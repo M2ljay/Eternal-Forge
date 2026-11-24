@@ -37160,3 +37160,79 @@ Plugin.get_vr_releases = _get_vr_releases
 Plugin.mark_vr_releases_seen = _mark_vr_releases_seen
 Plugin.add_vr_repo = _add_vr_repo
 Plugin.remove_vr_repo = _remove_vr_repo
+
+
+# ---- Holding game updates for modded games ---------------------------------------
+# A game update is what breaks mods most often, and Steam's default is to
+# apply it overnight. While this is on, the frontend switches every game
+# that has mods to Steam's "only update this game when I launch it"
+# (SteamClient.Apps.SetAppAutoUpdateBehavior) and the backend remembers
+# each game's previous setting, so turning it off - or the game's last
+# mod going - puts the game back the way it was.
+def _hold_state(settings: dict) -> dict:
+    st = settings.setdefault("update_hold", {})
+    st.setdefault("enabled", True)
+    st.setdefault("held", {})
+    return st
+
+
+def _modded_domains(settings: dict) -> list:
+    return sorted(d for d, recs in (settings.get("installed") or {}).items()
+                  if isinstance(recs, dict) and any(isinstance(r, dict) for r in recs.values()))
+
+
+def _manifest_update_waiting(app_id: int) -> bool:
+    path = _find_in_libraries(f"appmanifest_{int(app_id)}.acf")
+    if not path:
+        return False
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return False
+
+    def num(key):
+        m = re.search(rf'"{key}"\s+"(\d+)"', text)
+        return int(m.group(1)) if m else 0
+    # StateFlags bit 2 is "update required"; a started download counts too.
+    return bool(num("StateFlags") & 2) or num("BytesToDownload") > num("BytesDownloaded")
+
+
+async def _get_update_hold(self) -> dict:
+    settings = _load_settings()
+    st = _hold_state(settings)
+    return {"ok": True, "enabled": bool(st["enabled"]), "held": st["held"], "domains": _modded_domains(settings)}
+
+
+async def _set_update_hold_enabled(self, enabled: bool) -> dict:
+    settings = _load_settings()
+    _hold_state(settings)["enabled"] = bool(enabled)
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _note_update_hold(self, app_id: int, previous: int) -> dict:
+    settings = _load_settings()
+    _hold_state(settings)["held"].setdefault(str(int(app_id)), int(previous))
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _release_update_hold(self, app_id: int) -> dict:
+    settings = _load_settings()
+    _hold_state(settings)["held"].pop(str(int(app_id)), None)
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _get_waiting_updates(self, app_ids: list) -> dict:
+    ids = [int(a) for a in app_ids or [] if str(a).isdigit()][:200]
+    waiting = await asyncio.to_thread(lambda: [a for a in ids if _manifest_update_waiting(a)])
+    return {"ok": True, "waiting": waiting}
+
+
+Plugin.get_update_hold = _get_update_hold
+Plugin.set_update_hold_enabled = _set_update_hold_enabled
+Plugin.note_update_hold = _note_update_hold
+Plugin.release_update_hold = _release_update_hold
+Plugin.get_waiting_updates = _get_waiting_updates

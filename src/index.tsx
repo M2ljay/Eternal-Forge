@@ -113,6 +113,7 @@ import {
   getPluginUpdate,
 } from "./api";
 import { getVrReleases } from "./api";
+import { applyUpdateHold } from "./holdUpdates";
 import type { PluginUpdate } from "./pluginUpdate";
 import {
   crashHuntVerdict,
@@ -4859,6 +4860,10 @@ export default definePlugin(() => {
       })
       .catch(() => undefined);
   }, 45000);
+  // Hold Steam updates for games with mods, and keep it in step as mods
+  // come and go.
+  const holdTimer = setTimeout(() => void applyUpdateHold().catch(() => undefined), 30000);
+  const holdInterval = setInterval(() => void applyUpdateHold().catch(() => undefined), 15 * 60000);
 
   return {
     name: "Nexus Mods",
@@ -4884,6 +4889,8 @@ export default definePlugin(() => {
       removeEventListener("mod_program_done", programListener);
       lifetime?.unregister();
       clearTimeout(vrTimer);
+      clearTimeout(holdTimer);
+      clearInterval(holdInterval);
     },
   };
 });

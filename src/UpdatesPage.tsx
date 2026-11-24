@@ -32,6 +32,7 @@ import {
 } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { VrReleases } from "./VrReleases";
+import { UpdateHoldSection } from "./UpdateHold";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -419,6 +420,7 @@ export function UpdatesPage() {
             </Focusable>
           ))}
         </Focusable>
+        <UpdateHoldSection />
         <VrReleases />
       </Scroller>
     </Focusable>

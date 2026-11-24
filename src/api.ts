@@ -2674,3 +2674,13 @@ export const getVrReleases = callable<
 export const markVrReleasesSeen = callable<[], { ok: boolean }>("mark_vr_releases_seen");
 export const addVrRepo = callable<[text: string], { ok: boolean; error?: string; repo?: string }>("add_vr_repo");
 export const removeVrRepo = callable<[repo: string], { ok: boolean }>("remove_vr_repo");
+
+/** Steam updates held for games with mods ("only update when I launch it"). */
+export const getUpdateHold = callable<
+  [],
+  { ok: boolean; enabled: boolean; held: Record<string, number>; domains: string[] }
+>("get_update_hold");
+export const setUpdateHoldEnabled = callable<[enabled: boolean], { ok: boolean }>("set_update_hold_enabled");
+export const noteUpdateHold = callable<[app_id: number, previous: number], { ok: boolean }>("note_update_hold");
+export const releaseUpdateHold = callable<[app_id: number], { ok: boolean }>("release_update_hold");
+export const getWaitingUpdates = callable<[app_ids: number[]], { ok: boolean; waiting: number[] }>("get_waiting_updates");
