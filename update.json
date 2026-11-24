@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.59",
- "hash": "8f02c92dc0203a9c49436f36484a325848263d69f9e85f64b1cc734b4f1de2d1",
+ "version": "1.21.32-anygame.60",
+ "hash": "8f564de0e97c81562ad596527373b2543606465ebabb74069ba3f502c4b4cb57",
  "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "VR releases on the Updates page: new VR HUB versions, VR mods you follow on GitHub, and VR mods on Nexus for your games."
+ "notes": "Game updates held for modded games: they update only when you launch them, never overnight."
 }
