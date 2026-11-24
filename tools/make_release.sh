@@ -4,6 +4,7 @@
 set -e
 OUT=${1:?usage: make_release.sh OUT_DIR [notes]}
 NOTES=${2:-}
+mkdir -p "$OUT" && OUT=$(cd "$OUT" && pwd)  # the zip is written from another directory
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/Nexus Mods/py_modules" "$STAGE/Nexus Mods/dist" "$OUT"
