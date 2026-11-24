@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.57",
- "hash": "6a9553f1e96900100f9e04b174b7d9ba46d377f5f9be93fee7784812d05b5f85",
+ "version": "1.21.32-anygame.58",
+ "hash": "",
  "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "Collections no longer replace Step 1's REFramework."
+ "notes": "Record VR setup: keeps the files MRSURVIV0R's VR HUB or another VR tool adds to a game, so uninstalls and restores leave VR working."
 }
