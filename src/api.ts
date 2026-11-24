@@ -2684,3 +2684,38 @@ export const setUpdateHoldEnabled = callable<[enabled: boolean], { ok: boolean }
 export const noteUpdateHold = callable<[app_id: number, previous: number], { ok: boolean }>("note_update_hold");
 export const releaseUpdateHold = callable<[app_id: number], { ok: boolean }>("release_update_hold");
 export const getWaitingUpdates = callable<[app_ids: number[]], { ok: boolean; waiting: number[] }>("get_waiting_updates");
+
+/** Restore points: which mods were installed and on (and the game's Steam
+ * Cloud saves) before a mod change. */
+export interface RestorePoint {
+  id: string;
+  at: number;
+  reason: string;
+  count: number;
+  on: number;
+  saves: boolean;
+}
+export const listRestorePoints = callable<[game_domain: string], { ok: boolean; points: RestorePoint[] }>(
+  "list_restore_points"
+);
+export const createRestorePoint = callable<
+  [game_domain: string, app_id: number, reason: string],
+  { ok: boolean; error?: string; id?: string; count?: number; saves?: number }
+>("create_restore_point");
+export const getRestorePlan = callable<
+  [game_domain: string, point_id: string],
+  {
+    ok: boolean;
+    error?: string;
+    remove: SetupBackupMod[];
+    install: SetupBackupMod[];
+    enable: string[];
+    disable: string[];
+    saves: boolean;
+    at: number;
+  }
+>("get_restore_plan");
+export const restorePointSaves = callable<
+  [game_domain: string, point_id: string],
+  { ok: boolean; error?: string; files?: number }
+>("restore_point_saves");

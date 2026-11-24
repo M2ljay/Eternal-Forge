@@ -37236,3 +37236,218 @@ Plugin.set_update_hold_enabled = _set_update_hold_enabled
 Plugin.note_update_hold = _note_update_hold
 Plugin.release_update_hold = _release_update_hold
 Plugin.get_waiting_updates = _get_waiting_updates
+
+
+# ---- Restore points ------------------------------------------------------------
+# Before a mod is installed, updated or removed, or a whole set of mods is
+# switched (at most once every 10 minutes per game), the plugin notes which
+# mods were installed and on - the same list "Save mod list to a file"
+# writes - and zips the game's Steam Cloud save folder if it has one
+# (userdata/<account>/<appid>, up to 500 MB). Restoring puts the mods back
+# to that list (removing, reinstalling the same files, switching on and
+# off) and, if asked, the saves; a restore point of the present is made
+# first, so a restore can itself be undone.
+RP_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "restore-points")
+RP_KEEP = 12
+RP_EVERY = 600
+RP_SAVE_LIMIT = 500 << 20
+
+
+def _rp_mods(game_domain: str, settings: dict) -> list:
+    records = settings.get("installed", {}).get(game_domain) or {}
+    out = []
+    for key, rec in sorted(records.items(), key=lambda kv: kv[1].get("install_seq") or 0
+                           if isinstance(kv[1], dict) else 0):
+        if not isinstance(rec, dict) or not rec.get("mod_id"):
+            continue
+        out.append({"key": key, "name": rec.get("name") or key, "mod_id": rec.get("mod_id"),
+                    "file_id": rec.get("file_id"), "file_name": rec.get("file_name") or "",
+                    "version": rec.get("version") or "", "enabled": _record_is_on(rec),
+                    "choice": rec.get("payload_choice") or rec.get("choice") or ""})
+    return out
+
+
+def _rp_save_dirs(app_id: int) -> list:
+    if not app_id:
+        return []
+    out = []
+    for lib in _steam_libraries():
+        users = os.path.join(os.path.dirname(lib), "userdata")
+        try:
+            accts = os.listdir(users)
+        except OSError:
+            continue
+        for a in accts:
+            p = os.path.join(users, a, str(int(app_id)))
+            if os.path.isdir(p):
+                out.append(p)
+        if out:
+            break
+    return out
+
+
+def _rp_folder(game_domain: str) -> str:
+    return os.path.join(RP_DIR, re.sub(r"[^a-z0-9_-]", "_", game_domain))
+
+
+def _rp_list(game_domain: str) -> list:
+    base = _rp_folder(game_domain)
+    out = []
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return []
+    for n in names:
+        try:
+            with open(os.path.join(base, n, "point.json"), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        out.append({"id": n, "at": data.get("at") or 0, "reason": data.get("reason") or "",
+                    "count": len(data.get("mods") or []), "on": sum(1 for m in data.get("mods") or [] if m.get("enabled")),
+                    "saves": os.path.isfile(os.path.join(base, n, "saves.zip"))})
+    out.sort(key=lambda p: -p["at"])
+    return out
+
+
+def _rp_create(game_domain: str, app_id: int = 0, reason: str = "", force: bool = False) -> dict:
+    if not re.fullmatch(r"[a-z0-9_-]+", game_domain or ""):
+        return {"ok": False, "error": "Invalid game domain"}
+    settings = _load_settings()
+    ids = settings.setdefault("domain_app_ids", {})
+    if app_id:
+        if ids.get(game_domain) != int(app_id):
+            ids[game_domain] = int(app_id)
+            _save_settings(settings)
+    app_id = int(app_id or ids.get(game_domain) or 0)
+    mods = _rp_mods(game_domain, settings)
+    points = _rp_list(game_domain)
+    if not force and points and time.time() - points[0]["at"] < RP_EVERY:
+        return {"ok": True, "skipped": True}
+    if not force and not mods and not points:
+        return {"ok": True, "skipped": True}
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = os.path.join(_rp_folder(game_domain), stamp)
+    n = 1
+    while _REAL_OS.path.exists(folder):
+        n += 1
+        folder = os.path.join(_rp_folder(game_domain), f"{stamp}-{n}")
+    _REAL_OS.makedirs(folder, exist_ok=True)
+    saves = 0
+    for d in _rp_save_dirs(app_id)[:1]:
+        total = sum(_REAL_OS.path.getsize(os.path.join(c, f)) for c, _ds, fs in _REAL_OS.walk(d) for f in fs)
+        if 0 < total <= RP_SAVE_LIMIT:
+            with zipfile.ZipFile(os.path.join(folder, "saves.zip"), "w", zipfile.ZIP_DEFLATED) as z:
+                for c, _ds, fs in _REAL_OS.walk(d):
+                    for f in fs:
+                        p = os.path.join(c, f)
+                        z.write(p, os.path.relpath(p, d))
+                        saves += 1
+            with open(os.path.join(folder, "saves.txt"), "w", encoding="utf-8") as f:
+                f.write(d)
+    with open(os.path.join(folder, "point.json"), "w", encoding="utf-8") as f:
+        json.dump({"kind": "nexus-mods-restore-point", "game": game_domain, "at": int(time.time()),
+                   "reason": reason, "app_id": app_id, "mods": mods}, f, indent=1)
+    for old in _rp_list(game_domain)[RP_KEEP:]:
+        _REAL_SHUTIL.rmtree(os.path.join(_rp_folder(game_domain), old["id"]), ignore_errors=True)
+    decky.logger.info(f"restore point {game_domain}/{os.path.basename(folder)}: {len(mods)} mods, "
+                      f"{saves} save files ({reason})")
+    return {"ok": True, "id": os.path.basename(folder), "count": len(mods), "saves": saves}
+
+
+def _rp_read(game_domain: str, point_id: str):
+    if os.path.basename(point_id) != point_id or point_id.startswith("."):
+        return None
+    try:
+        with open(os.path.join(_rp_folder(game_domain), point_id, "point.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _rp_plan(game_domain: str, point_id: str) -> dict:
+    data = _rp_read(game_domain, point_id)
+    if not data:
+        return {"ok": False, "error": "That restore point is gone."}
+    now = {(m["mod_id"], m["file_id"]): m for m in _rp_mods(game_domain, _load_settings())}
+    then = {(m.get("mod_id"), m.get("file_id")): m for m in data.get("mods") or []}
+    remove = [m for k, m in now.items() if k not in then]
+    install = [dict(m, installed=False) for k, m in then.items() if k not in now]
+    enable = [now[k]["key"] for k, m in then.items() if k in now and m.get("enabled") and not now[k]["enabled"]]
+    disable = [now[k]["key"] for k, m in then.items() if k in now and not m.get("enabled") and now[k]["enabled"]]
+    return {"ok": True, "remove": remove, "install": install, "enable": enable, "disable": disable,
+            "saves": os.path.isfile(os.path.join(_rp_folder(game_domain), point_id, "saves.zip")),
+            "at": data.get("at") or 0}
+
+
+def _rp_restore_saves(game_domain: str, point_id: str) -> dict:
+    folder = os.path.join(_rp_folder(game_domain), point_id)
+    try:
+        with open(os.path.join(folder, "saves.txt"), encoding="utf-8") as f:
+            target = f.read().strip()
+    except OSError:
+        return {"ok": False, "error": "This restore point has no saves."}
+    if not target or not os.path.isdir(os.path.dirname(target)):
+        return {"ok": False, "error": "The game's save folder isn't there any more."}
+    with zipfile.ZipFile(os.path.join(folder, "saves.zip")) as z:
+        names = [n for n in z.namelist() if _safe_rel_path(n.rstrip("/")) and not n.endswith("/")]
+        for n in names:
+            dst = os.path.join(target, *n.split("/"))
+            _REAL_OS.makedirs(os.path.dirname(dst), exist_ok=True)
+            with z.open(n) as src, open(dst, "wb") as out:
+                _REAL_SHUTIL.copyfileobj(src, out)
+    return {"ok": True, "files": len(names)}
+
+
+async def _list_restore_points(self, game_domain: str) -> dict:
+    return {"ok": True, "points": await asyncio.to_thread(_rp_list, game_domain)}
+
+
+async def _create_restore_point(self, game_domain: str, app_id: int = 0, reason: str = "") -> dict:
+    return await asyncio.to_thread(_rp_create, game_domain, int(app_id or 0), reason or "Made by you", True)
+
+
+async def _get_restore_plan(self, game_domain: str, point_id: str) -> dict:
+    return await asyncio.to_thread(_rp_plan, game_domain, point_id)
+
+
+async def _restore_point_saves(self, game_domain: str, point_id: str) -> dict:
+    return await asyncio.to_thread(_rp_restore_saves, game_domain, point_id)
+
+
+Plugin.list_restore_points = _list_restore_points
+Plugin.create_restore_point = _create_restore_point
+Plugin.get_restore_plan = _get_restore_plan
+Plugin.restore_point_saves = _restore_point_saves
+
+# (method, index of the game domain, index of the app id, reason) - positional
+# arguments after self, as the frontend sends them.
+_RP_HOOKS = (("install_mod", 0, 11, "Before installing a mod"),
+             ("uninstall_mod", 0, 5, "Before removing a mod"),
+             ("set_all_mods_enabled", 4, 5, "Before switching all mods"),
+             ("apply_mod_setup", 3, 4, "Before applying a mod setup"))
+
+
+def _wrap_restore_points() -> None:
+    for name, d_at, a_at, reason in _RP_HOOKS:
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+
+        def make(original, d_at, a_at, reason):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                domain = args[d_at] if len(args) > d_at else kwargs.get("game_domain", "")
+                app = args[a_at] if len(args) > a_at else kwargs.get("app_id", 0)
+                if isinstance(domain, str) and domain and not kwargs.get("repair_only"):
+                    try:
+                        await asyncio.to_thread(_rp_create, domain, int(app or 0), reason)
+                    except Exception as e:  # noqa: BLE001 - a restore point must never block a change
+                        decky.logger.warning(f"restore point {domain}: {e}")
+                return await original(self, *args, **kwargs)
+            return wrapper
+
+        setattr(Plugin, name, make(original, d_at, a_at, reason))
+
+
+_wrap_restore_points()

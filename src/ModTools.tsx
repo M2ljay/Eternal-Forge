@@ -18,8 +18,13 @@ import {
   SetupBackupMod,
   SpaceItem,
   applyModSetup,
+  RestorePoint,
   clearSpaceItem,
+  createRestorePoint,
   deleteModSetup,
+  getRestorePlan,
+  listRestorePoints,
+  restorePointSaves,
   exportModSetup,
   getModFiles,
   getModOverlaps,
@@ -31,7 +36,7 @@ import {
   saveProblemReport,
 } from "./api";
 import { SupportedGame, isExperimentalGame, modeParams } from "./games";
-import { installLatest, installModWith, toggleMod } from "./install";
+import { installLatest, installModWith, removeMod, toggleMod } from "./install";
 import { VrSetupRows } from "./VrSetup";
 
 function gb(n: number): string {
@@ -307,6 +312,127 @@ function RestoreModal({
   );
 }
 
+function pointTime(ts: number): string {
+  const d = new Date(ts * 1000);
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+async function restorePoint(game: SupportedGame, p: RestorePoint, withSaves: boolean, onDone: () => void) {
+  const plan = await getRestorePlan(game.nexusDomain, p.id);
+  if (!plan.ok) {
+    toaster.toast({ title: "Couldn't restore", body: plan.error ?? "" });
+    return;
+  }
+  // The present first, so this restore can be undone too.
+  await createRestorePoint(game.nexusDomain, game.appId, "Before restoring an earlier point");
+  const failed: string[] = [];
+  for (const m of plan.remove) {
+    const r = await removeMod(game, m.key).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r.ok) failed.push(`remove ${m.name}`);
+  }
+  for (const key of plan.enable) await toggleMod(game, key, true).catch(() => undefined);
+  for (const key of plan.disable) await toggleMod(game, key, false).catch(() => undefined);
+  let savesNote = "";
+  if (withSaves && plan.saves) {
+    const r = await restorePointSaves(game.nexusDomain, p.id);
+    savesNote = r.ok ? `, saves put back (${r.files} files)` : `, saves not restored: ${r.error}`;
+  }
+  if (plan.install.length) {
+    toaster.toast({ title: `Reinstalling ${plan.install.length} mods`, body: "The Downloads page shows each one" });
+    await restoreMods(game, plan.install, onDone);
+  } else {
+    onDone();
+  }
+  toaster.toast({
+    title: failed.length ? "Restored, with problems" : `Back to ${pointTime(p.at)}`,
+    body:
+      `${plan.remove.length} removed, ${plan.install.length} reinstalled, ` +
+      `${plan.enable.length + plan.disable.length} switched${savesNote}` +
+      (failed.length ? `. Failed: ${failed.join(", ")}` : ""),
+  });
+}
+
+function RestorePointsModal({
+  game,
+  onChanged,
+  closeModal,
+}: {
+  game: SupportedGame;
+  onChanged: () => void;
+  closeModal?: () => void;
+}) {
+  const [points, setPoints] = useState<RestorePoint[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => void listRestorePoints(game.nexusDomain).then((r) => setPoints(r.points ?? []));
+  useEffect(load, []);
+  const ask = (p: RestorePoint) =>
+    showModal(
+      <ConfirmModal
+        strTitle={`Go back to ${pointTime(p.at)}?`}
+        strDescription={
+          `Mods go back to how they were then: ${p.count} installed, ${p.on} on. Mods added since are ` +
+          "removed and removed ones reinstalled (the same files, if Nexus still has them). " +
+          (p.saves ? "Choose whether your saves go back too. " : "") +
+          "A restore point of right now is made first."
+        }
+        strOKButtonText={p.saves ? "Mods and saves" : "Restore mods"}
+        strMiddleButtonText={p.saves ? "Mods only" : undefined}
+        onMiddleButton={p.saves ? () => void run(p, false) : undefined}
+        onOK={() => void run(p, p.saves)}
+      />
+    );
+  const run = async (p: RestorePoint, saves: boolean) => {
+    setBusy(true);
+    closeModal?.();
+    try {
+      await restorePoint(game, p, saves, onChanged);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+      <Field label={`Restore points - ${game.displayName}`} bottomSeparator="none">
+        Made by themselves before mods are installed, updated or removed (at most every 10
+        minutes), with the game's Steam Cloud saves when it has them. The last 12 are kept.
+      </Field>
+      <ButtonItem
+        layout="below"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await createRestorePoint(game.nexusDomain, game.appId, "Made by you");
+            toaster.toast({
+              title: r.ok ? "Restore point made" : "Couldn't make one",
+              body: r.ok ? `${r.count} mods${r.saves ? `, ${r.saves} save files` : ""}` : r.error ?? "",
+            });
+          } finally {
+            setBusy(false);
+            load();
+          }
+        }}
+      >
+        Make a restore point now
+      </ButtonItem>
+      {points === null && <Field label="Loading…" />}
+      {points?.length === 0 && <Field label="No restore points yet" />}
+      {points?.map((p) => (
+        <ButtonItem
+          key={p.id}
+          layout="below"
+          disabled={busy}
+          label={pointTime(p.at)}
+          description={`${p.reason} · ${p.count} mods, ${p.on} on${p.saves ? " · saves" : ""}`}
+          onClick={() => ask(p)}
+        >
+          Go back to this
+        </ButtonItem>
+      ))}
+    </ModalRoot>
+  );
+}
+
 function ReportModal({ game, closeModal }: { game?: SupportedGame; closeModal?: () => void }) {
   const [what, setWhat] = useState("");
   const [busy, setBusy] = useState(false);
@@ -368,6 +494,15 @@ export function ModToolsRows({ game, onChanged }: { game: SupportedGame; onChang
           </ButtonItem>
         </PanelSectionRow>
       )}
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          description="Go back to how this game's mods (and saves) were before a change"
+          onClick={() => showModal(<RestorePointsModal game={game} onChanged={onChanged} />)}
+        >
+          Restore points…
+        </ButtonItem>
+      </PanelSectionRow>
       <PanelSectionRow>
         <ButtonItem
           layout="below"
