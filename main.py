@@ -38,6 +38,7 @@ import re_engine  # noqa: E402
 import installers  # noqa: E402
 import generic_loaders  # noqa: E402
 import vr_setup  # noqa: E402
+import vr_feed  # noqa: E402
 
 
 def _steam_root() -> str:
@@ -36987,3 +36988,175 @@ def _wrap_vr_install_block() -> None:
 
 
 _wrap_vr_install_block()
+
+
+# ---- New VR mod releases ---------------------------------------------------------
+# One list on the Updates page: MRSURVIV0R's VR HUB releases (with the
+# user's games its notes name), other VR mods followed on GitHub, and VR
+# mods recently added or updated on Nexus for the games the plugin
+# manages. Checked at most every 6 hours unless asked; what has been seen
+# is remembered so new entries can be marked and announced.
+VR_FEED_TTL = 6 * 3600
+VR_FEED_DAYS = 45
+
+
+def _steam_game_names() -> list:
+    names = []
+    for lib in _steam_libraries():
+        try:
+            entries = os.listdir(lib)
+        except OSError:
+            continue
+        for n in entries:
+            if not (n.startswith("appmanifest_") and n.endswith(".acf")):
+                continue
+            try:
+                with open(os.path.join(lib, n), encoding="utf-8", errors="replace") as f:
+                    m = re.search(r'"name"\s+"([^"]+)"', f.read())
+            except OSError:
+                continue
+            if m and not re.search(r"redistributable|steamworks|proton|runtime|controller configs", m.group(1), re.I):
+                names.append(m.group(1))
+    return sorted(set(names))
+
+
+def _vr_feed_state(settings: dict) -> dict:
+    st = settings.setdefault("vr_feed", {})
+    st.setdefault("seen", [])
+    st.setdefault("repos", [])
+    return st
+
+
+async def _vr_fetch_text(session, url: str, headers=None) -> str:
+    async with session.get(url, headers=headers or {"User-Agent": APP_HEADERS.get("User-Agent", "decky-nexus")},
+                           ssl=SSL_CONTEXT) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"HTTP {resp.status}")
+        return await resp.text()
+
+
+async def _vr_collect() -> dict:
+    settings = _load_settings()
+    st = _vr_feed_state(settings)
+    api_key = settings.get("api_key")
+    repos = [vr_feed.HUB_REPO] + [r for r in st.get("repos") or [] if r != vr_feed.HUB_REPO]
+    domains = set((settings.get("installed") or {}).keys())
+    domains |= {g.get("nexusDomain") for g in (settings.get("experimental_games") or {}).values()
+                if isinstance(g, dict) and g.get("nexusDomain")}
+    domains |= set((settings.get("vr_setups") or {}).keys())
+    domains = sorted(d for d in domains if d and re.fullmatch(r"[a-z0-9_-]+", d))[:24]
+    names = await asyncio.to_thread(_steam_game_names)
+    items, errors = [], []
+    cutoff = time.time() - VR_FEED_DAYS * 86400
+    sem = asyncio.Semaphore(4)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        async def gh(repo):
+            async with sem:
+                try:
+                    xml = await _vr_fetch_text(session, f"https://github.com/{repo}/releases.atom")
+                except Exception as e:  # noqa: BLE001 - one source failing must not hide the rest
+                    errors.append(f"{repo}: {e}")
+                    return
+            for e in vr_feed.parse_atom(xml):
+                if e["date"] and e["date"] < cutoff:
+                    continue
+                hub = repo == vr_feed.HUB_REPO
+                items.append({"id": f"gh:{repo}:{e['id']}", "source": "hub" if hub else "github",
+                              "title": (("VR HUB " if hub else repo.split("/")[1] + " ") + e["title"]).strip(),
+                              "sub": vr_feed.teaser(e["text"]), "url": e["url"], "date": e["date"],
+                              "games": vr_feed.mentioned_games(e["text"], names) if hub else []})
+
+        async def nx(domain):
+            if not api_key:
+                return
+            for kind in ("latest_added", "latest_updated"):
+                async with sem:
+                    try:
+                        body = await _vr_fetch_text(
+                            session, f"{NEXUS_API_BASE}/v1/games/{domain}/mods/{kind}.json",
+                            headers=_api_headers(api_key))
+                        mods = json.loads(body)
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(f"{domain}: {e}")
+                        return
+                for m in mods if isinstance(mods, list) else []:
+                    if not isinstance(m, dict) or not m.get("available", True):
+                        continue
+                    if not vr_feed.is_vr(m.get("name") or "", m.get("summary") or ""):
+                        continue
+                    ts = int(m.get("updated_timestamp") or m.get("created_timestamp") or 0)
+                    if ts and ts < cutoff:
+                        continue
+                    items.append({"id": f"nx:{domain}:{m.get('mod_id')}:{m.get('version') or ts}",
+                                  "source": "nexus", "title": m.get("name") or "",
+                                  "sub": vr_feed.teaser(vr_feed._strip(m.get("summary") or "")),
+                                  "url": f"https://www.nexusmods.com/{domain}/mods/{m.get('mod_id')}",
+                                  "date": ts, "domain": domain, "mod_id": int(m.get("mod_id") or 0),
+                                  "version": m.get("version") or "",
+                                  "added": kind == "latest_added", "games": []})
+
+        await asyncio.gather(*(gh(r) for r in repos), *(nx(d) for d in domains))
+    uniq = {}
+    for it in sorted(items, key=lambda i: -(i.get("date") or 0)):
+        key = it["id"].rsplit(":", 1)[0] if it["source"] == "nexus" else it["id"]
+        uniq.setdefault(key, it)
+    return {"items": list(uniq.values())[:60], "errors": errors[:10]}
+
+
+async def _get_vr_releases(self, force: bool = False) -> dict:
+    settings = _load_settings()
+    st = _vr_feed_state(settings)
+    cache = st.get("cache") or {}
+    if force or not cache or time.time() - (cache.get("at") or 0) > VR_FEED_TTL:
+        got = await _vr_collect()
+        settings = _load_settings()
+        st = _vr_feed_state(settings)
+        cache = {"at": int(time.time()), "items": got["items"], "errors": got["errors"]}
+        st["cache"] = cache
+        if not st.get("primed"):
+            # First check: what is already out is not news.
+            st["seen"] = [i["id"] for i in cache["items"]]
+            st["primed"] = True
+        _save_settings(settings)
+    seen = set(st.get("seen") or [])
+    items = [dict(i, new=i["id"] not in seen) for i in cache.get("items") or []]
+    return {"ok": True, "items": items, "checked": cache.get("at") or 0, "errors": cache.get("errors") or [],
+            "repos": st.get("repos") or [], "new": sum(1 for i in items if i["new"]),
+            "nexus": bool(settings.get("api_key"))}
+
+
+async def _mark_vr_releases_seen(self) -> dict:
+    settings = _load_settings()
+    st = _vr_feed_state(settings)
+    ids = {i["id"] for i in (st.get("cache") or {}).get("items") or []}
+    st["seen"] = sorted(ids | set(st.get("seen") or []))[-2000:]
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _add_vr_repo(self, text: str) -> dict:
+    slug = vr_feed.repo_slug(text)
+    if not slug:
+        return {"ok": False, "error": "That isn't a GitHub project link (github.com/owner/project)."}
+    settings = _load_settings()
+    st = _vr_feed_state(settings)
+    if slug.lower() not in {r.lower() for r in st["repos"]} and slug != vr_feed.HUB_REPO:
+        st["repos"].append(slug)
+    st.pop("cache", None)
+    _save_settings(settings)
+    return {"ok": True, "repo": slug}
+
+
+async def _remove_vr_repo(self, repo: str) -> dict:
+    settings = _load_settings()
+    st = _vr_feed_state(settings)
+    st["repos"] = [r for r in st["repos"] if r.lower() != (repo or "").lower()]
+    st.pop("cache", None)
+    _save_settings(settings)
+    return {"ok": True}
+
+
+Plugin.get_vr_releases = _get_vr_releases
+Plugin.mark_vr_releases_seen = _mark_vr_releases_seen
+Plugin.add_vr_repo = _add_vr_repo
+Plugin.remove_vr_repo = _remove_vr_repo

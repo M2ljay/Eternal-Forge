@@ -112,6 +112,7 @@ import {
   buildReport,
   getPluginUpdate,
 } from "./api";
+import { getVrReleases } from "./api";
 import type { PluginUpdate } from "./pluginUpdate";
 import {
   crashHuntVerdict,
@@ -4843,6 +4844,22 @@ export default definePlugin(() => {
     }
   );
 
+  // New VR mod releases, once Steam has settled: a toast only when there
+  // is something new since they were last marked as seen.
+  const vrTimer = setTimeout(() => {
+    getVrReleases(false)
+      .then((r) => {
+        if (r?.new) {
+          const first = r.items.find((i) => i.new);
+          toaster.toast({
+            title: `${r.new} new VR release${r.new === 1 ? "" : "s"}`,
+            body: `${first?.title ?? ""} - see the Updates tab`,
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, 45000);
+
   return {
     name: "Nexus Mods",
     titleView: <div className={staticClasses.Title}>Nexus Mods</div>,
@@ -4866,6 +4883,7 @@ export default definePlugin(() => {
       removeEventListener("mod_files_healed", healedListener);
       removeEventListener("mod_program_done", programListener);
       lifetime?.unregister();
+      clearTimeout(vrTimer);
     },
   };
 });

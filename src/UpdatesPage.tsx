@@ -31,6 +31,7 @@ import {
   PRIMARY_BUTTON_CSS,
 } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
+import { VrReleases } from "./VrReleases";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -418,6 +419,7 @@ export function UpdatesPage() {
             </Focusable>
           ))}
         </Focusable>
+        <VrReleases />
       </Scroller>
     </Focusable>
   );

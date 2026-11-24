@@ -2650,3 +2650,27 @@ export const getVrFiles = callable<
   { ok: boolean; files: { path: string; ok: boolean }[]; missing: string[]; changed: string[] }
 >("get_vr_files");
 export const openVrHub = callable<[path: string], { ok: boolean; error?: string; path?: string }>("open_vr_hub");
+
+/** A new VR mod release: MRSURVIV0R's VR HUB, another VR mod on GitHub, or a
+ * VR mod on Nexus for one of the plugin's games. */
+export interface VrRelease {
+  id: string;
+  source: "hub" | "github" | "nexus";
+  title: string;
+  sub: string;
+  url: string;
+  date: number;
+  games: string[];
+  domain?: string;
+  mod_id?: number;
+  version?: string;
+  added?: boolean;
+  new: boolean;
+}
+export const getVrReleases = callable<
+  [force: boolean],
+  { ok: boolean; items: VrRelease[]; checked: number; errors: string[]; repos: string[]; new: number; nexus: boolean }
+>("get_vr_releases");
+export const markVrReleasesSeen = callable<[], { ok: boolean }>("mark_vr_releases_seen");
+export const addVrRepo = callable<[text: string], { ok: boolean; error?: string; repo?: string }>("add_vr_repo");
+export const removeVrRepo = callable<[repo: string], { ok: boolean }>("remove_vr_repo");
