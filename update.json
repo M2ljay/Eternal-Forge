@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.61",
- "hash": "740561357efd8d5381d37132370892fa3d441d7e7da129d946ef69a59c172468",
+ "version": "1.21.32-anygame.62",
+ "hash": "bae697cca9ae9e9a7607c000aba17ecc909124d648f2126938dca8cd789298c4",
  "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "Restore points: go back to how a game's mods and saves were before a change."
+ "notes": "Recommended mods: a starter pack of fixes and utilities, and the top collection, for each game."
 }
