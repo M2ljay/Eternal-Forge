@@ -38,6 +38,7 @@ import {
 import { SupportedGame, isExperimentalGame, modeParams } from "./games";
 import { installLatest, installModWith, removeMod, toggleMod } from "./install";
 import { VrSetupRows } from "./VrSetup";
+import { openRecommended } from "./Recommended";
 
 function gb(n: number): string {
   if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
@@ -473,6 +474,15 @@ export function ModToolsRows({ game, onChanged }: { game: SupportedGame; onChang
   const [busy, setBusy] = useState(false);
   return (
     <>
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          description="A starter pack: the most-endorsed fixes and utilities you don't have yet, and the top collection"
+          onClick={() => openRecommended(game, onChanged)}
+        >
+          Recommended mods…
+        </ButtonItem>
+      </PanelSectionRow>
       <VrSetupRows game={game} />
       <PanelSectionRow>
         <ButtonItem
