@@ -256,6 +256,9 @@ import { ManagerPage } from "./ManagerPage";
 import LoadOrderPage from "./LoadOrderPage";
 import { SettingsPage } from "./SettingsPage";
 import { UpdatesPage } from "./UpdatesPage";
+import { GameBananaPage } from "./GameBananaPage";
+import { GameBananaModPage } from "./GameBananaModPage";
+import { GB_BROWSE_ROUTE, GB_MOD_ROUTE } from "./gamebanana";
 import { installLatest, toggleMod } from "./install";
 import HealthCheckPage, { setHealthGame } from "./HealthCheckPage";
 import { scanUpdates } from "./updates";
@@ -4750,6 +4753,8 @@ export default definePlugin(() => {
   routerHook.addRoute(MANAGER_ROUTE, ManagerPage, { exact: true });
   routerHook.addRoute(LOAD_ORDER_ROUTE, LoadOrderPage, { exact: true });
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage, { exact: true });
+  routerHook.addRoute(GB_BROWSE_ROUTE, GameBananaPage, { exact: true });
+  routerHook.addRoute(GB_MOD_ROUTE, GameBananaModPage, { exact: true });
 
   // Feed the QAM Downloads section from anywhere in the UI.
   const progressListener = addEventListener<[p: InstallProgress]>(
@@ -4879,6 +4884,8 @@ export default definePlugin(() => {
       routerHook.removeRoute(MANAGER_ROUTE);
       routerHook.removeRoute(LOAD_ORDER_ROUTE);
       routerHook.removeRoute(SETTINGS_ROUTE);
+      routerHook.removeRoute(GB_BROWSE_ROUTE);
+      routerHook.removeRoute(GB_MOD_ROUTE);
       removeEventListener("backend_event", listener);
       removeEventListener("install_progress", progressListener);
       removeEventListener("experimental_changed", experimentalListener);

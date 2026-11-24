@@ -377,3 +377,16 @@ Curated games are unaffected. The helpers are in
 `py_modules/experimental_games.py`. The fork also finds Steam on Windows
 (registry), extracts archives with Windows' built-in `tar.exe` or 7-Zip, and
 registers the `nxm://` handler in the Windows registry.
+
+### GameBanana as a second source
+
+Many games' mods live on GameBanana rather than Nexus. **Store → GameBanana**
+browses, searches and sorts the current game's GameBanana mods, opens a mod's
+page (description, pictures, files) and installs a file through the same
+pipeline as Nexus mods: same install modes, FOMOD and folder choices,
+Downloads, restore points, enable/disable and uninstall. They show in My Mods
+tagged GameBanana, and on Updates when a newer upload of the installed file
+appears. The Steam game is linked to its GameBanana game by name, or picked
+by hand once and remembered. No account or key is needed. Details, endpoints
+and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
+

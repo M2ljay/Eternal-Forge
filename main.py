@@ -39,6 +39,7 @@ import installers  # noqa: E402
 import generic_loaders  # noqa: E402
 import vr_setup  # noqa: E402
 import vr_feed  # noqa: E402
+import gamebanana  # noqa: E402
 
 
 def _steam_root() -> str:
@@ -3037,6 +3038,9 @@ async def _legacy_mods_in_batches(
     Every bulk id lookup goes through here so that cannot be got wrong in one
     place and right in another.
     """
+    # A GameBanana mod (its id moved past 10^9, see gamebanana.py) is never
+    # a Nexus mod: asking about it would cost a request for nothing.
+    mod_ids = [i for i in mod_ids if not gamebanana.is_gb_id(i)]
     nodes = []
     for start in range(0, len(mod_ids), LEGACY_MODS_PAGE):
         chunk = mod_ids[start : start + LEGACY_MODS_PAGE]
@@ -17762,6 +17766,9 @@ async def _download_archive(
     (error, archive_path); error is '' on success."""
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
     archive_path = _archive_cache_path(mod_id, file_id, file_name)
+    # A GameBanana file: same cache, progress, pause and resume, but the
+    # link is GameBanana's own and no Nexus key is involved.
+    gb = gamebanana.is_gb_id(mod_id)
     try:
         if os.path.getsize(archive_path) > 0:
             # Prefetched (or a retry after install-stage failure). .part
@@ -17787,6 +17794,9 @@ async def _download_archive(
         """(err, uri). A function rather than straight-line code because
         CDN links expire: a download resumed after a long pause needs a
         fresh link, not the one minted an hour ago."""
+        if gb:
+            info = await _gb_client().file_download(gamebanana.from_local(file_id))
+            return "", [("GameBanana", info["url"])]
         # Parallel prefetching bursts this endpoint - back off and retry
         # on rate limits / transient 5xx instead of failing the mod's row.
         links = None
@@ -17892,9 +17902,13 @@ async def _download_archive(
                     sock_read=DOWNLOAD_STALL_SECONDS,
                 )
                 session = await _http_session()
+                if gb:
+                    req_headers = {**req_headers, **_gb_headers()}
                 async with session.get(
                     _safe_uri(uri), headers=req_headers, timeout=timeout
                 ) as resp:
+                    if resp.status == 403 and gb:
+                        return "GameBanana refused the download (HTTP 403)", ""
                     if resp.status == 403:
                         # The CDN link outlived its welcome (long pause,
                         # slow retry) - mint a fresh one and go again.
@@ -18034,6 +18048,11 @@ async def _download_archive(
                     await asyncio.sleep(2)
                     continue
                 os.replace(part_path, archive_path)
+                if gb:
+                    problem = await _gb_check_download(file_id, archive_path)
+                    if problem:
+                        await _emit_progress(mod_id, "error", 0, problem)
+                        return problem, ""
                 return "", archive_path
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 transport_failures += 1
@@ -22466,6 +22485,9 @@ query Link($slug: String!, $domainName: String!) {
             # updating it alone would install whichever file the page's
             # default logic picks - a different file entirely.
             and rec.get("source") != "companion"
+            # GameBanana mods are checked against GameBanana (the wrapper
+            # below), never against Nexus.
+            and not gamebanana.is_gb_id(rec.get("mod_id"))
         }
         if not tracked:
             return {"ok": True, "updates": {}}
@@ -23511,7 +23533,7 @@ query Link($slug: String!, $domainName: String!) {
     ) -> dict:
         settings = _load_settings()
         api_key = settings.get("api_key")
-        if not api_key:
+        if not api_key and not gamebanana.is_gb_id(mod_id):
             await _emit_progress(mod_id, "error", 0, "not signed in")
             return {"ok": False, "error": "Not signed in"}
 
@@ -37451,3 +37473,345 @@ def _wrap_restore_points() -> None:
 
 
 _wrap_restore_points()
+
+
+# ---- GameBanana: a second mod source ----------------------------------------
+# Browse a game's GameBanana mods, open a mod's page, and install its files
+# through the same pipeline as Nexus mods. Everything GameBanana-specific
+# (endpoints, parsing, update rules) is in py_modules/gamebanana.py; this
+# section is the transport, the settings it keeps (which GameBanana game a
+# Steam game is), the callables, and the hooks that let the Nexus-shaped
+# calls the rest of the plugin makes (files, thumbnails, update checks)
+# answer for a GameBanana mod. A GameBanana mod's ids are moved past 10^9
+# before they reach the pipeline (gamebanana.to_local), so archives,
+# progress, records and restore points need no second key.
+_GB_CLIENT = None
+
+
+def _gb_headers() -> dict:
+    return {"User-Agent": APP_HEADERS.get("User-Agent", "decky-nexus")}
+
+
+async def _gb_transport(url: str) -> tuple:
+    session = await _http_session()
+    async with session.get(url, headers={**_gb_headers(), "Accept": "application/json"},
+                           timeout=aiohttp.ClientTimeout(total=20)) as resp:
+        return resp.status, await resp.text()
+
+
+def _gb_client():
+    global _GB_CLIENT
+    if _GB_CLIENT is None:
+        _GB_CLIENT = gamebanana.Client(_gb_transport)
+    return _GB_CLIENT
+
+
+def _gb_state(settings: dict) -> dict:
+    st = settings.setdefault("gamebanana", {})
+    st.setdefault("games", {})
+    return st
+
+
+def _gb_installed(game_domain: str, settings: dict = None) -> dict:
+    """{local mod id: [(folder, record)]} for the game's GameBanana mods."""
+    records = ((settings or _load_settings()).get("installed") or {}).get(game_domain) or {}
+    out: dict = {}
+    for folder, rec in records.items():
+        if isinstance(rec, dict) and gamebanana.is_gb_id(rec.get("mod_id")):
+            out.setdefault(int(rec["mod_id"]), []).append((folder, rec))
+    return out
+
+
+def _gb_fail(e) -> dict:
+    return {"ok": False, "error": str(e) or "GameBanana did not answer"}
+
+
+def _gb_verify(path: str, md5: str) -> str:
+    """'' when a fresh download is the file, else what is wrong with it."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError as e:
+        return f"Download could not be read: {e}"
+    if gamebanana.looks_like_html(head):
+        return "GameBanana sent a web page instead of the file - try again later"
+    if md5:
+        h = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != md5:
+            return "The download does not match GameBanana's checksum - try again"
+    return ""
+
+
+async def _gb_check_download(file_id: int, path: str) -> str:
+    """A freshly downloaded GameBanana file, checked before anything
+    extracts it: a web page served in its place, or bytes that do not match
+    GameBanana's checksum, are thrown away and reported. '' when fine."""
+    info = await _gb_client().file_download(gamebanana.from_local(file_id))
+    problem = await asyncio.to_thread(_gb_verify, path, info.get("md5") or "")
+    if problem:
+        decky.logger.warning(f"gamebanana file {gamebanana.from_local(file_id)}: {problem}")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return problem
+
+
+async def _gb_get_game(self, app_id: int, display_name: str = "") -> dict:
+    """The GameBanana game this Steam game is linked to; linked by itself
+    when exactly one GameBanana game has its name, else the candidates."""
+    settings = _load_settings()
+    link = _gb_state(settings)["games"].get(str(int(app_id or 0)))
+    if link:
+        return {"ok": True, "linked": link, "candidates": []}
+    if not display_name:
+        return {"ok": True, "linked": None, "candidates": []}
+    try:
+        cands = await _gb_client().match_games(display_name)
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    best = gamebanana.best_game_match(display_name, cands)
+    if best:
+        settings = _load_settings()
+        link = {"id": best["id"], "name": best["name"], "auto": True}
+        _gb_state(settings)["games"][str(int(app_id))] = link
+        _save_settings(settings)
+        decky.logger.info(f"gamebanana: {display_name!r} linked to game {best['id']} by name")
+        return {"ok": True, "linked": link, "candidates": []}
+    return {"ok": True, "linked": None, "candidates": cands[:12]}
+
+
+async def _gb_search_games(self, query: str) -> dict:
+    try:
+        return {"ok": True, "games": (await _gb_client().match_games(query))[:15]}
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+
+
+async def _gb_link_game(self, app_id: int, ref: str, name: str = "") -> dict:
+    """Link a Steam game to a GameBanana game, by id, link, or a pick from
+    the candidates (which comes with its name)."""
+    gid = gamebanana.parse_game_ref(str(ref))
+    if not gid or not app_id:
+        return {"ok": False, "error": "That isn't a GameBanana game id or gamebanana.com/games/... link."}
+    if not name:
+        try:
+            name = await _gb_client().game_name(gid)
+        except gamebanana.GBError as e:
+            return _gb_fail(e)
+        if not name:
+            return {"ok": False, "error": f"GameBanana has no game {gid}."}
+    settings = _load_settings()
+    link = {"id": gid, "name": name, "auto": False}
+    _gb_state(settings)["games"][str(int(app_id))] = link
+    _save_settings(settings)
+    return {"ok": True, "linked": link}
+
+
+async def _gb_unlink_game(self, app_id: int) -> dict:
+    settings = _load_settings()
+    _gb_state(settings)["games"].pop(str(int(app_id or 0)), None)
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _gb_list_mods(self, game_domain: str, app_id: int, page: int = 1, sort: str = "default",
+                        search: str = "") -> dict:
+    link = _gb_state(_load_settings())["games"].get(str(int(app_id or 0)))
+    if not link:
+        return {"ok": False, "error": "This game isn't linked to GameBanana yet."}
+    try:
+        got = await _gb_client().list_mods(int(link["id"]), int(page or 1), sort or "default", search or "")
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    installed = _gb_installed(game_domain)
+    show_adult = _show_adult()
+    mods = [dict(m, installed=m["mod_id"] in installed) for m in got["mods"]
+            if show_adult or not m.get("nsfw")]
+    return {"ok": True, "mods": mods, "page": got["page"], "total": got["total"],
+            "has_more": got["has_more"], "sort_fallback": got["sort_fallback"],
+            "hidden": len(got["mods"]) - len(mods)}
+
+
+async def _gb_get_mod(self, game_domain: str, gb_mod_id: int) -> dict:
+    try:
+        mod = await _gb_client().mod(int(gb_mod_id))
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    recs = _gb_installed(game_domain).get(mod["mod_id"]) or []
+    return {"ok": True, "mod": mod,
+            "installed": [{"folder": f, "file_id": int(r.get("file_id") or 0), "enabled": _record_is_on(r)}
+                          for f, r in recs]}
+
+
+async def _gb_update_target(self, game_domain: str, mod_id: int, folder: str = "") -> dict:
+    """The file an update of an installed GameBanana mod should install:
+    the newer upload of the same file, else the newest file."""
+    if not gamebanana.is_gb_id(mod_id):
+        return {"ok": False, "error": "Not a GameBanana mod"}
+    gid = gamebanana.from_local(mod_id)
+    recs = _gb_installed(game_domain).get(int(mod_id)) or []
+    rec = next((r for f, r in recs if f == folder), recs[0][1] if recs else {})
+    try:
+        files = (await _gb_client().files_for([gid])).get(gid) or []
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    if not files:
+        return {"ok": False, "error": "No downloadable file found"}
+    pick = gamebanana.update_for(rec, files)["file"] or files[0]
+    return {"ok": True, "file": {k: pick[k] for k in ("file_id", "file_name", "name", "version")}}
+
+
+Plugin.gb_get_game = _gb_get_game
+Plugin.gb_search_games = _gb_search_games
+Plugin.gb_link_game = _gb_link_game
+Plugin.gb_unlink_game = _gb_unlink_game
+Plugin.gb_list_mods = _gb_list_mods
+Plugin.gb_get_mod = _gb_get_mod
+Plugin.gb_update_target = _gb_update_target
+
+
+def _gb_nexus_file(f: dict, primary: bool) -> dict:
+    return {"file_id": f["file_id"], "name": f["name"], "file_name": f["file_name"], "version": f["version"],
+            "size_kb": f["size_kb"], "category_name": "MAIN", "is_primary": primary,
+            "description": f["description"], "uploaded_timestamp": f["date"], "content_preview_link": ""}
+
+
+def _wrap_gamebanana_hooks() -> None:
+    """The Nexus-shaped calls, answering for GameBanana mods: their files
+    (an update installs through the same code as a Nexus update), their
+    thumbnails in My Mods, and their updates on the Updates page. A Nexus
+    mod passes straight through to the original."""
+    get_files = Plugin.get_mod_files
+
+    @functools.wraps(get_files)
+    async def get_mod_files(self, game_domain, mod_id, *args, **kwargs):
+        if not gamebanana.is_gb_id(mod_id):
+            return await get_files(self, game_domain, mod_id, *args, **kwargs)
+        try:
+            mod = await _gb_client().mod(gamebanana.from_local(mod_id))
+        except gamebanana.GBError as e:
+            return _gb_fail(e)
+        return {"ok": True, "files": [_gb_nexus_file(f, i == 0) for i, f in enumerate(mod["files"])]}
+
+    Plugin.get_mod_files = get_mod_files
+
+    by_ids = Plugin.get_mods_by_ids
+
+    @functools.wraps(by_ids)
+    async def get_mods_by_ids(self, game_domain, mod_ids, *args, **kwargs):
+        try:
+            ids = [int(i) for i in (mod_ids or [])]
+        except (TypeError, ValueError):
+            return await by_ids(self, game_domain, mod_ids, *args, **kwargs)
+        gb_ids = [i for i in ids if gamebanana.is_gb_id(i)]
+        if not gb_ids:
+            return await by_ids(self, game_domain, mod_ids, *args, **kwargs)
+        nexus_ids = [i for i in ids if not gamebanana.is_gb_id(i)]
+        result = (await by_ids(self, game_domain, nexus_ids, *args, **kwargs)) if nexus_ids else {"ok": True, "mods": []}
+        nodes = list(result.get("mods") or []) if result.get("ok") else []
+
+        async def one(local):
+            try:
+                m = await _gb_client().mod(gamebanana.from_local(local))
+            except gamebanana.GBError:
+                return None
+            return {"modId": local, "name": m["name"], "author": m["author"], "version": m["version"],
+                    "endorsements": m["likes"], "downloads": m["downloads"], "thumbnailUrl": m["thumbnail"],
+                    "pictureUrl": m["thumbnail"], "adultContent": m["nsfw"], "updatedAt": "",
+                    "source": "gamebanana"}
+        got = await asyncio.gather(*(one(i) for i in gb_ids[:60]))
+        nodes.extend(n for n in got if n)
+        order = {mid: i for i, mid in enumerate(ids)}
+        nodes.sort(key=lambda n: order.get(n.get("modId"), len(ids)))
+        return {"ok": True, "mods": nodes}
+
+    Plugin.get_mods_by_ids = get_mods_by_ids
+
+    details = Plugin.get_mod_details
+
+    @functools.wraps(details)
+    async def get_mod_details(self, game_domain, mod_id, *args, **kwargs):
+        if gamebanana.is_gb_id(mod_id):
+            return {"ok": False, "gamebanana": True, "error": "This mod is from GameBanana."}
+        return await details(self, game_domain, mod_id, *args, **kwargs)
+
+    Plugin.get_mod_details = get_mod_details
+
+    match = Plugin.match_file_to_game
+
+    @functools.wraps(match)
+    async def match_file_to_game(self, game_domain, mod_id, *args, **kwargs):
+        if gamebanana.is_gb_id(mod_id):
+            return {"ok": True, "file_id": 0}
+        return await match(self, game_domain, mod_id, *args, **kwargs)
+
+    Plugin.match_file_to_game = match_file_to_game
+
+    check = Plugin.check_updates
+
+    @functools.wraps(check)
+    async def check_updates(self, game_domain, *args, **kwargs):
+        result = await check(self, game_domain, *args, **kwargs)
+        if not isinstance(game_domain, str) or not re.fullmatch(r"[a-z0-9_-]+", game_domain or ""):
+            return result
+        recs = {folder: rec for recs in _gb_installed(game_domain).values() for folder, rec in recs
+                if rec.get("source") != "companion"}
+        if not recs:
+            return result
+        try:
+            files = await _gb_client().files_for([gamebanana.from_local(r["mod_id"]) for r in recs.values()])
+        except Exception as e:  # noqa: BLE001 - one source failing must not hide the other
+            decky.logger.warning(f"gamebanana update check {game_domain}: {e}")
+            return result
+        ups = {}
+        for folder, rec in recs.items():
+            fl = files.get(gamebanana.from_local(rec["mod_id"]))
+            if not fl:
+                continue
+            u = gamebanana.update_for(rec, fl)
+            if rec.get("ignore_update") and rec["ignore_update"] == u["current"]:
+                continue
+            ups[folder] = {"installed": rec.get("version"), "current": u["current"],
+                           "update_available": u["update_available"], "blamed": False, "source": "gamebanana"}
+        n = sum(1 for u in ups.values() if u["update_available"])
+        if n:
+            decky.logger.info(f"check_updates({game_domain!r}): {n} GameBanana mods have updates")
+        if isinstance(result, dict) and result.get("ok"):
+            result.setdefault("updates", {}).update(ups)
+            return result
+        return {"ok": True, "updates": ups,
+                "nexus_error": (result or {}).get("error") if isinstance(result, dict) else ""}
+
+    Plugin.check_updates = check_updates
+
+    install = Plugin.install_mod
+
+    @functools.wraps(install)
+    async def install_mod(self, game_domain, mod_id, file_id, *args, **kwargs):
+        result = await install(self, game_domain, mod_id, file_id, *args, **kwargs)
+        if not gamebanana.is_gb_id(mod_id) or not isinstance(result, dict) or not result.get("ok"):
+            return result
+        # What the update check needs later, kept on the record: which
+        # GameBanana file this is and when it was uploaded, so a newer
+        # upload is recognised even after the author deletes this one.
+        info = await _gb_client().file_download(gamebanana.from_local(file_id))
+        settings = _load_settings()
+        for folder, rec in (settings.get("installed", {}).get(game_domain) or {}).items():
+            if (isinstance(rec, dict) and int(rec.get("mod_id") or 0) == int(mod_id)
+                    and int(rec.get("file_id") or 0) == int(file_id)):
+                rec["gb_mod_id"] = gamebanana.from_local(mod_id)
+                rec["gb_file_id"] = gamebanana.from_local(file_id)
+                if info.get("date"):
+                    rec["gb_file_date"] = int(info["date"])
+                rec["source"] = "gamebanana"
+        _save_settings(settings)
+        return result
+
+    Plugin.install_mod = install_mod
+
+
+_wrap_gamebanana_hooks()

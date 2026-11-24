@@ -15,6 +15,8 @@ import {
   prepareModFile,
   matchFileToGame,
   getGameBinaryVersion,
+  gbUpdateTarget,
+  isGameBananaId,
 } from "./api";
 import { SupportedGame, modeParams, stalenessExemptModIds } from "./games";
 import { nameDownload } from "./state";
@@ -286,6 +288,20 @@ export async function installLatest(
   pageVersion = "",
   payloadChoice = ""
 ): Promise<InstallResult> {
+  if (isGameBananaId(modId)) {
+    // GameBanana: the newer upload of the installed file (a mod page there
+    // often holds variants side by side), through the same pipeline.
+    const target = await gbUpdateTarget(game.nexusDomain, modId, "");
+    if (!target.ok || !target.file) {
+      return { ok: false, error: target.error ?? "No downloadable file found" };
+    }
+    const f = target.file;
+    nameDownload(modId, modName, game.appId);
+    return installModWith(
+      game, modId, f.file_id, f.file_name, modName, f.version || pageVersion,
+      "gamebanana", f.version || pageVersion, "", payloadChoice
+    );
+  }
   const files = await getModFiles(game.nexusDomain, modId);
   let file = files.files?.[0];
   // When a file on the page names the installed game's version, that file
