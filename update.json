@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.58",
- "hash": "cda6d0ec2bc9365e2cdd11a6aa8f3f3c816ebad9cb7b021876654d609f4b1637",
+ "version": "1.21.32-anygame.59",
+ "hash": "8f02c92dc0203a9c49436f36484a325848263d69f9e85f64b1cc734b4f1de2d1",
  "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "Record VR setup: keeps the files MRSURVIV0R's VR HUB or another VR tool adds to a game, so uninstalls and restores leave VR working."
+ "notes": "VR releases on the Updates page: new VR HUB versions, VR mods you follow on GitHub, and VR mods on Nexus for your games."
 }
