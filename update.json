@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.60",
- "hash": "8f564de0e97c81562ad596527373b2543606465ebabb74069ba3f502c4b4cb57",
+ "version": "1.21.32-anygame.61",
+ "hash": "740561357efd8d5381d37132370892fa3d441d7e7da129d946ef69a59c172468",
  "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "Game updates held for modded games: they update only when you launch them, never overnight."
+ "notes": "Restore points: go back to how a game's mods and saves were before a change."
 }
