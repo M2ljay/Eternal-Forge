@@ -32,6 +32,7 @@ import {
 } from "./api";
 import { SupportedGame, isExperimentalGame, modeParams } from "./games";
 import { installLatest, installModWith, toggleMod } from "./install";
+import { VrSetupRows } from "./VrSetup";
 
 function gb(n: number): string {
   if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
@@ -346,6 +347,7 @@ export function ModToolsRows({ game, onChanged }: { game: SupportedGame; onChang
   const [busy, setBusy] = useState(false);
   return (
     <>
+      <VrSetupRows game={game} />
       <PanelSectionRow>
         <ButtonItem
           layout="below"

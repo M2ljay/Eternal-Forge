@@ -2605,3 +2605,48 @@ export const saveProblemReport = callable<
   [game_domain: string, app_id: number, what: string],
   { ok: boolean; error?: string; path?: string }
 >("save_problem_report");
+
+/** A VR setup an outside tool (MRSURVIV0R's VR HUB, UEVR) made in a game
+ * folder, recorded so the plugin keeps its files. */
+export interface VrSetupState {
+  ok: boolean;
+  error?: string;
+  recording: boolean;
+  started: number;
+  setup: {
+    count: number;
+    recordedAt: number;
+    missing: number;
+    changed: number;
+    examples: string[];
+    removed: number;
+  } | null;
+  hub: string;
+  kept: number;
+}
+export const getVrSetup = callable<[game_domain: string, install_dir: string], VrSetupState>("get_vr_setup");
+export const startVrRecording = callable<
+  [game_domain: string, install_dir: string, mods_subdir: string],
+  { ok: boolean; error?: string; files?: number }
+>("start_vr_recording");
+export const finishVrRecording = callable<
+  [game_domain: string],
+  {
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    added?: number;
+    changed?: number;
+    removed?: number;
+    protected?: number;
+    new?: number;
+    examples?: string[];
+  }
+>("finish_vr_recording");
+export const cancelVrRecording = callable<[game_domain: string], { ok: boolean }>("cancel_vr_recording");
+export const forgetVrSetup = callable<[game_domain: string], { ok: boolean; forgot?: number }>("forget_vr_setup");
+export const getVrFiles = callable<
+  [game_domain: string],
+  { ok: boolean; files: { path: string; ok: boolean }[]; missing: string[]; changed: string[] }
+>("get_vr_files");
+export const openVrHub = callable<[path: string], { ok: boolean; error?: string; path?: string }>("open_vr_hub");

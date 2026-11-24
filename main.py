@@ -37,6 +37,7 @@ import memoria  # noqa: E402
 import re_engine  # noqa: E402
 import installers  # noqa: E402
 import generic_loaders  # noqa: E402
+import vr_setup  # noqa: E402
 
 
 def _steam_root() -> str:
@@ -36519,3 +36520,470 @@ def _re_is_loader_copy(scratch: str, rel_files: list, game_domain: str) -> bool:
     except OSError:
         return False
     return b"REFramework" in blob or b"re2_fw_config.txt" in blob
+
+
+# ---- VR setups made by outside tools ------------------------------------------
+# MRSURVIV0R's VR HUB (and UEVR, a mod's own installer) change game folders
+# with no install record the plugin could read. "Record VR setup" lists the
+# game folder before the tool runs and again after; the difference is kept
+# in settings["vr_setups"][domain] with a signature per file, and from then
+# on nothing the plugin does deletes, moves aside or overwrites a file that
+# is still the VR tool's: every os/shutil call in this module goes through
+# the guard below. A file that changed since (a mod installed over it with
+# the VR copy set aside as .nexusbak, or a game update) is no longer the VR
+# tool's and is treated like any other file.
+VR_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "vr-setups")
+_REAL_OS = os
+_REAL_SHUTIL = shutil
+_VR_INDEX = None  # {normcase abs path: (domain, rel, sig)}
+_VR_LOCK = threading.Lock()
+_VR_KEPT = []  # (time, domain, rel, action) - files the guard kept
+
+
+def _vr_norm(path) -> str:
+    try:
+        return _REAL_OS.path.normcase(_REAL_OS.path.abspath(_REAL_OS.fspath(path)))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _vr_rebuild(settings: dict = None) -> dict:
+    global _VR_INDEX
+    if settings is None:
+        _VR_INDEX = {}  # a settings read that writes must not come back here
+        settings = _load_settings()
+    index = {}
+    for domain, setup in (settings.get("vr_setups") or {}).items():
+        root = (setup or {}).get("root") or ""
+        if not root:
+            continue
+        for rel, sig in (setup.get("files") or {}).items():
+            if _safe_rel_path(rel):
+                index[_vr_norm(_REAL_OS.path.join(root, *rel.split("/")))] = (domain, rel, sig)
+    _VR_INDEX = index
+    return index
+
+
+def _vr_protected(path):
+    """(domain, rel) when path is a VR tool's file that is still the one
+    recorded, else None."""
+    index = _VR_INDEX if _VR_INDEX is not None else _vr_rebuild()
+    if not index:
+        return None
+    hit = index.get(_vr_norm(path))
+    if not hit:
+        return None
+    domain, rel, sig = hit
+    return (domain, rel) if vr_setup.matches(_REAL_OS.fspath(path), sig) else None
+
+
+def _vr_kept(hit, action: str) -> None:
+    with _VR_LOCK:
+        _VR_KEPT.append((time.time(), hit[0], hit[1], action))
+        del _VR_KEPT[:-500]
+    decky.logger.info(f"VR setup {hit[0]}: kept {hit[1]} ({action})")
+
+
+def _vr_under(top: str) -> list:
+    """Protected files inside a folder."""
+    index = _VR_INDEX if _VR_INDEX is not None else _vr_rebuild()
+    t = _vr_norm(top)
+    if not t or not index:
+        return []
+    pre = t.rstrip(_REAL_OS.sep) + _REAL_OS.sep
+    return [p for p in index if p.startswith(pre)]
+
+
+def _vr_guard_remove(fn):
+    def guarded(path, *a, **k):
+        hit = _vr_protected(path)
+        if hit:
+            _vr_kept(hit, "delete")
+            return None
+        return fn(path, *a, **k)
+    return guarded
+
+
+def _vr_guard_move(fn):
+    def guarded(src, dst, *a, **k):
+        hit = _vr_protected(src)
+        # Setting the VR file aside so a mod can go in its place is allowed:
+        # uninstalling the mod puts the .nexusbak back.
+        if hit and not _REAL_OS.fspath(dst).lower().endswith(".nexusbak"):
+            _vr_kept(hit, "move")
+            return dst
+        over = _vr_protected(dst)
+        if over:
+            _vr_kept(over, "overwrite")
+            return dst
+        return fn(src, dst, *a, **k)
+    return guarded
+
+
+def _vr_guard_copy(fn):
+    def guarded(src, dst, *a, **k):
+        target = dst
+        try:
+            if _REAL_OS.path.isdir(dst):
+                target = _REAL_OS.path.join(dst, _REAL_OS.path.basename(_REAL_OS.fspath(src)))
+        except (TypeError, ValueError):
+            pass
+        over = _vr_protected(target)
+        if over:
+            _vr_kept(over, "overwrite")
+            return target
+        return fn(src, dst, *a, **k)
+    return guarded
+
+
+def _vr_rmtree(path, ignore_errors=False, onerror=None, **kw):
+    inside = [p for p in _vr_under(path) if _vr_protected(p)]
+    if not inside:
+        return _REAL_SHUTIL.rmtree(path, ignore_errors=ignore_errors, onerror=onerror, **kw)
+    keep = set(inside)
+    for dp, _ds, names in _REAL_OS.walk(path, topdown=False):
+        for n in names:
+            p = _REAL_OS.path.join(dp, n)
+            if _vr_norm(p) in keep:
+                continue
+            try:
+                _REAL_OS.remove(p)
+            except OSError:
+                pass
+        try:
+            _REAL_OS.rmdir(dp)
+        except OSError:
+            pass
+    for p in inside:
+        _vr_kept(_VR_INDEX[p][:2], "delete")
+    return None
+
+
+def _vr_install_guard() -> None:
+    """Route this module's os and shutil calls through the guard."""
+    import types
+    global os, shutil
+    g_os = types.ModuleType("os")
+    g_os.__dict__.update(_REAL_OS.__dict__)
+    g_os.remove = _vr_guard_remove(_REAL_OS.remove)
+    g_os.unlink = _vr_guard_remove(_REAL_OS.unlink)
+    g_os.replace = _vr_guard_move(_REAL_OS.replace)
+    g_os.rename = _vr_guard_move(_REAL_OS.rename)
+    g_sh = types.ModuleType("shutil")
+    g_sh.__dict__.update(_REAL_SHUTIL.__dict__)
+    g_sh.move = _vr_guard_move(_REAL_SHUTIL.move)
+    g_sh.copy = _vr_guard_copy(_REAL_SHUTIL.copy)
+    g_sh.copy2 = _vr_guard_copy(_REAL_SHUTIL.copy2)
+    g_sh.copyfile = _vr_guard_copy(_REAL_SHUTIL.copyfile)
+    g_sh.rmtree = _vr_rmtree
+    os, shutil = g_os, g_sh
+
+
+_vr_install_guard()
+
+
+def _vr_recording_path(domain: str) -> str:
+    return _REAL_OS.path.join(VR_DIR, re.sub(r"[^A-Za-z0-9_.-]", "_", domain) + ".recording.json")
+
+
+def _vr_read_recording(domain: str):
+    try:
+        with open(_vr_recording_path(domain), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _vr_status(domain: str, install_dir: str = "") -> dict:
+    setup = (_load_settings().get("vr_setups") or {}).get(domain)
+    rec = _vr_read_recording(domain)
+    out = {"ok": True, "recording": bool(rec), "started": (rec or {}).get("started") or 0,
+           "setup": None, "hub": "", "kept": 0}
+    if setup:
+        st = vr_setup.status(setup.get("root") or "", setup.get("files") or {})
+        out["setup"] = {"count": len(setup.get("files") or {}), "recordedAt": setup.get("recordedAt") or 0,
+                        "missing": len(st["missing"]), "changed": len(st["changed"]),
+                        "examples": (st["missing"] + st["changed"])[:4],
+                        "removed": len(setup.get("removed") or [])}
+    with _VR_LOCK:
+        out["kept"] = sum(1 for _t, d, _r, _a in _VR_KEPT if d == domain)
+    hubs = vr_setup.hub_candidates([_load_settings().get("vr_hub_dir") or "", _user_downloads_dir()])
+    out["hub"] = hubs[0] if hubs else ""
+    return out
+
+
+def _vr_start(domain: str, install_dir: str, mods_subdir: str = "") -> dict:
+    root = _game_dir(install_dir or "")
+    if not install_dir or not _REAL_OS.path.isdir(root):
+        return {"ok": False, "error": "The game's folder wasn't found."}
+    before = vr_setup.snapshot(root)
+    _REAL_OS.makedirs(VR_DIR, exist_ok=True)
+    seq = max([int(r.get("install_seq") or 0) for r in
+               (_load_settings().get("installed", {}).get(domain) or {}).values() if isinstance(r, dict)] or [0])
+    data = {"root": root, "installDir": install_dir, "modsSubdir": mods_subdir or "",
+            "started": int(time.time()), "seq": seq, "before": before}
+    tmp = _vr_recording_path(domain) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    _REAL_OS.replace(tmp, _vr_recording_path(domain))
+    decky.logger.info(f"VR setup {domain}: recording started, {len(before)} files listed in {root}")
+    return {"ok": True, "files": len(before)}
+
+
+def _vr_finish(domain: str) -> dict:
+    rec = _vr_read_recording(domain)
+    if not rec:
+        return {"ok": False, "error": "No recording was running for this game."}
+    root = rec["root"]
+    after = vr_setup.snapshot(root)
+    added, changed, removed = vr_setup.diff(rec.get("before") or {}, after)
+    settings = _load_settings()
+    # Files a Nexus mod brought in during the recording are that mod's.
+    started = int(rec.get("started") or 0)
+    start_seq = int(rec.get("seq") or 0)
+    mine = set()
+    mods_sub = (rec.get("modsSubdir") or "").strip("/\\").replace("\\", "/").lower()
+    for key, r in (settings.get("installed", {}).get(domain) or {}).items():
+        if not isinstance(r, dict):
+            continue
+        if int(r.get("install_seq") or 0) <= start_seq and int(r.get("installed_at") or 0) < started:
+            continue
+        if r.get("mode") == "files":
+            _b, paths = _files_record_paths(r, root)
+            mine.update(paths)
+        elif mods_sub:
+            mine.add(("folder", f"{mods_sub}/{key}".lower()))
+    folders = {f for kind, f in (m for m in mine if isinstance(m, tuple))}
+    paths_mine = {m for m in mine if isinstance(m, str)}
+
+    def theirs(rel: str) -> bool:
+        low = rel.lower()
+        if any(low == f or low.startswith(f + "/") for f in folders):
+            return False
+        return _vr_norm(_REAL_OS.path.join(root, *rel.split("/"))) not in paths_mine
+
+    picked = [r for r in added + changed if theirs(r)]
+    setups = settings.setdefault("vr_setups", {})
+    setup = setups.get(domain) or {"files": {}, "removed": []}
+    files = dict(setup.get("files") or {})
+    hashed = 0
+    for rel in picked:
+        try:
+            files[rel] = vr_setup.signature(_REAL_OS.path.join(root, *rel.split("/")))
+            hashed += 1
+        except OSError:
+            continue
+    setup.update({"root": root, "installDir": rec.get("installDir") or "", "files": files,
+                  "recordedAt": int(time.time()), "tool": "VR setup",
+                  "removed": sorted(set(setup.get("removed") or []) | set(removed))[:2000]})
+    if not files:
+        setups.pop(domain, None)
+    else:
+        setups[domain] = setup
+    _save_settings(settings)
+    _vr_rebuild(settings)
+    try:
+        _REAL_OS.remove(_vr_recording_path(domain))
+    except OSError:
+        pass
+    decky.logger.info(f"VR setup {domain}: {len(added)} added, {len(changed)} changed, "
+                      f"{len(removed)} removed; {hashed} protected")
+    out = {"ok": True, "added": len(added), "changed": len(changed), "removed": len(removed),
+           "protected": len(files), "new": hashed, "examples": picked[:6]}
+    if len(picked) > 3000:
+        out["warning"] = (f"{len(picked)} files changed while recording - more than a VR setup "
+                          "usually touches. A game update or a test launch may be mixed in; "
+                          "they are protected too until you forget this setup.")
+    elif not picked:
+        out["warning"] = "Nothing in the game folder changed while recording."
+    return out
+
+
+def _vr_cancel(domain: str) -> dict:
+    try:
+        _REAL_OS.remove(_vr_recording_path(domain))
+    except OSError:
+        pass
+    return {"ok": True}
+
+
+def _vr_forget(domain: str) -> dict:
+    settings = _load_settings()
+    gone = (settings.get("vr_setups") or {}).pop(domain, None)
+    _save_settings(settings)
+    _vr_rebuild(settings)
+    return {"ok": True, "forgot": len((gone or {}).get("files") or {})}
+
+
+def _vr_files(domain: str) -> dict:
+    setup = (_load_settings().get("vr_setups") or {}).get(domain) or {}
+    st = vr_setup.status(setup.get("root") or "", setup.get("files") or {})
+    bad = set(st["missing"]) | set(st["changed"])
+    return {"ok": True, "files": [{"path": r, "ok": r not in bad} for r in sorted(setup.get("files") or {})][:500],
+            "missing": st["missing"][:100], "changed": st["changed"][:100]}
+
+
+def _vr_open_hub(path: str = "") -> dict:
+    hubs = vr_setup.hub_candidates([_load_settings().get("vr_hub_dir") or "", _user_downloads_dir()])
+    exe = path or (hubs[0] if hubs else "")
+    if not exe or not _REAL_OS.path.isfile(exe) or not exe.lower().endswith(".exe"):
+        return {"ok": False, "error": "MRSURVIV0R's VR HUB wasn't found in Downloads. "
+                                      "Download it from its GitHub releases first."}
+    try:
+        if sys.platform == "win32":
+            _REAL_OS.startfile(exe, cwd=_REAL_OS.path.dirname(exe))
+        else:
+            import subprocess
+            subprocess.Popen([exe], cwd=_REAL_OS.path.dirname(exe))
+    except OSError as e:
+        return {"ok": False, "error": f"Couldn't start it: {e}"}
+    return {"ok": True, "path": exe}
+
+
+async def _get_vr_setup(self, game_domain: str, install_dir: str = "") -> dict:
+    return await asyncio.to_thread(_vr_status, game_domain, install_dir)
+
+
+async def _start_vr_recording(self, game_domain: str, install_dir: str, mods_subdir: str = "") -> dict:
+    return await asyncio.to_thread(_vr_start, game_domain, install_dir, mods_subdir)
+
+
+async def _finish_vr_recording(self, game_domain: str) -> dict:
+    return await asyncio.to_thread(_vr_finish, game_domain)
+
+
+async def _cancel_vr_recording(self, game_domain: str) -> dict:
+    return _vr_cancel(game_domain)
+
+
+async def _forget_vr_setup(self, game_domain: str) -> dict:
+    return await asyncio.to_thread(_vr_forget, game_domain)
+
+
+async def _get_vr_files(self, game_domain: str) -> dict:
+    return await asyncio.to_thread(_vr_files, game_domain)
+
+
+async def _open_vr_hub(self, path: str = "") -> dict:
+    return await asyncio.to_thread(_vr_open_hub, path)
+
+
+Plugin.get_vr_setup = _get_vr_setup
+Plugin.start_vr_recording = _start_vr_recording
+Plugin.finish_vr_recording = _finish_vr_recording
+Plugin.cancel_vr_recording = _cancel_vr_recording
+Plugin.forget_vr_setup = _forget_vr_setup
+Plugin.get_vr_files = _get_vr_files
+Plugin.open_vr_hub = _open_vr_hub
+
+
+def _vr_note_after(since: float, result) -> None:
+    """Say on a result which VR files the guard kept during the call."""
+    if not isinstance(result, dict):
+        return
+    with _VR_LOCK:
+        kept = sorted({r for t, _d, r, _a in _VR_KEPT if t >= since})
+    if kept:
+        note = (f"Left {len(kept)} VR setup file{'s' if len(kept) != 1 else ''} in place "
+                f"({', '.join(kept[:3])}{'…' if len(kept) > 3 else ''}).")
+        result["warning"] = " ".join(x for x in (result.get("warning"), note) if x)
+
+
+def _vr_replaced_by(game_domain: str, key: str) -> list:
+    """VR files a just-installed files-mode mod set aside (.nexusbak)."""
+    settings = _load_settings()
+    setup = (settings.get("vr_setups") or {}).get(game_domain)
+    rec = (settings.get("installed", {}).get(game_domain) or {}).get(key)
+    if not setup or not isinstance(rec, dict) or rec.get("mode") != "files":
+        return []
+    root = setup.get("root") or ""
+    _b, paths = _files_record_paths(rec, root)
+    out = []
+    for rel in setup.get("files") or {}:
+        if _vr_norm(_REAL_OS.path.join(root, *rel.split("/"))) in paths:
+            out.append(rel)
+    return out
+
+
+def _wrap_vr_calls() -> None:
+    for name in ("install_mod", "uninstall_mod", "set_mod_enabled", "set_all_mods_enabled",
+                 "apply_mod_setup"):
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+
+        def make(original, name):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                since = time.time()
+                result = await original(self, *args, **kwargs)
+                try:
+                    game_domain = args[0] if args else kwargs.get("game_domain", "")
+                    if name == "install_mod" and isinstance(result, dict) and result.get("ok") \
+                            and result.get("folder"):
+                        over = await asyncio.to_thread(_vr_replaced_by, game_domain, result["folder"])
+                        if over:
+                            note = (f"This mod replaced {len(over)} VR setup file"
+                                    f"{'s' if len(over) != 1 else ''} ({', '.join(over[:3])}); the VR "
+                                    "copies are kept aside and come back if you uninstall or switch it off.")
+                            result["warning"] = " ".join(x for x in (result.get("warning"), note) if x)
+                    _vr_note_after(since, result)
+                except Exception as e:  # noqa: BLE001 - a note must never break the call
+                    decky.logger.debug(f"VR note {name}: {e}")
+                return result
+            return wrapper
+
+        setattr(Plugin, name, make(original, name))
+
+
+_wrap_vr_calls()
+
+_VR_DISTINCT = (".dll", ".asi", ".exe", ".lua", ".pak")
+
+
+def _vr_name_clash(game_domain: str, paths: list) -> list:
+    setup = (_load_settings().get("vr_setups") or {}).get(game_domain) or {}
+    mine = {}
+    for rel in setup.get("files") or {}:
+        base = rel.split("/")[-1].lower()
+        if base.endswith(_VR_DISTINCT) or "vr" in base or "openxr" in base:
+            mine[base] = rel
+    hits = []
+    for p in paths or []:
+        base = str(p).replace("\\", "/").split("/")[-1].lower()
+        if base in mine:
+            hits.append(mine[base])
+    return sorted(set(hits))
+
+
+def _wrap_vr_install_block() -> None:
+    original = Plugin.get_install_block
+
+    @functools.wraps(original)
+    async def wrapper(self, game_domain, mod_id, file_id, mod_name, *args, **kwargs):
+        result = await original(self, game_domain, mod_id, file_id, mod_name, *args, **kwargs)
+        if not isinstance(result, dict) or result.get("blocked") or result.get("refused"):
+            return result
+        if not (_load_settings().get("vr_setups") or {}).get(game_domain):
+            return result
+        try:
+            children = await _mod_file_listing(game_domain, int(mod_id), int(file_id))
+            paths = _listing_paths(children) if children else None
+            if not paths:
+                paths = await _peek_paths(game_domain, int(mod_id), int(file_id))
+            clash = _vr_name_clash(game_domain, paths or [])
+        except Exception as e:  # noqa: BLE001 - a hint must never break the page
+            decky.logger.debug(f"VR clash {game_domain}/{mod_id}: {e}")
+            return result
+        if clash:
+            note = (f"May replace files of your VR setup ({', '.join(clash[:3])}"
+                    f"{'…' if len(clash) > 3 else ''}). If it does, the VR copies are kept aside "
+                    "and come back when you uninstall it, but VR may not work while it's on.")
+            result["warning"] = " ".join(x for x in (result.get("warning"), note) if x)
+            result["vrClash"] = clash
+        return result
+
+    Plugin.get_install_block = wrapper
+
+
+_wrap_vr_install_block()
