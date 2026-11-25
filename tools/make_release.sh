@@ -19,6 +19,8 @@ mkdir -p "$STAGE/$FOLDER/py_modules" "$STAGE/$FOLDER/dist" "$OUT"
 cp "$HERE/main.py" "$HERE/package.json" "$HERE/plugin.json" "$HERE/LICENSE" "$HERE/README.md" "$STAGE/$FOLDER/"
 cp "$HERE/dist/index.js" "$STAGE/$FOLDER/dist/"
 find "$HERE/py_modules" -maxdepth 1 -type f \( -name '*.py' -o -name '*.json' \) -exec cp {} "$STAGE/$FOLDER/py_modules/" \;
+mkdir -p "$STAGE/$FOLDER/py_modules/_stdlib_compat"
+cp "$HERE/py_modules/_stdlib_compat/"*.py "$HERE/py_modules/_stdlib_compat/README.md" "$STAGE/$FOLDER/py_modules/_stdlib_compat/"
 rm -f "$OUT/Nexus-Mods.zip"
 (cd "$STAGE" && TZ=UTC find "$FOLDER" -exec touch -t 202601010000 {} + && zip -qrX "$OUT/Nexus-Mods.zip" "$FOLDER")
 rm -rf "$STAGE"

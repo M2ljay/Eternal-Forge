@@ -34,11 +34,20 @@ from __future__ import annotations
 import asyncio
 import datetime
 import html
-import html.parser
 import json
+import os
 import re
+import sys
 import time
 import urllib.parse
+
+try:
+    from html.parser import HTMLParser
+except ImportError:
+    # Decky's frozen Windows Python bundles neither html.parser nor
+    # _markupbase; _stdlib_compat holds unmodified CPython copies.
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_stdlib_compat"))
+    from html_parser import HTMLParser
 
 API = "https://gamebanana.com/apiv11"
 CORE = "https://api.gamebanana.com"
@@ -177,7 +186,7 @@ def parse_game_ref(text: str) -> int:
 # ---- description: html -> readable text ----------------------------------
 
 
-class _TextOut(html.parser.HTMLParser):
+class _TextOut(HTMLParser):
     _BLOCK = {"p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
               "blockquote", "tr", "table", "hr", "section", "pre"}
     _SKIP = {"script", "style", "iframe", "object", "embed", "noscript", "svg"}
