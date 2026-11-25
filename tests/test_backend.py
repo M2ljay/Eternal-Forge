@@ -17686,10 +17686,19 @@ class TestReleaseZipGate(unittest.TestCase):
             f"{top}/plugin.json": json.dumps({"name": name or self.plugin_name}),
             f"{top}/package.json": json.dumps({"version": version}),
             f"{top}/main.py": "x",
-            f"{top}/dist/index.js": "x",
+            f"{top}/dist/index.js": 'var plugin_default = { name: "%s" };\n'
+                                    "const manifest = { name: plugin_default.name };" % (name or self.plugin_name),
             f"{top}/LICENSE": "x",
             f"{top}/README.md": "x",
         }
+
+    def test_a_frontend_built_under_another_name_is_refused(self):
+        """anygame.64: plugin.json said Forge, the bundle still called the
+        backend as Nexus Mods, and every page sat on its spinner."""
+        entries = self._good_entries()
+        entries[f"{self.folder}/dist/index.js"] = 'const manifest = {"name":"Nexus Mods"};'
+        problems = self.check(self._zip(entries), "Forge", "9.9.9", self.folder)
+        self.assertTrue(any("rebuild the frontend" in p for p in problems), problems)
 
     def test_a_correct_zip_passes(self):
         z = self._zip(self._good_entries())
