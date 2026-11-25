@@ -23,6 +23,7 @@ Usage:  python tools/makestore.py dist/Nexus-Mods-0.259.0.zip [notes.md]
 import hashlib
 import io
 import json
+import re
 import os
 import sys
 import zipfile
@@ -120,6 +121,27 @@ def check_zip(zip_path: str, plugin_name: str, version: str,
                 )
         except (KeyError, OSError, ValueError, AttributeError):
             pass  # a missing plugin.json is reported above
+
+        # The frontend reaches its backend by the name compiled into
+        # dist/index.js. anygame.64 shipped a bundle still built as "Nexus
+        # Mods" against a plugin.json of "Forge": the backend started, the
+        # frontend's calls went to a plugin that no longer existed, and every
+        # page sat on its loading spinner.
+        try:
+            bundle = zipfile.ZipFile(zip_path).read(f"{folder}/dist/index.js").decode("utf-8", "replace")
+            if "pluginJson.name" not in bundle and "plugin_default.name" not in bundle:
+                m = re.search(r'manifest\s*=\s*\{\s*"?name"?\s*:\s*"([^"]*)"', bundle)
+                if m is None:
+                    problems.append("dist/index.js: cannot find the plugin name it was built with")
+                elif m.group(1) != plugin_name:
+                    problems.append(
+                        f"dist/index.js was built as {m.group(1)!r} but plugin.json "
+                        f"says {plugin_name!r}: rebuild the frontend"
+                    )
+            elif not re.search(r'name\s*:\s*"' + re.escape(plugin_name) + '"', bundle):
+                problems.append(f"dist/index.js does not carry the plugin name {plugin_name!r}: rebuild the frontend")
+        except (KeyError, OSError):
+            pass  # a missing dist/index.js is reported above
 
     # The version in the zip is the one that will run, whatever the
     # filename claims.

@@ -1,4 +1,5 @@
-const manifest = {"name":"Nexus Mods"};
+import pluginJson from "../../../plugin.json";
+const manifest = { name: pluginJson.name };
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
