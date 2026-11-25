@@ -1,0 +1,6 @@
+{
+ "version": "1.21.32-anygame.67",
+ "hash": "d2378ccebebbbc9a1304c5cbdc4db2caa97214d73f52880b7c38d5efadd1e95d",
+ "artifact": "https://raw.githubusercontent.com/M2ljay/Eternal-Forge/release/Nexus-Mods-1.21.32-anygame.67.zip",
+ "notes": "Safer self-update on Windows: Forge closes its own helper tools and waits for downloads before Decky replaces it, and tells you (with a Reinstall button) if an update did not finish copying."
+}

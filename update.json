@@ -1,6 +1,6 @@
 {
- "version": "1.21.32-anygame.62",
- "hash": "bae697cca9ae9e9a7607c000aba17ecc909124d648f2126938dca8cd789298c4",
- "artifact": "https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip",
- "notes": "Recommended mods: a starter pack of fixes and utilities, and the top collection, for each game."
+ "version": "1.21.32-anygame.67",
+ "hash": "d2378ccebebbbc9a1304c5cbdc4db2caa97214d73f52880b7c38d5efadd1e95d",
+ "artifact": "https://raw.githubusercontent.com/M2ljay/Eternal-Forge/release/Nexus-Mods.zip",
+ "notes": "Safer self-update on Windows: Forge closes its own helper tools and waits for downloads before Decky replaces it, and tells you (with a Reinstall button) if an update did not finish copying."
 }
