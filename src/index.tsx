@@ -4692,7 +4692,7 @@ function Content() {
 }
 
 export default definePlugin(() => {
-  console.log("Nexus Mods plugin initializing");
+  console.log("Forge plugin initializing");
   void loadExperimentalState();
   const experimentalListener = addEventListener(
     "experimental_changed",
@@ -4846,7 +4846,7 @@ export default definePlugin(() => {
   const listener = addEventListener<[message: string]>(
     "backend_event",
     (message) => {
-      toaster.toast({ title: "Nexus Mods", body: `Backend says: ${message}` });
+      toaster.toast({ title: "Forge", body: `Backend says: ${message}` });
     }
   );
 
@@ -4871,8 +4871,8 @@ export default definePlugin(() => {
   const holdInterval = setInterval(() => void applyUpdateHold().catch(() => undefined), 15 * 60000);
 
   return {
-    name: "Nexus Mods",
-    titleView: <div className={staticClasses.Title}>Nexus Mods</div>,
+    name: "Forge",
+    titleView: <div className={staticClasses.Title}>Forge</div>,
     content: <Content />,
     icon: <FaPuzzlePiece />,
     onDismount() {

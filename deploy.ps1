@@ -44,8 +44,14 @@ $cfg = Get-Content $settingsPath -Raw | ConvertFrom-Json
 # (including which settings directory Decky reads), and deploying onto a
 # device that already had a released build left TWO plugin folders, so Decky
 # loaded the plugin twice.
-$pluginJson = Get-Content (Join-Path $root "plugin.json") -Raw | ConvertFrom-Json
-$folder = $pluginJson.name
+#
+# Since the rename to "Forge" the folder is no longer plugin.json's name: it
+# is package.json's "pluginFolder" ("Nexus Mods"), because Decky keys the
+# settings directory (and so the API key) by the folder. See
+# tools/makestore.py plugin_folder.
+$packageJson = Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json
+$folder = $packageJson.pluginFolder
+if (-not $folder) { throw "package.json has no pluginFolder" }
 $pluginDir = "$($cfg.deckdir)/homebrew/plugins/$folder"
 # The folder this used to deploy to. Removed on the device if it is still
 # there, because leaving it means two copies of the plugin in the QAM.

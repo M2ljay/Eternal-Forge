@@ -1,4 +1,20 @@
-# Nexus Mods: Decky Loader Plugin (Unofficial)
+# Forge: Decky Loader Plugin (Unofficial)
+
+**Forge** is a fork of [decky-nexus](https://github.com/RedRanger14/decky-nexus)
+by RedRanger14 (Michael Finney), the Nexus Mods plugin for Decky Loader, with
+experimental support for any game, GameBanana as a second mod source, and
+Windows (Steam Big Picture) support. The rest of this README is upstream's,
+with this fork's additions in the "Fork" section at the end. The licence is
+upstream's (see [License](#license)).
+
+Decky lists it as **Forge**. It still installs into the plugin folder
+`Nexus Mods`, because Decky keeps a plugin's settings (including the Nexus API
+key), data and logs under its folder name, so updating from a build called
+"Nexus Mods" keeps everything. Its updates come from the `release` branch of
+[M2ljay/Eternal-Forge](https://github.com/M2ljay/Eternal-Forge) (`update.json`
+and `Nexus-Mods.zip`, built by `tools/make_release.sh`).
+
+## Upstream: Nexus Mods Decky Loader Plugin (Unofficial)
 
 Browse, download, install, and enable/disable [Nexus Mods](https://www.nexusmods.com) content for the currently selected game, entirely from Gaming Mode with a controller, on SteamOS and Bazzite. No Desktop Mode required.
 

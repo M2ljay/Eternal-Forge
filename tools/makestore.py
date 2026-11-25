@@ -34,8 +34,27 @@ REPO = "RedRanger14/decky-nexus"
 REQUIRED = ("plugin.json", "package.json", "main.py", "dist/index.js")
 
 
-def check_zip(zip_path: str, plugin_name: str, version: str) -> list:
+def plugin_folder(pkg: dict, plug: dict) -> str:
+    """The folder the zip unpacks into on the device.
+
+    Not always plugin.json's name. Decky v3 finds an installed plugin by
+    plugin.json's name (browser.py: find_plugin_folder) but keys its
+    settings, data and logs by the FOLDER (plugin/plugin.py and
+    sandboxed_plugin.py: DECKY_PLUGIN_SETTINGS_DIR = settings/<folder>).
+    The plugin was renamed to "Forge" while its folder stays "Nexus Mods",
+    so the user's API key, settings and mod state stay where they are.
+    package.json "pluginFolder" pins it; without one it is the name.
+    """
+    return pkg.get("pluginFolder") or plug["name"]
+
+
+def check_zip(zip_path: str, plugin_name: str, version: str,
+              folder: str = "") -> list:
     """Everything that would make Decky or install.sh refuse this zip.
+
+    `folder` is the zip's one top-level folder (see plugin_folder); it
+    defaults to plugin_name. The plugin.json inside must carry plugin_name,
+    because that is the name Decky's updater looks the plugin up by.
 
     This runs at the one step nobody can skip on the way to publishing: the
     store index is generated FROM the artifact, so a zip that cannot install
@@ -74,26 +93,40 @@ def check_zip(zip_path: str, plugin_name: str, version: str) -> list:
             f"(e.g. {backslashed[0]!r}) - build with tools/makezip.py"
         )
 
+    folder = folder or plugin_name
     tops = {n.split("/")[0] for n in names if "\\" not in n}
     if len(tops) != 1:
         problems.append(f"expected ONE top-level folder, found {sorted(tops)}")
-    elif tops != {plugin_name}:
+    elif tops != {folder}:
         problems.append(
-            f"top-level folder is {tops.pop()!r} but plugin.json says "
-            f"{plugin_name!r} - Decky and install.sh both use the "
-            f"plugin.json name, so the two must match exactly"
+            f"top-level folder is {tops.pop()!r} but it must be "
+            f"{folder!r} - the folder Decky installs into, and the one the "
+            f"user's settings and API key are kept under"
         )
     else:
         for rel in REQUIRED:
-            if f"{plugin_name}/{rel}" not in names:
-                problems.append(f"missing {plugin_name}/{rel}")
+            if f"{folder}/{rel}" not in names:
+                problems.append(f"missing {folder}/{rel}")
+        try:
+            inner_name = json.loads(
+                zipfile.ZipFile(zip_path)
+                .read(f"{folder}/plugin.json")
+                .decode("utf-8")
+            ).get("name")
+            if inner_name != plugin_name:
+                problems.append(
+                    f"zip's plugin.json name is {inner_name!r} but this "
+                    f"repo's is {plugin_name!r}"
+                )
+        except (KeyError, OSError, ValueError, AttributeError):
+            pass  # a missing plugin.json is reported above
 
     # The version in the zip is the one that will run, whatever the
     # filename claims.
     try:
         inner = json.loads(
             zipfile.ZipFile(zip_path)
-            .read(f"{plugin_name}/package.json")
+            .read(f"{folder}/package.json")
             .decode("utf-8")
         )
         if inner.get("version") != version:
@@ -135,7 +168,8 @@ def main(zip_path: str, notes_path: str = "") -> int:
     plug = json.load(io.open("plugin.json", encoding="utf-8"))
     version = pkg["version"]
 
-    problems = check_zip(zip_path, plug["name"], version)
+    problems = check_zip(zip_path, plug["name"], version,
+                         plugin_folder(pkg, plug))
     if problems:
         print(f"REFUSING to index {zip_path}: this zip will not install.")
         for p in problems:

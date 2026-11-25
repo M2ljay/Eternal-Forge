@@ -88,18 +88,45 @@ export function isNewerVersion(current: string, latest: string): boolean {
   return false;
 }
 
-/** The artifact must come from this project's own releases.
+/** The name Decky knows this plugin by: plugin.json's "name", and what
+ * Decky shows in the Quick Access Menu. utilities/install_plugin finds the
+ * installed copy by this name (browser.py: find_plugin_folder), so it must
+ * equal plugin.json's name or Decky installs beside it instead of updating.
+ * The FOLDER the zip unpacks into is a different thing and stays "Nexus
+ * Mods" (package.json pluginFolder): Decky keys settings, data and logs by
+ * the folder, so the API key and mod state stay where they are. */
+export const PLUGIN_NAME = "Forge";
+
+/** Where this fork publishes its builds: the "release" branch of its own
+ * repository, holding update.json and the zip beside it. */
+export const FORK_RELEASE_RAW =
+  "https://raw.githubusercontent.com/M2ljay/Eternal-Forge/release/";
+
+/** The artifact must come from this fork's own release channel.
  *
  * The loader installs whatever URL it is handed, so this is the last
  * point where that is checked on our side. The backend checks it too;
  * both, because it is the one field that decides what code runs.
+ *
+ * One zip file directly on that branch, nothing else: a prefix check
+ * alone would accept ".../release/../../other/repo/...", which the
+ * loader's HTTP client resolves into somebody else's repository. The
+ * upstream store's releases are not trusted either: installing one would
+ * replace this fork with upstream.
  */
 export function trustedArtifact(url?: string): boolean {
-  return Boolean(
-    url?.startsWith(
-      "https://github.com/RedRanger14/decky-nexus/releases/download/"
-    )
-  );
+  if (typeof url !== "string" || !url.startsWith(FORK_RELEASE_RAW)) {
+    return false;
+  }
+  const file = url.slice(FORK_RELEASE_RAW.length);
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.zip$/.test(file);
+}
+
+/** A SHA-256 as Decky compares it: 64 lowercase hex digits. Decky skips
+ * its hash check entirely when the hash is empty, so anything else is
+ * refused before it gets there. */
+export function trustedHash(hash?: string): boolean {
+  return typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash);
 }
 
 export function pluginUpdateLabel(u?: PluginUpdate): string {
@@ -120,7 +147,7 @@ export function pluginUpdateBody(u?: PluginUpdate): string {
  * it can. */
 export function pluginUpdateBlocked(u?: PluginUpdate): string {
   if (!u?.update_available) return "";
-  if (!trustedArtifact(u.artifact) || !u.hash) {
+  if (!trustedArtifact(u.artifact) || !trustedHash(u.hash)) {
     return "The update could not be verified, so it was not offered.";
   }
   if (!canSelfUpdate()) {
@@ -149,9 +176,9 @@ export async function requestPluginUpdate(u: PluginUpdate): Promise<string> {
     await router.call(
       "utilities/install_plugin",
       u.artifact,
-      // Must match the installed folder name, or Decky installs a second
-      // copy beside this one rather than replacing it.
-      "Nexus Mods",
+      // Must match plugin.json's name, which is how Decky finds the
+      // installed copy, or it installs a second copy beside this one.
+      PLUGIN_NAME,
       u.version,
       u.hash,
       DECKY_INSTALL_TYPE_UPDATE

@@ -303,11 +303,11 @@ export function UpdatesPage() {
                     const err = await requestPluginUpdate(self);
                     if (err) {
                       setSelfSentAt(0);
-                      toaster.toast({ title: "Nexus Mods", body: err });
+                      toaster.toast({ title: "Forge", body: err });
                       return;
                     }
                     toaster.toast({
-                      title: "Nexus Mods",
+                      title: "Forge",
                       body: "Decky will ask you to confirm the update.",
                     });
                   }}

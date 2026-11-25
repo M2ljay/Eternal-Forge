@@ -1,11 +1,11 @@
 {
-  "name": "Nexus Mods",
+  "name": "Forge",
   "author": "Michael Finney",
   "flags": ["debug"],
   "api_version": 1,
   "publish": {
     "tags": ["mods", "nexus-mods"],
-    "description": "Browse, install, and enable/disable Nexus Mods for the current game without leaving Gaming Mode.",
+    "description": "Forge: browse, install, and enable/disable Nexus Mods (and GameBanana) mods for the current game without leaving Gaming Mode. Based on decky-nexus by RedRanger14.",
     "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
   }
 }

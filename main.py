@@ -35226,7 +35226,7 @@ query CollectionInstructions($slug: String!) {
     # ---- Lifecycle ---------------------------------------------------------
 
     async def _main(self):
-        decky.logger.info("Nexus Mods plugin loaded")
+        decky.logger.info("Forge plugin loaded")
         self._tool_watcher = asyncio.get_running_loop().create_task(_watch_tool_games())
         self._reapply_watcher = asyncio.get_running_loop().create_task(_watch_reapply())
         self._focus_watcher = asyncio.get_running_loop().create_task(_watch_focus())
@@ -35243,13 +35243,13 @@ query CollectionInstructions($slug: String!) {
         # start needs a terminal the user does not have.
         _DL_CANCEL.update(_DL_ACTIVE)
         await _close_http_session()
-        decky.logger.info("Nexus Mods plugin unloading")
+        decky.logger.info("Forge plugin unloading")
         watchdog = threading.Timer(UNLOAD_EXIT_SECONDS, os._exit, args=(0,))
         watchdog.daemon = True
         watchdog.start()
 
     async def _uninstall(self):
-        decky.logger.info("Nexus Mods plugin uninstalled")
+        decky.logger.info("Forge plugin uninstalled")
 
 
 # Experimental tool-managed games (Overstrike): every change to what is
@@ -36062,7 +36062,7 @@ def _recent_logs(limit: int = 600 << 10) -> str:
 async def _save_problem_report(self, game_domain: str = "", app_id: int = 0, what: str = "") -> dict:
     settings = _load_settings()
     secrets = [str(settings.get(k) or "") for k in ("api_key", "apikey", "nexus_api_key")]
-    lines = [f"Nexus Mods plugin {APP_VERSION} problem report - {time.strftime('%Y-%m-%d %H:%M')}",
+    lines = [f"Forge plugin {APP_VERSION} problem report - {time.strftime('%Y-%m-%d %H:%M')}",
              f"What happened: {what or '(not given)'}", ""]
     if game_domain and re.fullmatch(r"[a-z0-9_-]+", game_domain):
         try:
@@ -36079,7 +36079,7 @@ async def _save_problem_report(self, game_domain: str = "", app_id: int = 0, wha
                   json.dumps(settings.get("installed", {}).get(game_domain), indent=1, default=str)[:60000], ""]
     lines += ["--- plugin logs ---", await asyncio.to_thread(_recent_logs)]
     text = _scrub("\n".join(lines), secrets)
-    path = os.path.join(_report_dir(), f"Nexus Mods report - {time.strftime('%Y-%m-%d %H%M%S')}.txt")
+    path = os.path.join(_report_dir(), f"Forge report - {time.strftime('%Y-%m-%d %H%M%S')}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     decky.logger.info(f"problem report saved: {path}")
@@ -36090,12 +36090,20 @@ Plugin.save_problem_report = _save_problem_report
 
 
 # ---- Updates come from the fork -------------------------------------------------
-# This build is a fork: the store's newer upstream build would replace it
-# (and every any-game feature with it). So updates come from the fork's
+# This build is a fork (Forge): the store's newer upstream build would replace
+# it (and every any-game feature with it). So updates come from the fork's
 # "release" branch, which holds the zip and an update.json beside it.
-FORK_REPO = "M2ljay/vibe-nexus"
+FORK_REPO = "M2ljay/Eternal-Forge"
 FORK_RAW = f"https://raw.githubusercontent.com/{FORK_REPO}/release/"
 FORK_UPDATE_URL = FORK_RAW + "update.json"
+# The artifact must be a single zip file at the top of that branch. A bare
+# prefix check would also accept ".../release/../../<other repo>/...", which an
+# HTTP client normalises into someone else's repository before fetching it.
+_FORK_ARTIFACT = re.compile(re.escape(FORK_RAW) + r"[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.zip")
+
+
+def _fork_artifact_trusted(url: str) -> bool:
+    return bool(_FORK_ARTIFACT.fullmatch(url or ""))
 
 
 async def _fetch_fork_update(force: bool = False) -> dict:
@@ -36109,7 +36117,7 @@ async def _fetch_fork_update(force: bool = False) -> dict:
                "artifact": str(data["artifact"]), "notes": str(data.get("notes") or "")}
     except Exception:  # noqa: BLE001 - no answer is simply no update
         return {}
-    if not out["artifact"].startswith(FORK_RAW) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
+    if not _fork_artifact_trusted(out["artifact"]) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
         return {}
     _ForkUpdateCache.at, _ForkUpdateCache.data = now, out
     return out

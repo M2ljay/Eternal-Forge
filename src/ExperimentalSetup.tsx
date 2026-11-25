@@ -661,7 +661,7 @@ export function ExperimentalGameRows({ game }: { game: SupportedGame }) {
                   setBusy(true);
                   try {
                     const r = await setExperimentalDomain(game.appId, c.domain);
-                    if (!r.ok) toaster.toast({ title: "Nexus Mods", body: r.error ?? "Couldn't switch" });
+                    if (!r.ok) toaster.toast({ title: "Forge", body: r.error ?? "Couldn't switch" });
                     await loadExperimentalState();
                     notifyGameStateChanged();
                   } finally {
