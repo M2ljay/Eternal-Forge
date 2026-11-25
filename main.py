@@ -1,46 +1,70 @@
-import asyncio
-import datetime
-import functools
-import io
-import glob
-import hashlib
-import itertools
-import inspect
-import json
-import lzma
+# First, before any import that a half-copied install could break: start the
+# check of this install against the manifest its release zip carried
+# (py_modules/forge_integrity.py, standard library only). The py_modules
+# below are imported through it, so one that is missing or truncated becomes
+# a recorded failure and a stand-in instead of a backend that never starts.
+# That is what lets the panel say "the last update didn't finish copying"
+# and offer the reinstall, rather than every page spinning forever.
 import os
-import re
-import shutil
-import struct
-import socket
-import ssl
-import threading
-import time
-import urllib.parse
-import zipfile
-
 import sys
 
-import aiohttp
+_PLUGIN_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_PLUGIN_ROOT, "py_modules"))
+try:
+    import forge_integrity  # noqa: E402
 
-import decky
+    _INTEGRITY = forge_integrity.begin(_PLUGIN_ROOT)
+except Exception:  # noqa: BLE001 - the plugin must still start without it
+    forge_integrity = None
+    _INTEGRITY = None
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
-import experimental_games  # noqa: E402 - needs the py_modules path above
-import reloaded_ii  # noqa: E402
-import xenoverse2  # noqa: E402
-import reshade_setup  # noqa: E402
-import kingdom_hearts  # noqa: E402
-import archive_peek  # noqa: E402
-import gta_img  # noqa: E402
-import memoria  # noqa: E402
-import re_engine  # noqa: E402
-import installers  # noqa: E402
-import generic_loaders  # noqa: E402
-import vr_setup  # noqa: E402
-import vr_feed  # noqa: E402
-import gamebanana  # noqa: E402
+import asyncio  # noqa: E402
+import datetime  # noqa: E402
+import functools  # noqa: E402
+import importlib  # noqa: E402
+import io  # noqa: E402
+import glob  # noqa: E402
+import hashlib  # noqa: E402
+import itertools  # noqa: E402
+import inspect  # noqa: E402
+import json  # noqa: E402
+import lzma  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import struct  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
+import zipfile  # noqa: E402
 
+import aiohttp  # noqa: E402
+
+import decky  # noqa: E402
+
+
+def _guarded_import(name: str):
+    if forge_integrity is not None:
+        return forge_integrity.guarded_import(name)
+    return importlib.import_module(name)
+
+
+experimental_games = _guarded_import("experimental_games")
+reloaded_ii = _guarded_import("reloaded_ii")
+xenoverse2 = _guarded_import("xenoverse2")
+reshade_setup = _guarded_import("reshade_setup")
+kingdom_hearts = _guarded_import("kingdom_hearts")
+archive_peek = _guarded_import("archive_peek")
+gta_img = _guarded_import("gta_img")
+memoria = _guarded_import("memoria")
+re_engine = _guarded_import("re_engine")
+installers = _guarded_import("installers")
+generic_loaders = _guarded_import("generic_loaders")
+vr_setup = _guarded_import("vr_setup")
+vr_feed = _guarded_import("vr_feed")
+gamebanana = _guarded_import("gamebanana")
+forge_helpers = _guarded_import("forge_helpers")
 
 def _steam_root() -> str:
     """Steam's install folder. On Windows the registry says where it is;
@@ -37823,3 +37847,196 @@ def _wrap_gamebanana_hooks() -> None:
 
 
 _wrap_gamebanana_hooks()
+
+
+# ---- Updating safely, and knowing when an update did not finish ------------------
+# Decky v3.3.1's installer (backend/decky_loader/browser.py: _install,
+# uninstall_plugin) stops this backend, rmtree-s the plugin folder and
+# extracts the new zip over what is left. On Windows the stop is
+# TerminateProcess: _unload never runs and children survive. Any file still
+# held stops rmtree part-way (logged by Decky, then ignored) or extraction
+# part-way (uncaught: no reload, no message). Either leaves a half-copied
+# plugin. So before the frontend hands the update to Decky it asks here
+# first: nothing running that writes, no helper of ours still holding files.
+
+# Callables that change files or run tools. While one runs, an update would
+# pull the plugin out from under it. Matched by name so a callable added
+# later is covered without anyone remembering this list.
+_JOB_CALLABLE = re.compile(
+    r"(install|uninstall|apply|prepare_mod_file|prefetch_mod_file|repair|run|reset|setup|remove"
+    r"|crash_bisect_apply|restore_point_saves|create_restore_point|copy_saves|fix|resolve_file_conflicts"
+    r"|park|disable_failing|set_all_mods_enabled|set_mod_enabled|bg3_disable)(_|$)")
+_JOBS_RUNNING: dict = {}
+
+
+def _wrap_jobs() -> None:
+    for name in dir(Plugin):
+        if name.startswith("_") or not _JOB_CALLABLE.match(name):
+            continue
+        original = getattr(Plugin, name)
+        if not inspect.iscoroutinefunction(original):
+            continue
+
+        def make(name, original):
+            @functools.wraps(original)
+            async def job(self, *args, **kwargs):
+                _JOBS_RUNNING[name] = _JOBS_RUNNING.get(name, 0) + 1
+                try:
+                    return await original(self, *args, **kwargs)
+                finally:
+                    _JOBS_RUNNING[name] -= 1
+                    if _JOBS_RUNNING[name] <= 0:
+                        _JOBS_RUNNING.pop(name, None)
+            return job
+
+        setattr(Plugin, name, make(name, original))
+
+
+def _update_busy(plugin) -> str:
+    """What is still running that an update would interrupt, or ""."""
+    if _DL_ACTIVE:
+        return "a download"
+    if _PROGRAM_RUNS:
+        return "a mod installer"
+    if any(not t.done() for t in _TOOL_APPLY_TASKS.values()):
+        return "a mod tool"
+    task = getattr(plugin, "_library_task", None)
+    if task is not None and not task.done():
+        return "the library check"
+    if _JOBS_RUNNING:
+        name = sorted(_JOBS_RUNNING)[0]
+        return "an install" if "install" in name else name.replace("_", " ")
+    return ""
+
+
+def _release_plugin_folder() -> None:
+    """Let go of anything this process holds under the plugin folder."""
+    if _INTEGRITY is not None:
+        _INTEGRITY.stop()  # its hash thread has a file open
+    try:
+        if forge_helpers.under(os.getcwd(), _PLUGIN_ROOT):
+            os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
+            os.chdir(decky.DECKY_PLUGIN_RUNTIME_DIR)
+    except (OSError, ImportError):
+        pass
+    import logging
+    for logger in (logging.getLogger(), decky.logger):
+        for h in list(getattr(logger, "handlers", [])):
+            path = getattr(h, "baseFilename", "")
+            if path and _norm_under(path, _PLUGIN_ROOT):
+                logger.removeHandler(h)
+                h.close()
+
+
+def _norm_under(path: str, root: str) -> bool:
+    try:
+        return forge_helpers.under(path, root)
+    except ImportError:
+        p, r = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(root))
+        return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
+
+
+async def _prepare_plugin_update(self, close_helpers: bool = False) -> dict:
+    """Get ready for Decky to replace the plugin folder.
+
+    Refuses while something is running that an update would interrupt.
+    Helper processes this backend started from its own folders are listed
+    first and closed only when close_helpers is true, after the user has
+    seen the list. Never touches any other process.
+    """
+    busy = _update_busy(self)
+    if busy:
+        return {"ok": False, "reason": "busy",
+                "message": f"Wait for {busy} to finish (or cancel it), then update."}
+    try:
+        found = await asyncio.to_thread(
+            forge_helpers.find, _PLUGIN_ROOT, decky.DECKY_PLUGIN_RUNTIME_DIR)
+    except Exception:  # noqa: BLE001 - a broken install must still be reinstallable
+        decky.logger.exception("update: could not list helper processes")
+        found = {"close": [], "blockers": []}
+    if found["blockers"]:
+        names = sorted({p["name"] for p in found["blockers"]})
+        return {"ok": False, "reason": "blocked", "helpers": names,
+                "message": f"Close {', '.join(names)} first: it is running from Forge's folder."}
+    if found["close"]:
+        names = sorted({p["name"] for p in found["close"]})
+        if not close_helpers:
+            return {"ok": False, "reason": "helpers_running", "helpers": names,
+                    "message": f"Forge will close {', '.join(names)} before updating."}
+        left = await asyncio.to_thread(
+            forge_helpers.stop, found["close"], _PLUGIN_ROOT, decky.DECKY_PLUGIN_RUNTIME_DIR)
+        decky.logger.info(f"update: closed {names}, still running {left}")
+        if left:
+            return {"ok": False, "reason": "helpers_stuck", "helpers": left,
+                    "message": f"{', '.join(left)} would not close. Close it, then update."}
+    _release_plugin_folder()
+    return {"ok": True, "closed": sorted({p["name"] for p in found["close"]})}
+
+
+def _short_version(version: str) -> str:
+    """'1.21.32-anygame.67' -> 'anygame.67', which is what the user sees."""
+    return version.rsplit("-", 1)[-1] if "-" in version else version
+
+
+class _IntegrityLog:
+    done = False
+
+
+async def _get_install_integrity(self) -> dict:
+    snap = _INTEGRITY.snapshot() if _INTEGRITY is not None else {
+        "status": "unknown", "version": "", "problems": [], "problem_count": 0, "import_failures": {}}
+    if _INTEGRITY is None and forge_integrity is None:
+        snap["import_failures"] = {"forge_integrity": "did not load"}
+    if snap["status"] == "broken" and not _IntegrityLog.done:
+        _IntegrityLog.done = True
+        decky.logger.error(f"install integrity: {snap['problem_count']} problems, e.g. {snap['problems']}")
+    expected = snap.get("version") or APP_VERSION
+    return {"ok": True, **snap, "running_version": APP_VERSION,
+            "expected_version": expected, "label": _short_version(expected)}
+
+
+async def _get_reinstall_target(self) -> dict:
+    """The current build from the release channel, to put a broken copy right.
+
+    make_release.sh publishes update-<version>.json beside update.json for
+    every build, naming a zip that stays put, so a build that is no longer the
+    newest can still be reinstalled. If neither names this version, the
+    newest is offered instead, saying so.
+    """
+    snap = _INTEGRITY.snapshot() if _INTEGRITY is not None else {}
+    version = snap.get("version") or APP_VERSION
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]{0,40}", version or ""):
+        return {"ok": False, "message": "This build does not know its own version."}
+
+    async def read(url: str) -> dict:
+        try:
+            data = json.loads(await _fetch_bytes(url + f"?t={int(time.time())}", 30))
+            out = {"version": str(data["version"]), "hash": str(data["hash"]),
+                   "artifact": str(data["artifact"])}
+        except Exception:  # noqa: BLE001 - not there is an answer too
+            return {}
+        if not _fork_artifact_trusted(out["artifact"]) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
+            return {}
+        return out
+
+    pinned = await read(f"{FORK_RAW}update-{version}.json")
+    if pinned.get("version") == version:
+        return {"ok": True, "same_version": True, **pinned, "label": _short_version(version)}
+    newest = await read(FORK_UPDATE_URL)
+    if newest.get("version") == version:
+        return {"ok": True, "same_version": True, **newest, "label": _short_version(version)}
+    if newest:
+        return {"ok": True, "same_version": False, **newest, "label": _short_version(newest["version"]),
+                "message": f"{_short_version(version)} is no longer on the release channel; "
+                           f"this installs {_short_version(newest['version'])}."}
+    return {"ok": False, "message": "The release channel could not be reached. Check the connection and try again."}
+
+
+Plugin.prepare_plugin_update = _prepare_plugin_update
+Plugin.get_install_integrity = _get_install_integrity
+Plugin.get_reinstall_target = _get_reinstall_target
+
+if _INTEGRITY is not None and _INTEGRITY.import_failures:
+    decky.logger.error(f"install integrity: modules failed to import: {_INTEGRITY.import_failures}")
+
+_wrap_jobs()

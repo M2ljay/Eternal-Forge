@@ -2816,3 +2816,41 @@ export const gbUpdateTarget = callable<
   [game_domain: string, mod_id: number, folder: string],
   { ok: boolean; error?: string; file?: { file_id: number; file_name: string; name: string; version: string } }
 >("gb_update_target");
+
+/** Before handing an update to Decky: refuses while a download or install
+ * runs, lists Forge's own helper tools still running and closes them when
+ * closeHelpers is true. See prepare_plugin_update in main.py. */
+export const preparePluginUpdate = callable<
+  [close_helpers?: boolean],
+  { ok: boolean; reason?: string; message?: string; helpers?: string[]; closed?: string[] }
+>("prepare_plugin_update");
+
+/** Is the installed copy the build its manifest says it is? */
+export const getInstallIntegrity = callable<
+  [],
+  {
+    ok: boolean;
+    status: string;
+    label?: string;
+    version?: string;
+    running_version?: string;
+    expected_version?: string;
+    problems?: string[];
+    problem_count?: number;
+    import_failures?: Record<string, string>;
+  }
+>("get_install_integrity");
+
+/** The current build from the release channel, to reinstall it. */
+export const getReinstallTarget = callable<
+  [],
+  {
+    ok: boolean;
+    same_version?: boolean;
+    version?: string;
+    artifact?: string;
+    hash?: string;
+    label?: string;
+    message?: string;
+  }
+>("get_reinstall_target");

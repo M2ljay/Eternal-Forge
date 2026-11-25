@@ -9,6 +9,7 @@ anything that would hit the Nexus Mods API raises immediately.
 
 import ast
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -17673,12 +17674,75 @@ class TestReleaseZipGate(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _zip(self, entries: dict, name="rel.zip") -> str:
+    def _zip(self, entries: dict, name="rel.zip", manifest=True) -> str:
+        """The entries, with a true install manifest stored first (as
+        make_release.sh builds it) when they all sit in the plugin folder."""
         path = os.path.join(self.tmp, name)
+        prefix = self.folder + "/"
         with zipfile.ZipFile(path, "w") as z:
+            if manifest and entries and all(k.startswith(prefix) for k in entries):
+                z.writestr(prefix + "forge-manifest.json", self._manifest(entries))
             for rel, body in entries.items():
                 z.writestr(rel, body)
         return path
+
+    def _manifest(self, entries: dict, version=None) -> str:
+        prefix = self.folder + "/"
+        if version is None:
+            try:
+                version = json.loads(entries.get(prefix + "package.json", "{}")).get("version")
+            except ValueError:
+                version = None
+        files = []
+        for rel, body in sorted(entries.items()):
+            data = body.encode() if isinstance(body, str) else body
+            files.append({"path": rel[len(prefix):], "size": len(data),
+                          "sha256": hashlib.sha256(data).hexdigest()})
+        return json.dumps({"format": 1, "version": version, "files": files})
+
+    def test_a_zip_without_the_install_manifest_is_refused(self):
+        """anygame.67: the backend checks the installed copy against it to
+        catch a Windows update that stopped part-way."""
+        problems = self.check(self._zip(self._good_entries(), manifest=False),
+                              self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("forge-manifest.json" in p for p in problems), problems)
+
+    def test_the_manifest_must_come_first(self):
+        """Decky extracts in zip order and stops at the first file Windows
+        refuses: a manifest stored last is the one most likely to be lost."""
+        entries = self._good_entries()
+        path = os.path.join(self.tmp, "last.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(entries))
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("first file" in p for p in problems), problems)
+
+    def test_a_manifest_that_disagrees_with_its_zip_is_refused(self):
+        """It would tell every user their fresh install is broken."""
+        entries = self._good_entries()
+        stale = dict(entries)
+        stale[f"{self.folder}/main.py"] = "y"  # same size, other bytes
+        del stale[f"{self.folder}/README.md"]
+        path = os.path.join(self.tmp, "stale.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(stale))
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("sha256 of main.py" in p for p in problems), problems)
+        self.assertTrue(any("does not list README.md" in p for p in problems), problems)
+
+    def test_a_manifest_for_another_version_is_refused(self):
+        entries = self._good_entries()
+        path = os.path.join(self.tmp, "oldmanifest.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(entries, version="1.0.0"))
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("is for '1.0.0'" in p for p in problems), problems)
 
     def _good_entries(self, top=None, version="9.9.9", name=None):
         top = top if top is not None else self.folder

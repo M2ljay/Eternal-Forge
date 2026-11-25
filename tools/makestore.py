@@ -143,6 +143,8 @@ def check_zip(zip_path: str, plugin_name: str, version: str,
         except (KeyError, OSError):
             pass  # a missing dist/index.js is reported above
 
+        problems += _check_manifest(zip_path, infos, folder, version)
+
     # The version in the zip is the one that will run, whatever the
     # filename claims.
     try:
@@ -158,6 +160,55 @@ def check_zip(zip_path: str, plugin_name: str, version: str,
             )
     except (KeyError, OSError, ValueError):
         pass  # already reported as a missing file above
+    return problems
+
+
+MANIFEST = "forge-manifest.json"
+
+
+def _check_manifest(zip_path: str, infos: list, folder: str, version: str) -> list:
+    """The install manifest must be there, first, and true to the zip.
+
+    The backend checks the installed plugin against it at start
+    (py_modules/forge_integrity.py) and tells the user when a Windows update
+    stopped part-way. FIRST because Decky extracts in zip order and stops at
+    the first file Windows refuses: only a manifest written before the rest
+    survives to describe what is missing. True to the zip because a manifest
+    that disagrees with its own build would tell every user their install is
+    broken.
+    """
+    name = f"{folder}/{MANIFEST}"
+    files = [i for i in infos if not i.filename.endswith("/")]
+    if not any(i.filename == name for i in files):
+        return [f"missing {name} (build with tools/make_release.sh)"]
+    problems = []
+    if files[0].filename != name:
+        problems.append(f"{name} must be the zip's first file, not {files[0].filename!r}")
+    z = zipfile.ZipFile(zip_path)
+    try:
+        manifest = json.loads(z.read(name).decode("utf-8"))
+        listed = {e["path"]: e for e in manifest["files"]}
+    except (ValueError, KeyError, TypeError) as exc:
+        return problems + [f"{name} cannot be read: {exc}"]
+    if manifest.get("format") != 1:
+        problems.append(f"{name} is format {manifest.get('format')!r}, expected 1")
+    if manifest.get("version") != version:
+        problems.append(f"{name} is for {manifest.get('version')!r}, not {version!r}")
+    in_zip = {}
+    for i in files:
+        if i.filename == name or not i.filename.startswith(folder + "/"):
+            continue
+        in_zip[i.filename[len(folder) + 1:]] = i
+    for rel in sorted(set(in_zip) - set(listed)):
+        problems.append(f"{name} does not list {rel}")
+    for rel in sorted(set(listed) - set(in_zip)):
+        problems.append(f"{name} lists {rel}, which is not in the zip")
+    for rel in sorted(set(in_zip) & set(listed)):
+        e, info = listed[rel], in_zip[rel]
+        if e.get("size") != info.file_size:
+            problems.append(f"{name}: size of {rel} is {e.get('size')}, zip has {info.file_size}")
+        elif e.get("sha256") != hashlib.sha256(z.read(info)).hexdigest():
+            problems.append(f"{name}: sha256 of {rel} does not match the zip")
     return problems
 
 

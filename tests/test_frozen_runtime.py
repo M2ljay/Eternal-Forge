@@ -62,6 +62,10 @@ CHILD = textwrap.dedent(r'''
     spec = importlib.util.spec_from_file_location("forge_main", os.path.join(root, "main.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    if len(sys.argv) > 3:  # a caller's own checks (test_install_integrity.py)
+        exec(sys.argv[3], {"mod": mod})
+        print("frozen import OK")
+        sys.exit(0)
     import gamebanana, vr_feed
     text, _ = gamebanana.html_to_text("<p>Hello <b>there</b></p><ul><li>one</li></ul>")
     assert "Hello there" in text and "one" in text, text

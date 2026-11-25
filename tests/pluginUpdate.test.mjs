@@ -4,12 +4,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DECKY_INSTALL_TYPE_REINSTALL,
   DECKY_INSTALL_TYPE_UPDATE,
   FORK_RELEASE_RAW,
   PLUGIN_NAME,
   UPDATE_WAIT_MS,
   canSelfUpdate,
   formatReleaseNotes,
+  handOffToDecky,
+  integrityNotice,
   isNewerVersion,
   pluginUpdateBlocked,
   pluginUpdateBody,
@@ -338,4 +341,95 @@ test("notes with no headings at all are still shown rather than swallowed", () =
   const lines = formatReleaseNotes(plain);
   assert.ok(lines.length >= 1, "plain notes were dropped entirely");
   assert.match(lines.join("\n"), /Fixed a crash/);
+});
+
+// --- anygame.67: never hand Decky a plugin that is still busy ---------------
+// Decky v3.3.1 deletes the folder and extracts over it; on Windows both stop
+// at the first file still held, leaving a half-copied plugin.
+
+function hooks({ first, second, confirm = true }) {
+  const calls = [];
+  return {
+    calls,
+    prepare: async (close) => {
+      calls.push(close ? "prepare(close)" : "prepare");
+      return close ? second : first;
+    },
+    confirmClose: async (helpers) => {
+      calls.push(`confirm ${helpers.join(",")}`);
+      return confirm;
+    },
+  };
+}
+
+test("a busy plugin is not handed to Decky", async () => {
+  let called = false;
+  const h = hooks({ first: { ok: false, reason: "busy", message: "Wait for a download to finish" } });
+  const err = await withRouter(() => requestPluginUpdate(GOOD, h), { call: async () => { called = true; } });
+  assert.equal(called, false);
+  assert.match(err, /download/);
+});
+
+test("Forge's own tools are closed only after the user agrees", async () => {
+  let seen;
+  const h = hooks({
+    first: { ok: false, reason: "helpers_running", helpers: ["7z.exe"], message: "Forge will close 7z.exe" },
+    second: { ok: true, closed: ["7z.exe"] },
+  });
+  const err = await withRouter(() => requestPluginUpdate(GOOD, h), { call: async (...a) => { seen = a; } });
+  assert.equal(err, "");
+  assert.deepEqual(h.calls, ["prepare", "confirm 7z.exe", "prepare(close)"]);
+  assert.equal(seen[0], "utilities/install_plugin");
+
+  let called = false;
+  const no = hooks({ first: { ok: false, reason: "helpers_running", helpers: ["x.exe"] }, confirm: false });
+  const err2 = await withRouter(() => requestPluginUpdate(GOOD, no), { call: async () => { called = true; } });
+  assert.equal(called, false, "declined, yet Decky was asked");
+  assert.match(err2, /cancelled/);
+  assert.deepEqual(no.calls, ["prepare", "confirm x.exe"]);
+});
+
+test("a backend too broken to answer cannot block its own repair", async () => {
+  let seen;
+  const h = { prepare: async () => { throw new Error("no such method"); }, confirmClose: async () => true };
+  const prevWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const err = await withRouter(
+      () => handOffToDecky({ ...GOOD }, DECKY_INSTALL_TYPE_REINSTALL, h),
+      { call: async (...a) => { seen = a; } }
+    );
+    assert.equal(err, "");
+  } finally {
+    console.warn = prevWarn;
+  }
+  assert.equal(seen[5], 1, "REINSTALL in Decky's PluginInstallType");
+  assert.equal(DECKY_INSTALL_TYPE_REINSTALL, 1);
+});
+
+test("a reinstall target is held to the same trust rules", async () => {
+  let called = false;
+  const err = await withRouter(
+    () => handOffToDecky({ ...GOOD, artifact: REAL.replace("Nexus-Mods.zip", "../../x/y.zip") }, 1),
+    { call: async () => { called = true; } }
+  );
+  assert.equal(called, false);
+  assert.match(err, /could not be verified/);
+  assert.equal(trustedArtifact(REAL.replace("Nexus-Mods.zip", "Nexus-Mods-1.21.32-anygame.67.zip")), true,
+    "the pinned per-version zip must be installable");
+});
+
+test("the integrity notice is plain and only shown when needed", () => {
+  assert.equal(integrityNotice(undefined), "");
+  assert.equal(integrityNotice({ ok: true, status: "ok" }), "");
+  assert.equal(integrityNotice({ ok: true, status: "checking" }), "");
+  assert.equal(integrityNotice({ ok: true, status: "no_manifest" }), "");
+  assert.equal(
+    integrityNotice({ ok: true, status: "broken", label: "anygame.67" }),
+    "Forge's last update didn't finish copying. Reinstall anygame.67."
+  );
+  assert.match(
+    integrityNotice({ ok: true, status: "ok", label: "anygame.67", import_failures: { vr_feed: "SyntaxError" } }),
+    /vr_feed.*Reinstall anygame\.67/
+  );
 });

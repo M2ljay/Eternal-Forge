@@ -33,6 +33,7 @@ import {
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { VrReleases } from "./VrReleases";
 import { UpdateHoldSection } from "./UpdateHold";
+import { UPDATE_HOOKS } from "./safeUpdate";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -300,7 +301,7 @@ export function UpdatesPage() {
                   disabled={selfWaiting}
                   onClick={async () => {
                     setSelfSentAt(Date.now());
-                    const err = await requestPluginUpdate(self);
+                    const err = await requestPluginUpdate(self, UPDATE_HOOKS);
                     if (err) {
                       setSelfSentAt(0);
                       toaster.toast({ title: "Forge", body: err });

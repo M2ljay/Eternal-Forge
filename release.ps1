@@ -68,8 +68,9 @@ if (Test-Path $out) { Remove-Item -Force $out }
 # FILE" forever. Python's zipfile writes forward slashes, which is what the
 # format specifies. The bug is invisible on Windows, where the separators
 # are normalised away on read: it took listing the entries on the device.
-$pyFile = Join-Path $env:TEMP "decky-nexus-zip.py"
-Copy-Item (Join-Path $root "tools\makezip.py") $pyFile
+# Run in place: it imports tools\make_manifest.py, which writes the
+# install manifest into the zip (and that imports py_modules\forge_integrity.py).
+$pyFile = Join-Path $root "tools\makezip.py"
 # Same reason as the build above: anything python writes to stderr, warnings
 # included, would otherwise be fatal. The exit code is the verdict.
 $ErrorActionPreference = "Continue"

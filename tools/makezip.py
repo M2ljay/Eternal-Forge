@@ -14,13 +14,25 @@ import os
 import sys
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import make_manifest  # noqa: E402
+
+MANIFEST = make_manifest.forge_integrity.MANIFEST
+
 
 def main(stage: str, out: str) -> int:
+    # The stage holds the plugin's one folder. Its manifest goes in first
+    # (see make_manifest.py for why first).
+    (top,) = [d for d in os.listdir(stage) if os.path.isdir(os.path.join(stage, d))]
+    manifest = make_manifest.write(os.path.join(stage, top))
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(manifest, f"{top}/{MANIFEST}")
         for root, _dirs, files in os.walk(stage):
             for name in sorted(files):
                 full = os.path.join(root, name)
                 rel = os.path.relpath(full, stage).replace(os.sep, "/")
+                if rel == f"{top}/{MANIFEST}":
+                    continue
                 z.write(full, rel)
     names = zipfile.ZipFile(out).namelist()
     bad = [n for n in names if "\\" in n]

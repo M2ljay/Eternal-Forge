@@ -115,6 +115,7 @@ import {
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
 import type { PluginUpdate } from "./pluginUpdate";
+import { IntegrityNotice } from "./safeUpdate";
 import {
   crashHuntVerdict,
   crashSuspect,
@@ -4655,6 +4656,7 @@ function Content() {
     <>
       <ScrollToTopOnMount />
       <VersionBadge />
+      <IntegrityNotice />
       <PanelSection>
         <UpdatesButton scopedGame={ctx.game} />
         <DownloadsButton />

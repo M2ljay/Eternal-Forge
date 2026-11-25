@@ -14,6 +14,15 @@ key), data and logs under its folder name, so updating from a build called
 [M2ljay/Eternal-Forge](https://github.com/M2ljay/Eternal-Forge) (`update.json`
 and `Nexus-Mods.zip`, built by `tools/make_release.sh`).
 
+Since anygame.67 each build also publishes `Nexus-Mods-<version>.zip` and
+`update-<version>.json` (kept on the branch), and its zip carries
+`forge-manifest.json`. On Windows, Decky can leave a half-copied plugin when a
+file is still in use, so before handing an update to Decky Forge waits for
+downloads and installs to finish and closes the helper tools it started from
+its own folders (after asking). At start it checks the installed files against
+the manifest, and if they don't match the panel says the last update didn't
+finish copying and offers to reinstall that build.
+
 ## Upstream: Nexus Mods Decky Loader Plugin (Unofficial)
 
 Browse, download, install, and enable/disable [Nexus Mods](https://www.nexusmods.com) content for the currently selected game, entirely from Gaming Mode with a controller, on SteamOS and Bazzite. No Desktop Mode required.
