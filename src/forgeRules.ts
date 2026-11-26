@@ -1,0 +1,190 @@
+// Forge rules that do not need Steam or the backend: what the game page's
+// Mods section shows, the tile-dot stylesheet, and the patch's failure
+// budget. Self-contained on purpose (no imports) so tests/forge.test.mjs
+// compiles this one file and checks it under node.
+
+/** Forge palette: AMOLED black, crimson for accents and problems, steel
+ * for secondary text, gunmetal surfaces. No glow, no haze. */
+export const FORGE_BLACK = "#000000";
+export const FORGE_CRIMSON = "#D7263D";
+export const FORGE_STEEL = "#C9D1D9";
+export const FORGE_GUNMETAL = "#1A1D21";
+
+// ---- Patch failure budget ----------------------------------------------------
+// The game page is Steam's, not ours. Any error in the patch or in the
+// section leaves the page as Steam drew it, and after this many in one
+// session the patch stops trying until the plugin reloads.
+export const PATCH_FAILURE_LIMIT = 3;
+
+export class FailureBudget {
+  private failures = 0;
+  constructor(private readonly limit: number = PATCH_FAILURE_LIMIT) {}
+  /** Count one failure; true when that one used the budget up. */
+  fail(): boolean {
+    this.failures += 1;
+    return this.failures === this.limit;
+  }
+  get disabled(): boolean {
+    return this.failures >= this.limit;
+  }
+  get count(): number {
+    return this.failures;
+  }
+}
+
+// ---- What the section shows --------------------------------------------------
+
+export type SectionMode = "hidden" | "locked" | "setup" | "mods";
+
+export function sectionMode(o: {
+  managed: boolean;
+  locked: boolean;
+  experimental: boolean;
+  enabledSetting: boolean;
+}): SectionMode {
+  if (!o.enabledSetting) return "hidden";
+  // A locked game says so even when the plugin does not manage it: that is
+  // the moment someone is about to mod it some other way.
+  if (o.locked && (o.managed || o.experimental)) return "locked";
+  if (o.managed) return "mods";
+  return o.experimental ? "setup" : "hidden";
+}
+
+export interface ModLike {
+  folder: string;
+  enabled: boolean;
+  togglable?: boolean;
+}
+
+/** The {folder: on} set the crash guard compares. Mods without a switch
+ * are left out: nothing can restore them, so they cannot be blamed. */
+export function modSet(mods: ModLike[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const m of mods) {
+    if (m.togglable === false) continue;
+    out[m.folder] = Boolean(m.enabled);
+  }
+  return out;
+}
+
+/** Rows shown on the game page before "Show all": enough to see what is
+ * going on, few enough that Play stays one or two presses away. Mods with
+ * an update and mods that are on come first. */
+export const GAME_PAGE_ROWS = 6;
+
+export function rowsToShow<T extends ModLike>(
+  mods: T[],
+  updates: Set<string>,
+  limit = GAME_PAGE_ROWS
+): T[] {
+  const rank = (m: T) => (updates.has(m.folder) ? 0 : m.enabled ? 1 : 2);
+  return [...mods]
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, Math.max(0, limit));
+}
+
+export function countLabel(mods: ModLike[]): string {
+  const on = mods.filter((m) => m.enabled).length;
+  if (mods.length === 0) return "No mods installed";
+  return `${on} of ${mods.length} on`;
+}
+
+export interface AntiCheatVerdict {
+  detected: boolean;
+  locked: boolean;
+  products: string[];
+  source: string;
+  marker?: string;
+  name?: string;
+  override_allowed: boolean;
+  override_on: boolean;
+  offline_note?: string;
+}
+
+export function lockHeadline(v: AntiCheatVerdict): string {
+  const what = v.products.length ? v.products.join(" + ") : "anti-cheat";
+  return `Mods locked - ${what}`;
+}
+
+export function lockBody(v: AntiCheatVerdict): string {
+  const why =
+    v.source === "folder"
+      ? `Anti-cheat files are in the game folder (${v.marker || "found"}).`
+      : "This game is known to run anti-cheat on your PC.";
+  return (
+    `${why} Installing or switching on mods is off for this game to protect your ` +
+    "account. Switching mods off still works."
+  );
+}
+
+export interface RestorePlan {
+  changes: { folder: string; enabled: boolean }[];
+  missing: string[];
+  lkg_at: number;
+  vanilla: boolean;
+}
+
+export function offerBody(plan: RestorePlan, names: Record<string, string> = {}): string {
+  const off = plan.changes.filter((c) => !c.enabled);
+  const on = plan.changes.filter((c) => c.enabled);
+  const label = (f: string) => names[f] ?? f;
+  const parts: string[] = [];
+  if (off.length) parts.push(`switch off ${off.length} (${off.slice(0, 3).map((c) => label(c.folder)).join(", ")}${off.length > 3 ? ", ..." : ""})`);
+  if (on.length) parts.push(`switch back on ${on.length}`);
+  const target = plan.vanilla
+    ? "There is no clean run on record, so this switches every mod off."
+    : `Back to the mods of the last run that worked${plan.lkg_at ? ` (${new Date(plan.lkg_at * 1000).toLocaleDateString()})` : ""}.`;
+  const what = parts.length ? ` It will ${parts.join(" and ")}.` : " Nothing needs switching.";
+  const gone = plan.missing.length
+    ? ` ${plan.missing.length} mod${plan.missing.length === 1 ? " was" : "s were"} removed since and stay${plan.missing.length === 1 ? "s" : ""} removed.`
+    : "";
+  return `${target}${what}${gone} Nothing is deleted, and it can be undone.`;
+}
+
+// ---- Tile dots ---------------------------------------------------------------
+// One stylesheet in Steam's main window. Pure CSS on purpose: a selector
+// that matches nothing does nothing, so a Steam update that renames its
+// markup removes the dots and never breaks a tile. The capsule <img> carries
+// the app id in its URL (library_600x900 for portraits, <appid>p.<ext> for
+// custom art); :has() puts the dot on the image's wrapper.
+
+export const DOT_STYLE_ID = "forge-update-dots";
+
+export function dotCss(appIds: number[]): string {
+  const ids = [...new Set(appIds.filter((a) => Number.isInteger(a) && a > 0))].sort(
+    (a, b) => a - b
+  );
+  if (ids.length === 0) return "";
+  const imgs = ids
+    .flatMap((id) => [
+      `img[src*="/${id}/library_600x900"]`,
+      `img[src*="/${id}/library_capsule"]`,
+      `img[src*="/${id}p."]`,
+    ])
+    .join(",");
+  return (
+    `:is(div):has(> :is(${imgs}))::after{` +
+    'content:"";position:absolute;top:8px;right:8px;width:12px;height:12px;' +
+    `border-radius:50%;background:${FORGE_CRIMSON};border:2px solid ${FORGE_BLACK};` +
+    "z-index:5;pointer-events:none;box-sizing:border-box;}"
+  );
+}
+
+/** App ids whose game has at least one mod update waiting. */
+export function appsWithUpdates(
+  games: { appId: number; nexusDomain: string }[],
+  counts: Record<string, { count: number }>
+): number[] {
+  return games
+    .filter((g) => (counts[g.nexusDomain]?.count ?? 0) > 0)
+    .map((g) => g.appId);
+}
+
+// ---- Crash guard toast ---------------------------------------------------------
+
+export function offerToast(gameName: string): { title: string; body: string } {
+  return {
+    title: "Restore last working mods?",
+    body: `${gameName} closed early twice since its mods changed. Open its page to go back - nothing is deleted.`,
+  };
+}

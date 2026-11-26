@@ -7,6 +7,7 @@ import {
   Focusable,
   ScrollPanelGroup,
   SliderField,
+  ToggleField,
 } from "@decky/ui";
 import { useEffect, useState } from "react";
 
@@ -15,6 +16,23 @@ import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { ExperimentalToggle } from "./ExperimentalSetup";
 import { LibraryScan } from "./LibraryScan";
+import { ForgeSetting, getForgeSetting, setForgeSetting } from "./forgeSettings";
+
+/** One of Forge's frontend switches, kept in step with its stored value. */
+function ForgeToggle({ name, label, description }: { name: ForgeSetting; label: string; description: string }) {
+  const [on, setOn] = useState(() => getForgeSetting(name));
+  return (
+    <ToggleField
+      label={label}
+      description={description}
+      checked={on}
+      onChange={(v: boolean) => {
+        setForgeSetting(name, v);
+        setOn(v);
+      }}
+    />
+  );
+}
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -277,6 +295,19 @@ export function SettingsPage() {
                 step={1}
                 showValue={false}
                 onChange={(v: number) => update({ min_free_gb: v })}
+              />
+            </Section>
+
+            <Section title="Game page" blurb="Forge on Steam's own library pages">
+              <ForgeToggle
+                name="gamePage"
+                label="Mods section on game pages"
+                description="Installed mods, their switches and updates, Add mods, the anti-cheat lock and the way back after a crash, above Play on each game's page. Turn off to leave Steam's page untouched."
+              />
+              <ForgeToggle
+                name="tileDots"
+                label="Update dots on game tiles"
+                description="A small crimson dot on library and home tiles of games with mod updates. Checked against Nexus at most every six hours per game."
               />
             </Section>
 

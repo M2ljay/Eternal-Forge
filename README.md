@@ -377,3 +377,32 @@ Curated games are unaffected. The helpers are in
 `py_modules/experimental_games.py`. The fork also finds Steam on Windows
 (registry), extracts archives with Windows' built-in `tar.exe` or 7-Zip, and
 registers the `nxm://` handler in the Windows registry.
+
+## Fork: Forge on the game page
+
+Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
+
+- **Mods section on Steam's game page.** Above Play on a game's library
+  page: mods on/total, updates, up to six mods with a switch each, Open /
+  Update, Add mods and My Mods. Controller only; B from a page opened here
+  returns to the game page. Any error leaves Steam's page untouched, and the
+  section switches itself off for the session after three.
+- **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
+  BattlEye, Vanguard, Ricochet, FACEIT, EA Javelin, GameGuard...) are locked:
+  installs and switching mods on are refused by the backend, not just hidden.
+  Switching off always works. Sources: a 500-game list generated from
+  AreWeAntiCheatYet (MIT) and the anti-cheat file markers Core's Gaming Mode
+  uses. Games with an offline or anti-cheat-off mode (Elden Ring, GTA V story
+  mode, ...) can be unlocked per game behind a confirmation; online-only
+  competitive games cannot. Elden Ring and Helldivers 2 start locked.
+- **Way back after a crash.** A run of at least 60 seconds with no Windows
+  crash report makes its mods the last known good set. Two shorter (or
+  crashed) runs in a row after a mod change bring one notification and an
+  offer on the game page to restore that set - by switching mods only,
+  never deleting, with Undo.
+- **Update dots.** A crimson dot on library and home tiles of games with mod
+  updates, from a six-hour cache of Nexus versions (three games per check at
+  most, also filled by the Updates page). Pure CSS that matches nothing if
+  Steam changes its markup.
+
+Both game page features can be turned off in Settings, under **Game page**.

@@ -114,6 +114,13 @@ import {
 } from "./api";
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
+import { registerGamePagePatch, unregisterGamePagePatch } from "./gamePagePatch";
+import {
+  guardGameStarted,
+  guardGameStopped,
+  registerManagedGames,
+  startForgeBackground,
+} from "./forge";
 import type { PluginUpdate } from "./pluginUpdate";
 import {
   crashHuntVerdict,
@@ -4690,10 +4697,12 @@ function Content() {
 
 export default definePlugin(() => {
   console.log("Nexus Mods plugin initializing");
-  void loadExperimentalState();
+  // Forge's anti-cheat gate needs every managed game's domain and app id,
+  // experimental ones included, so registration follows the state load.
+  void loadExperimentalState().then(registerManagedGames);
   const experimentalListener = addEventListener(
     "experimental_changed",
-    () => void loadExperimentalState()
+    () => void loadExperimentalState().then(registerManagedGames)
   );
   const toolListener = addEventListener<
     [domain: string, result: { ok: boolean; count?: number; error?: string; tool?: string; fetched?: string[]; missing?: string[]; restart?: boolean }]
@@ -4750,6 +4759,10 @@ export default definePlugin(() => {
   routerHook.addRoute(MANAGER_ROUTE, ManagerPage, { exact: true });
   routerHook.addRoute(LOAD_ORDER_ROUTE, LoadOrderPage, { exact: true });
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage, { exact: true });
+  // Forge: the Mods section on Steam's game page, the tile dots and the
+  // crash guard's game-start bookkeeping.
+  registerGamePagePatch();
+  const stopForge = startForgeBackground();
 
   // Feed the QAM Downloads section from anywhere in the UI.
   const progressListener = addEventListener<[p: InstallProgress]>(
@@ -4782,6 +4795,10 @@ export default definePlugin(() => {
   ).GameSessions?.RegisterForAppLifetimeNotifications?.((e) => {
     const game = getSupportedGame(e.unAppID);
     if (!game) return;
+    // Forge's way back after a crash: the mod set at start, the run's
+    // length at exit.
+    if (e.bRunning) guardGameStarted(e.unAppID);
+    else guardGameStopped(e.unAppID);
     if (!e.bRunning) {
       // Mods that failed constantly this session go off now, not after
       // the user notices and hunts for a switch: the plugin's job, not
@@ -4879,6 +4896,9 @@ export default definePlugin(() => {
       routerHook.removeRoute(MANAGER_ROUTE);
       routerHook.removeRoute(LOAD_ORDER_ROUTE);
       routerHook.removeRoute(SETTINGS_ROUTE);
+      routerHook.removeRoute(HEALTH_ROUTE);
+      unregisterGamePagePatch();
+      stopForge();
       removeEventListener("backend_event", listener);
       removeEventListener("install_progress", progressListener);
       removeEventListener("experimental_changed", experimentalListener);
