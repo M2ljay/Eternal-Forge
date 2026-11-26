@@ -18,6 +18,7 @@ import {
   lockBody,
   lockHeadline,
   modSet,
+  overrideLabel,
   offerBody,
   rowsToShow,
   sectionMode,
@@ -86,6 +87,14 @@ test("the lock says what was found and that switching off still works", () => {
   assert.match(lockBody(listed), /Switching mods off still works/);
   const folder = { ...listed, source: "folder", marker: "BattlEye" };
   assert.match(lockBody(folder), /BattlEye/);
+});
+
+test("the one-press bypass states the risk on the button itself", () => {
+  const base = { detected: true, locked: true, products: ["Ricochet"], source: "list", override_allowed: true, override_on: false };
+  assert.match(overrideLabel({ ...base, risk: "ban" }), /may get this account banned/);
+  assert.match(overrideLabel({ ...base, risk: "offline" }), /offline only/);
+  assert.doesNotMatch(overrideLabel({ ...base, risk: "offline" }), /banned/);
+  assert.match(lockBody({ ...base, risk: "ban" }), /can get the account banned/);
 });
 
 // ---- restore offer --------------------------------------------------------------
@@ -157,13 +166,18 @@ test("the section never takes focus from Play", () => {
   assert.ok(!/\.focus\(\)/.test(src));
 });
 
-test("mods are switched through install.ts, and the override only after a confirmation", () => {
+test("mods are switched through install.ts, and the bypass is one press with its risk as the label", () => {
   const src = readCode("GameModsSection.tsx");
   assert.match(src, /import \{ toggleMod \} from "\.\/install"/);
-  const ask = src.indexOf("const askOverride");
-  const call = src.indexOf("forgeSetAnticheatOverride(appId, true");
-  assert.ok(ask > 0 && call > ask, "the override call lives inside the confirmation");
-  assert.match(src.slice(ask, call), /<ConfirmModal[\s\S]*bDestructiveWarning=\{true\}/);
+  assert.match(src, /onClick=\{allowAnyway\}>\s*\{overrideLabel\(ac\)\}/);
+  const allow = src.slice(src.indexOf("const allowAnyway"), src.indexOf("const relock"));
+  assert.ok(!/showModal|ConfirmModal/.test(allow), "no dialog in front of the bypass");
+  assert.match(src, /Lock mods again/);
+  const qam = readCode("ForgeLock.tsx");
+  assert.match(qam, /\{overrideLabel\(v\)\}/);
+  assert.match(qam, /Lock mods again/);
+  assert.ok(!/showModal|ConfirmModal/.test(qam));
+  assert.match(readCode("index.tsx"), /<ForgeLockSection game=\{ctx\.game\} \/>/);
 });
 
 test("focus styles use the palette and never glow", () => {

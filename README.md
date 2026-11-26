@@ -392,9 +392,10 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   installs and switching mods on are refused by the backend, not just hidden.
   Switching off always works. Sources: a 500-game list generated from
   AreWeAntiCheatYet (MIT) and the anti-cheat file markers Core's Gaming Mode
-  uses. Games with an offline or anti-cheat-off mode (Elden Ring, GTA V story
-  mode, ...) can be unlocked per game behind a confirmation; online-only
-  competitive games cannot. Elden Ring and Helldivers 2 start locked.
+  uses. Every locked game has a one-press "Allow mods anyway" on the game
+  page and in the QAM, labelled with its risk ("play modded offline only"
+  for games with an offline mode, "may get this account banned" for the
+  rest), and "Lock mods again". Elden Ring and Helldivers 2 start locked.
 - **Way back after a crash.** A run of at least 60 seconds with no Windows
   crash report makes its mods the last known good set. Two shorter (or
   crashed) runs in a row after a mod change bring one notification and an

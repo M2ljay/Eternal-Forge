@@ -24,7 +24,6 @@ import {
   forgeGuardPlan,
   forgeGuardRestored,
   forgeGuardUndone,
-  forgeSetAnticheatOverride,
   forgeUpdateDots,
   getInstalledMods,
   getModDetails,
@@ -42,10 +41,12 @@ import {
   lockHeadline,
   modSet,
   offerBody,
+  overrideLabel,
   rowsToShow,
   sectionMode,
 } from "./forgeRules";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
+import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
 import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } from "./games";
 import { toggleMod } from "./install";
 import { notifyGameStateChanged, setBrowseGame, setDetailOrigin, setSelectedMod, subscribeGameState } from "./state";
@@ -291,31 +292,15 @@ export function GameModsSection({ appId }: { appId: number }) {
       });
     });
 
-  const askOverride = () =>
-    showModal(
-      <ConfirmModal
-        strTitle="Allow mods for this game?"
-        strDescription={
-          `${ac.offline_note ? ac.offline_note + " " : ""}` +
-          "Only do this if you play this game modded offline, or with its anti-cheat switched off. " +
-          "A modded game that connects online can get your account banned, and the plugin cannot stop that. " +
-          "You can lock it again here at any time."
-        }
-        strOKButtonText="I understand - allow mods"
-        strCancelButtonText="Keep locked"
-        bDestructiveWarning={true}
-        onOK={() =>
-          void run(async () => {
-            const r = await forgeSetAnticheatOverride(appId, true, "I understand");
-            if (!r.ok) toaster.toast({ title: "Still locked", body: r.error ?? "" });
-          })
-        }
-      />
-    );
+  // One press: the label carries the risk (see ForgeLock.tsx).
+  const allowAnyway = () =>
+    void run(async () => {
+      await allowModsAnyway(appId);
+    });
 
   const relock = () =>
     void run(async () => {
-      await forgeSetAnticheatOverride(appId, false, "");
+      await lockModsAgain(appId);
     });
 
   const shown = expanded ? list : rowsToShow(list, updates);
@@ -346,7 +331,7 @@ export function GameModsSection({ appId }: { appId: number }) {
             {updates.size} update{updates.size === 1 ? "" : "s"}
           </Chip>
         )}
-        {ac.detected && ac.override_on && <Chip crimson>Anti-cheat lock overridden</Chip>}
+        {ac.detected && ac.override_on && <Chip crimson>{overrideOnLabel(ac)}</Chip>}
       </div>
 
       {locked && (
@@ -457,8 +442,8 @@ export function GameModsSection({ appId }: { appId: number }) {
           </Button>
         )}
         {locked && ac.override_allowed && (
-          <Button disabled={busy} onClick={askOverride}>
-            Allow mods...
+          <Button disabled={busy} onClick={allowAnyway}>
+            {overrideLabel(ac)}
           </Button>
         )}
         {ac.detected && ac.override_on && (

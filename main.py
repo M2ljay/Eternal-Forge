@@ -37588,6 +37588,10 @@ async def _forge_game_status(self, app_id: int, game_domain: str = "", install_d
 
 async def _forge_set_anticheat_override(self, app_id: int, enabled: bool,
                                         acknowledgement: str = "") -> dict:
+    """One press from the game page or the QAM, no dialog: the risk is in
+    the button's own label. The flag is what the install gate reads, so
+    nothing unlocks a game but this call. `acknowledgement` is kept for the
+    frontend's call shape and not checked."""
     app_id = int(app_id or 0)
     if not app_id:
         return {"ok": False, "error": "No game"}
@@ -37595,11 +37599,9 @@ async def _forge_set_anticheat_override(self, app_id: int, enabled: bool,
         st = _forge_state()
         if enabled:
             v = _forge_verdict(app_id, st=st)
-            if not v["override_allowed"]:
-                return {"ok": False, "error": "This game is online-only; mods stay locked."}
-            if acknowledgement != forge_guard.OVERRIDE_ACK:
-                return {"ok": False, "error": "The override needs a confirmation."}
-            st["overrides"][str(app_id)] = {"at": int(time.time())}
+            if not v["detected"]:
+                return {"ok": False, "error": "This game has no anti-cheat lock."}
+            st["overrides"][str(app_id)] = {"at": int(time.time()), "risk": v.get("risk", "ban")}
         else:
             st["overrides"].pop(str(app_id), None)
         _forge_write(FORGE_STATE, st)

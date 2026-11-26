@@ -86,12 +86,20 @@ class VerdictTests(unittest.TestCase):
         self.assertTrue(v["locked"])
         self.assertEqual(v["source"], "list")
 
-    def test_override_unlocks_only_where_allowed(self):
+    def test_every_locked_game_offers_the_override(self):
         self.assertFalse(fg.verdict(100, self.cat, {}, {"100": {"at": 1}})["locked"])
         online = {"730": {"name": "CS2", "anticheats": ["VAC"]}}
-        v = fg.verdict(730, online, {}, {"730": {"at": 1}})
+        v = fg.verdict(730, online, {}, {})
         self.assertTrue(v["locked"])
-        self.assertFalse(v["override_allowed"])
+        self.assertTrue(v["override_allowed"])
+        self.assertEqual(v["risk"], "ban")
+        self.assertTrue(v["online_only"])
+        self.assertFalse(fg.verdict(730, online, {}, {"730": {"at": 1}})["locked"])
+
+    def test_risk_wording_follows_offline_modes(self):
+        er = {"1245620": {"name": "Elden Ring", "anticheats": ["Easy Anti-Cheat"]}}
+        self.assertEqual(fg.verdict(1245620, er, {}, {})["risk"], "offline")
+        self.assertEqual(fg.verdict(100, self.cat, {}, {})["risk"], "ban")
 
     def test_folder_hit_locks_an_unlisted_game(self):
         v = fg.verdict(5, {}, {"marker": "EasyAntiCheat", "product": "Easy Anti-Cheat"}, {})
@@ -150,11 +158,9 @@ class BackendLockTests(unittest.TestCase):
                                                        "eldenring", 1245620))
         self.assertFalse(all_off.get("anticheat_locked"))
 
-    def test_override_needs_the_confirmation_and_then_unlocks(self):
-        r = run(self.plugin.forge_set_anticheat_override(1245620, True, ""))
-        self.assertFalse(r["ok"])
+    def test_one_call_unlocks_and_the_flag_is_what_the_gate_reads(self):
         self.assertTrue(run(self.plugin.install_mod(*install_args())).get("anticheat_locked"))
-        r = run(self.plugin.forge_set_anticheat_override(1245620, True, fg.OVERRIDE_ACK))
+        r = run(self.plugin.forge_set_anticheat_override(1245620, True, ""))
         self.assertTrue(r["ok"])
         self.assertFalse(run(self.plugin.install_mod(*install_args())).get("anticheat_locked"))
         st = run(self.plugin.forge_game_status(1245620, "eldenring", ""))["anticheat"]
@@ -164,11 +170,16 @@ class BackendLockTests(unittest.TestCase):
         run(self.plugin.forge_set_anticheat_override(1245620, False, ""))
         self.assertTrue(run(self.plugin.install_mod(*install_args())).get("anticheat_locked"))
 
-    def test_online_only_games_have_no_override(self):
-        r = run(self.plugin.forge_set_anticheat_override(730, True, fg.OVERRIDE_ACK))
-        self.assertFalse(r["ok"])
-        r = run(self.plugin.install_mod(*install_args("counterstrike2", 730, "Counter-Strike Global Offensive")))
-        self.assertTrue(r.get("anticheat_locked"))
+    def test_online_only_games_can_be_bypassed_too(self):
+        args = install_args("counterstrike2", 730, "Counter-Strike Global Offensive")
+        self.assertTrue(run(self.plugin.install_mod(*args)).get("anticheat_locked"))
+        self.assertTrue(run(self.plugin.forge_set_anticheat_override(730, True, ""))["ok"])
+        self.assertFalse(run(self.plugin.install_mod(*args)).get("anticheat_locked"))
+        run(self.plugin.forge_set_anticheat_override(730, False, ""))
+        self.assertTrue(run(self.plugin.install_mod(*args)).get("anticheat_locked"))
+
+    def test_a_game_without_anti_cheat_has_nothing_to_bypass(self):
+        self.assertFalse(run(self.plugin.forge_set_anticheat_override(413150, True, ""))["ok"])
 
     def test_anti_cheat_files_lock_a_game_no_list_knows(self):
         os.makedirs(os.path.join(main.STEAM_COMMON, "FakeGame", "EasyAntiCheat"), exist_ok=True)

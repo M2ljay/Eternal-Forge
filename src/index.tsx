@@ -115,6 +115,7 @@ import {
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
 import { registerGamePagePatch, unregisterGamePagePatch } from "./gamePagePatch";
+import { ForgeLockSection } from "./ForgeLock";
 import {
   guardGameStarted,
   guardGameStopped,
@@ -4666,6 +4667,7 @@ function Content() {
       <CurrentGameSection />
       {ctx.game ? (
         <>
+          <ForgeLockSection game={ctx.game} />
           <InstalledModsSection />
           <SavesSection />
           <TroubleshootingSection />

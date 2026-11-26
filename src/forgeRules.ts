@@ -99,6 +99,18 @@ export interface AntiCheatVerdict {
   override_allowed: boolean;
   override_on: boolean;
   offline_note?: string;
+  /** "offline": the game can be played modded without its anti-cheat;
+   * "ban": online-only or unknown, a modded game risks the account. */
+  risk?: "offline" | "ban";
+  online_only?: boolean;
+}
+
+/** The bypass is one press, no dialog, so the button itself has to carry
+ * the risk in plain words. */
+export function overrideLabel(v: AntiCheatVerdict): string {
+  return v.risk === "offline"
+    ? "Allow mods anyway - play modded offline only"
+    : "Allow mods anyway - may get this account banned";
 }
 
 export function lockHeadline(v: AntiCheatVerdict): string {
@@ -111,9 +123,13 @@ export function lockBody(v: AntiCheatVerdict): string {
     v.source === "folder"
       ? `Anti-cheat files are in the game folder (${v.marker || "found"}).`
       : "This game is known to run anti-cheat on your PC.";
+  const risk =
+    v.risk === "offline"
+      ? "This game has an offline or anti-cheat-off mode; mods are only safe there, never online."
+      : "A modded copy of this game can get the account banned, whatever the mod does.";
   return (
     `${why} Installing or switching on mods is off for this game to protect your ` +
-    "account. Switching mods off still works."
+    `account. ${risk} Switching mods off still works.`
   );
 }
 

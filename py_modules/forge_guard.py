@@ -56,16 +56,18 @@ EXTRA_GAMES = {
     "230410": {"name": "Warframe", "anticheats": ["Warframe anti-cheat"]},
 }
 
-# Online-only games: no offline mode to mod in, so no override is offered.
-# Modding them is a ban, whatever the mod does.
-NO_OVERRIDE = {
+# Online-only games: no offline mode to mod in, so a modded game is a ban
+# risk whatever the mod does. They get the same one-press override as every
+# other locked game; only the wording is harsher.
+ONLINE_ONLY = {
     730, 1938090, 1962663, 1985820, 2933620, 3606480,  # CS2, Call of Duty
     359550, 1172470, 2073850, 1085660, 252490, 578080,  # R6, Apex, Finals, D2, Rust, PUBG
     2807960, 1517290, 2357570, 1599340, 594650, 230410,  # BF6, BF2042, OW2, Lost Ark, Hunt, Warframe
 }
 
-# Games that DO have a way to play modded without the anti-cheat. Shown in
-# the confirmation so the user knows what the override assumes.
+# Games that DO have a way to play modded without the anti-cheat (the
+# milder wording), plus a note for a few online ones. Shown with the lock.
+OFFLINE_CAPABLE = {1245620, 2622380, 374320, 1888160, 271590, 3240220, 976730}
 OFFLINE_NOTES = {
     1245620: "Elden Ring runs offline with Easy Anti-Cheat off when modded. Never take a modded game online.",
     2622380: "Nightreign mods need Easy Anti-Cheat off, which also keeps you off the official servers.",
@@ -78,7 +80,6 @@ OFFLINE_NOTES = {
     553850: "Helldivers 2 is online-only. Its developer tolerates client-side cosmetic mods, but GameGuard is still running: any mod is at your own risk.",
 }
 
-OVERRIDE_ACK = "I understand"
 
 _CATALOG_CACHE: dict = {}
 
@@ -139,7 +140,10 @@ def verdict(app_id: int, catalog: dict, folder_hit: dict, overrides: dict) -> di
 
     locked: installs and enables are refused (frontend and backend).
     detected: an anti-cheat was found at all (an override keeps it true).
-    override_allowed / override_on: the per-game escape hatch.
+    override_allowed / override_on: the per-game escape hatch, offered for
+    every locked game (one press, no dialog; the risk is in the wording).
+    risk: "offline" when the game has an offline or anti-cheat-off mode,
+    "ban" for everything else (online-only, or unknown to the list).
     """
     app_id = int(app_id or 0)
     listed = catalog.get(str(app_id)) if app_id else None
@@ -150,7 +154,7 @@ def verdict(app_id: int, catalog: dict, folder_hit: dict, overrides: dict) -> di
             products.append(folder_hit["product"])
         source = source or "folder"
     detected = bool(products)
-    allowed = detected and app_id not in NO_OVERRIDE
+    allowed = detected
     on = bool(allowed and overrides.get(str(app_id)))
     return {
         "detected": detected,
@@ -162,6 +166,8 @@ def verdict(app_id: int, catalog: dict, folder_hit: dict, overrides: dict) -> di
         "override_allowed": allowed,
         "override_on": on,
         "offline_note": OFFLINE_NOTES.get(app_id, ""),
+        "risk": "offline" if app_id in OFFLINE_CAPABLE else "ban",
+        "online_only": app_id in ONLINE_ONLY,
     }
 
 
