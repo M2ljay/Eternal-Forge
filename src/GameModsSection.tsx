@@ -44,6 +44,7 @@ import {
   overrideLabel,
   rowsToShow,
   sectionMode,
+  undoOutcome,
 } from "./forgeRules";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
@@ -285,11 +286,11 @@ export function GameModsSection({ appId }: { appId: number }) {
       if (!game) return;
       const plan = await forgeGuardPlan(appId, modSet(list), "undo");
       const failed = await applyChanges(game, plan.changes);
-      await forgeGuardUndone(appId);
-      toaster.toast({
-        title: failed.length ? "Undo finished with problems" : "Mods put back as they were",
-        body: failed.slice(0, 3).join("; "),
-      });
+      // Keep the record unless everything went back: a refused change
+      // (locked game, busy folder) must leave Undo available to retry.
+      const outcome = undoOutcome(failed);
+      if (outcome.clearRecord) await forgeGuardUndone(appId);
+      toaster.toast({ title: outcome.title, body: outcome.body });
     });
 
   // One press: the label carries the risk (see ForgeLock.tsx).

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_backend import main
+from test_backend import main, real_forge_resolver
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "py_modules"))
 import forge_guard as fg  # noqa: E402
@@ -118,6 +118,8 @@ class BackendLockTests(unittest.TestCase):
 
     def setUp(self):
         reset_forge()
+        self.real = real_forge_resolver()
+        self.real.start()
         main._save_settings({"api_key": "test-key", "installed": {}})
         self.plugin = main.Plugin()
         run(self.plugin.forge_register_games([["eldenring", 1245620, "ELDEN RING"],
@@ -126,6 +128,7 @@ class BackendLockTests(unittest.TestCase):
                                               ["stardewvalley", 413150, "Stardew Valley"]]))
 
     def tearDown(self):
+        self.real.stop()
         reset_forge()
         shutil.rmtree(os.path.join(main.STEAM_COMMON, "FakeGame"), ignore_errors=True)
 
@@ -202,6 +205,238 @@ class BackendLockTests(unittest.TestCase):
         import inspect
         params = list(inspect.signature(main.Plugin.set_mod_enabled).parameters)
         self.assertEqual(params[:5], ["self", "install_dir", "mods_subdir", "folder", "enabled"])
+
+
+class EveryEnablePathTests(BackendLockTests):
+    """F1: every path that installs or switches mods on is gated, including
+    the ones whose game is in saved state rather than in the call."""
+
+    def park_fomod(self, domain="eldenring", app_id=1245620, install_dir="ELDEN RING"):
+        token = f"t-{domain}"
+        main.PENDING_FOMODS[token] = {"at": 0, "scratch": "/nonexistent", "ctx": {},
+                                      "game_domain": domain, "mod_id": 1, "file_id": 2,
+                                      "mod_name": "X", "install_dir": install_dir,
+                                      "app_id": app_id}
+        self.addCleanup(main.PENDING_FOMODS.pop, token, None)
+        return token
+
+    def test_finishing_a_fomod_is_checked_when_it_finishes(self):
+        # The token was made while the override was on; it is off now.
+        run(self.plugin.forge_set_anticheat_override(1245620, True, ""))
+        token = self.park_fomod()
+        run(self.plugin.forge_set_anticheat_override(1245620, False, ""))
+        for r in (run(self.plugin.install_fomod(token, ["a"])),
+                  run(self.plugin.install_fomod_auto(token, {"type": "choices"}))):
+            self.assertTrue(r.get("anticheat_locked"), r)
+        self.assertIn(token, main.PENDING_FOMODS)
+
+    def test_a_fomod_token_with_only_a_domain_is_resolved(self):
+        token = self.park_fomod(app_id=0, install_dir="")
+        self.assertTrue(run(self.plugin.install_fomod(token, ["a"])).get("anticheat_locked"))
+
+    def test_an_expired_fomod_token_is_left_to_the_call(self):
+        r = run(self.plugin.install_fomod_auto("gone", {}))
+        self.assertFalse(r.get("anticheat_locked"))
+        self.assertFalse(r["ok"])
+
+    def test_script_extender_dlls_come_back_only_when_unlocked(self):
+        on = run(self.plugin.set_script_extender_plugins("ELDEN RING", "/x", ["a.dll"], True))
+        self.assertTrue(on.get("anticheat_locked"))
+        off = run(self.plugin.set_script_extender_plugins("ELDEN RING", "/x", ["a.dll"], False))
+        self.assertFalse(off.get("anticheat_locked"))
+
+    def test_crash_hunt_is_gated_from_its_saved_state(self):
+        r = run(self.plugin.crash_bisect_start(1245620, "ELDEN RING", "x", "starred", "eldenring",
+                                               "", "", []))
+        self.assertTrue(r.get("anticheat_locked"))
+        with mock.patch.object(main, "_bisect_load",
+                               return_value={"app_id": 1245620, "game_domain": "eldenring",
+                                             "install_dir": "ELDEN RING"}):
+            self.assertTrue(run(self.plugin.crash_bisect_apply()).get("anticheat_locked"))
+            self.assertTrue(run(self.plugin.crash_bisect_finish(True)).get("anticheat_locked"))
+        with mock.patch.object(main, "_bisect_load", return_value={}):
+            r = run(self.plugin.crash_bisect_apply())
+        self.assertFalse(r.get("anticheat_locked"))
+        self.assertIn("No hunt", r["error"])
+
+    def test_other_enable_paths_are_gated(self):
+        calls = [
+            self.plugin.set_mod_option("eldenring", "SomeMod", "v2"),
+            self.plugin.set_load_order(1245620, "ELDEN RING", "x", "starred", "eldenring", []),
+            self.plugin.fix_load_order(1245620, "ELDEN RING", "x", "starred", "eldenring"),
+            self.plugin.apply_known_verdicts("eldenring", "ELDEN RING", "mods"),
+            self.plugin.bg3_disable_broken_deps("eldenring", "ELDEN RING"),
+            self.plugin.set_bg3_module_cap("eldenring", "ELDEN RING", 0),
+            self.plugin.resolve_file_conflicts("eldenring", "ELDEN RING", "mods"),
+            self.plugin.set_experimental_framework(1245620, "redetect"),
+        ]
+        for c in calls:
+            self.assertTrue(run(c).get("anticheat_locked"), c)
+        r = run(self.plugin.set_experimental_framework(1245620, "none"))
+        self.assertFalse(r.get("anticheat_locked"))
+
+    def test_gotr_on_is_gated_off_is_not(self):
+        # No Saints Row 2 registered anywhere: the game cannot be told, so on
+        # is refused and off still goes through.
+        with mock.patch.object(main, "_experimental_game_for", return_value=None):
+            on = run(self.plugin.set_gotr_all(True))
+            self.assertTrue(on.get("anticheat_locked"))
+            self.assertEqual(on.get("reason"), "game_unknown")
+            self.assertTrue(run(self.plugin.set_gotr_option("X", True)).get("anticheat_locked"))
+            self.assertFalse(run(self.plugin.set_gotr_all(False)).get("anticheat_locked"))
+
+
+class FailClosedTests(BackendLockTests):
+    """F2: a game the gate cannot resolve is refused, never allowed."""
+
+    def test_an_unregistered_domain_is_refused(self):
+        r = run(self.plugin.set_framework_enabled("neverregistered", True))
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["anticheat_locked"])
+        self.assertEqual(r["reason"], "game_unknown")
+        self.assertIn("couldn't tell which game", r["error"])
+        r = run(self.plugin.install_mod(*install_args("neverregistered", 0, "")))
+        self.assertEqual(r.get("reason"), "game_unknown")
+
+    def test_switching_off_an_unknown_game_still_works(self):
+        r = run(self.plugin.set_framework_enabled("neverregistered", False))
+        self.assertNotEqual(r.get("reason"), "game_unknown")
+
+    def test_an_error_in_the_lookup_refuses(self):
+        with mock.patch.object(main, "_forge_state", side_effect=OSError("disk")):
+            r = run(self.plugin.install_mod(*install_args("stardewvalley", 413150, "Stardew Valley")))
+        self.assertEqual(r.get("reason"), "game_unknown")
+
+    def test_a_broken_folder_walk_still_locks_a_listed_game(self):
+        with mock.patch.object(main, "_forge_folder_hit", side_effect=OSError("walk")):
+            self.assertTrue(run(self.plugin.install_mod(*install_args())).get("anticheat_locked"))
+            r = run(self.plugin.install_mod(*install_args("stardewvalley", 413150, "Stardew Valley")))
+        self.assertFalse(r.get("anticheat_locked"))
+
+    def test_the_backend_resolves_from_its_own_records(self):
+        st = main._forge_state()
+        st["games"] = {}
+        main._forge_write(main.FORGE_STATE, st)
+        # Not registered by the frontend; a restore point recorded the id.
+        s = main._load_settings()
+        s["domain_app_ids"] = {"eldenring": 1245620}
+        main._save_settings(s)
+        self.assertTrue(run(self.plugin.set_framework_enabled("eldenring", True)).get("anticheat_locked"))
+
+    def test_an_install_folder_alone_resolves_through_steam_manifests(self):
+        st = main._forge_state()
+        st["games"] = {}
+        main._forge_write(main.FORGE_STATE, st)
+        lib = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, lib, True)
+        with open(os.path.join(lib, "appmanifest_1245620.acf"), "w") as f:
+            f.write('"AppState"\n{\n\t"appid"\t"1245620"\n\t"installdir"\t"ELDEN RING"\n}\n')
+        with mock.patch.object(main, "_steam_libraries", return_value=[lib]):
+            r = run(self.plugin.set_script_extender_plugins("ELDEN RING", "/x", ["a.dll"], True))
+        self.assertTrue(r.get("anticheat_locked"))
+        self.assertNotEqual(r.get("reason"), "game_unknown")
+
+
+# Every backend callable that is NOT gated, and why it may stay open: it only
+# reads, switches off, removes, records bookkeeping, or acts outside the game.
+# A new callable fails StructuralGateTests until it is gated or listed here.
+ALLOWED_UNGATED = {
+    "read-only": {
+        "build_report", "check_docs_file", "check_experimental_coverage", "check_framework_update",
+        "check_game_file", "check_plugin_masters", "check_updates", "crash_bisect_status",
+        "crash_since", "experimental_folder_options", "export_mod_setup", "find_collection",
+        "find_experimental_game", "forge_game_status", "forge_guard_plan", "forge_modded_state",
+        "forge_update_dots", "gb_get_game", "gb_get_mod", "gb_list_mods", "gb_search_games",
+        "gb_update_target", "get_auth_status", "get_blamed_folders", "get_collection",
+        "get_collection_attention", "get_collection_extras", "get_collection_manifest",
+        "get_collection_support", "get_collection_verdicts", "get_collections", "get_debug_info",
+        "get_disk_usage", "get_display_fix", "get_download_control", "get_endorsement",
+        "get_experimental_state", "get_file_conflicts", "get_framework_setup", "get_frosty_state",
+        "get_game_binary_version", "get_game_categories", "get_game_status", "get_gotr_options",
+        "get_health_check", "get_install_block", "get_install_integrity", "get_installed_count",
+        "get_installed_mods", "get_known_bad_state", "get_known_mod_verdict",
+        "get_launch_options_state", "get_library_scan", "get_load_order", "get_load_order_games",
+        "get_load_order_state", "get_me3_coop_password", "get_me3_launch_command", "get_me3_state",
+        "get_me3_status", "get_merge_support", "get_mod_details", "get_mod_files",
+        "get_mod_load_status", "get_mod_options", "get_mod_overlaps", "get_mod_program",
+        "get_mod_requirements", "get_mod_setups", "get_mod_support", "get_mods", "get_mods_by_ids",
+        "get_nxm_queue", "get_plugin_update", "get_prefix_runtime_state", "get_prefix_tools_state",
+        "get_reinstall_target", "get_repair_queue", "get_restore_plan", "get_save_status",
+        "get_script_extender_state", "get_show_adult", "get_smapi_load_status", "get_space_report",
+        "get_trending_mods", "get_unsupported_mods", "get_update_hold", "get_user_prefs",
+        "get_user_tool_status", "get_vr_files", "get_vr_releases", "get_vr_setup",
+        "get_waiting_updates", "in_game_since", "list_restore_points", "list_setup_backups",
+        "match_file_to_game", "ping", "read_setup_backup", "scan_steam_library",
+    },
+    "switch off": {
+        "apply_known_bad", "clear_framework_launch_options", "disable_blocked_plugins",
+        "disable_failing_mods", "disable_plugins", "enforce_skips", "park_failing_mods",
+        "remove_ghost_plugins",
+    },
+    "remove / uninstall": {
+        "delete_mod_setup", "remove_experimental_framework", "remove_experimental_game",
+        "remove_merge_support", "remove_reshade", "remove_vr_repo", "reset_frosty",
+        "reset_game_modding", "uninstall_all_mods", "uninstall_collection", "uninstall_frosty_mod",
+        "uninstall_mod", "clear_space_item", "forget_vr_setup",
+    },
+    # Plugin state, records and settings: nothing reaches a game's files.
+    "bookkeeping": {
+        "cancel_collection_install", "cancel_download", "cancel_library_check",
+        "cancel_vr_recording", "crash_bisect_record", "create_restore_point", "dismiss_update",
+        "endorse_collection", "finish_vr_recording", "forge_guard_dismiss", "forge_guard_exit",
+        "forge_guard_launch", "forge_guard_restored", "forge_guard_undone", "forge_note_modded",
+        "forge_register_games", "forge_set_anticheat_override", "forge_set_modded_collection",
+        "gb_link_game", "gb_unlink_game", "mark_launch_options_set", "mark_vr_releases_seen",
+        "note_update_hold", "record_collection_installed", "refresh_content_gate",
+        "register_collection", "release_update_hold", "save_experimental_game", "save_mod_setup",
+        "save_problem_report", "set_api_key", "set_collection_attention", "set_downloads_paused",
+        "set_endorsement", "set_experimental_domain", "set_experimental_enabled",
+        "set_experimental_focus", "set_experimental_mods_folder", "set_me3_coop_password",
+        "set_show_adult", "set_update_hold_enabled", "set_user_prefs", "skip_prefix_tools",
+        "start_library_check", "start_vr_recording", "add_vr_repo", "open_vr_hub",
+        "register_nxm_handler", "unregister_nxm_handler", "prepare_plugin_update",
+    },
+    # Downloads into Forge's own cache: nothing reaches the game until a
+    # gated install.
+    "download only": {"prefetch_mod_file", "prepare_mod_file"},
+    # Mod tools fetched into Forge's own folder; using one for a game goes
+    # through set_framework_launch_options / install_framework, both gated.
+    "tool into Forge's folder": {"install_me3", "install_frosty_toolkit"},
+    # Game settings, saves and the Proton prefix, never mod content.
+    "game settings and prefix": {
+        "apply_display_fix", "copy_saves_to_modded", "enable_papyrus_logging",
+        "fix_prefix_runtime", "restore_point_saves", "seed_game_ini",
+    },
+}
+
+
+class StructuralGateTests(unittest.TestCase):
+    """Every backend callable is either behind the anti-cheat gate or on the
+    allow-list with a reason. A new install or enable path cannot slip in."""
+
+    @staticmethod
+    def callables():
+        import inspect
+        return {n for n in dir(main.Plugin)
+                if not n.startswith("_") and inspect.iscoroutinefunction(getattr(main.Plugin, n))}
+
+    def test_every_callable_is_gated_or_allowed(self):
+        allowed = set().union(*ALLOWED_UNGATED.values())
+        unaccounted = sorted(n for n in self.callables()
+                             if not getattr(getattr(main.Plugin, n), "__forge_gated__", False)
+                             and n not in allowed)
+        self.assertEqual(unaccounted, [], "gate these in _FORGE_GATED, or allow-list them with a reason")
+
+    def test_every_gated_name_is_really_wrapped(self):
+        for name in main._FORGE_GATED:
+            self.assertTrue(getattr(getattr(main.Plugin, name), "__forge_gated__", False), name)
+
+    def test_the_allow_list_has_no_stale_or_gated_names(self):
+        allowed = set().union(*ALLOWED_UNGATED.values())
+        self.assertEqual(sorted(allowed - self.callables()), [])
+        self.assertEqual(sorted(allowed & set(main._FORGE_GATED)), [])
+        sizes = sum(len(v) for v in ALLOWED_UNGATED.values())
+        self.assertEqual(sizes, len(allowed), "a name is listed under two reasons")
 
 
 class GuardRuleTests(unittest.TestCase):

@@ -22,6 +22,7 @@ import {
   offerBody,
   rowsToShow,
   sectionMode,
+  undoOutcome,
 } from "../.test-build/forgeRules.js";
 import { exitReturnsToGamePage } from "../.test-build/navRules.js";
 
@@ -192,4 +193,28 @@ test("tile dots go through one style element that is removed on unload", () => {
   const src = readCode("forge.ts");
   assert.match(src, /getElementById\(DOT_STYLE_ID\)/);
   assert.match(src, /return \(\) => \{[\s\S]*writeStyle\(""\);[\s\S]*\};/);
+});
+
+// ---- undo after a restore -------------------------------------------------
+
+test("undo clears its record only when every change went back", () => {
+  const ok = undoOutcome([]);
+  assert.equal(ok.clearRecord, true);
+  assert.equal(ok.title, "Mods put back as they were");
+  const partial = undoOutcome(["ModA: Mods are locked for this game"]);
+  assert.equal(partial.clearRecord, false);
+  assert.match(partial.title, /1 mod not restored/);
+  assert.match(partial.body, /ModA: Mods are locked/);
+  assert.match(partial.body, /try again/);
+  const many = undoOutcome(["a: x", "b: x", "c: x", "d: x", "e: x"]);
+  assert.equal(many.clearRecord, false);
+  assert.match(many.title, /5 mods not restored/);
+  assert.match(many.body, /\(\+2 more\)/);
+});
+
+test("the game page calls forgeGuardUndone only through undoOutcome's verdict", () => {
+  const code = readCode("GameModsSection.tsx");
+  const calls = code.match(/forgeGuardUndone\(/g) ?? [];
+  assert.equal(calls.length, 1);
+  assert.match(code, /if \(outcome\.clearRecord\) await forgeGuardUndone\(appId\)/);
 });

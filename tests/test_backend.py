@@ -100,6 +100,28 @@ def allow_mods_despite_anticheat(*app_ids):
     main._forge_write(main.FORGE_STATE, st)
 
 
+# Forge's gate refuses a call whose game it cannot resolve (fail closed). Most
+# backend tests install into made-up games that no Steam library or
+# registration names, so here an unresolved game stands for an app id no
+# anti-cheat list knows. The gate's own tests (test_forge.py) put the real
+# resolver back with real_forge_resolver().
+FORGE_RESOLVE_APP_REAL = main._forge_resolve_app
+TEST_UNLISTED_APP_ID = 4242424242
+
+
+def _test_forge_resolve_app(st, app_id=0, game_domain="", install_dir=""):
+    return FORGE_RESOLVE_APP_REAL(st, app_id, game_domain, install_dir) or TEST_UNLISTED_APP_ID
+
+
+main._forge_resolve_app = _test_forge_resolve_app
+
+
+def real_forge_resolver():
+    """A patch context restoring main._forge_resolve_app for one test."""
+    from unittest import mock as _mock
+    return _mock.patch.object(main, "_forge_resolve_app", FORGE_RESOLVE_APP_REAL)
+
+
 def _read_main_source() -> str:
     """main.py as text, for the handful of tests that assert on structure
     rather than behaviour (a reset path that is hard to exercise for real

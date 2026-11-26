@@ -204,3 +204,22 @@ export function offerToast(gameName: string): { title: string; body: string } {
     body: `${gameName} closed early twice since its mods changed. Open its page to go back - nothing is deleted.`,
   };
 }
+
+// ---- Undo after a restore ------------------------------------------------------
+
+/** What an undo of "Restore last working mods" leaves behind. The record of
+ * the set that was on before the restore is cleared only when every change
+ * went through: if any was refused (an anti-cheat lock, a busy folder) the
+ * record stays, so Undo can be tried again. Retrying switches only what still
+ * differs, because the backend plans from the record against the current set. */
+export function undoOutcome(failed: string[]): { clearRecord: boolean; title: string; body: string } {
+  if (!failed.length) {
+    return { clearRecord: true, title: "Mods put back as they were", body: "" };
+  }
+  const more = failed.length > 3 ? ` (+${failed.length - 3} more)` : "";
+  return {
+    clearRecord: false,
+    title: `Undo incomplete: ${failed.length} mod${failed.length === 1 ? "" : "s"} not restored`,
+    body: `${failed.slice(0, 3).join("; ")}${more}. Undo stays on the game page to try again.`,
+  };
+}

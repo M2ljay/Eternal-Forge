@@ -69,6 +69,26 @@ programs, ReShade, mod setups, `set_mod_enabled` (on), `set_all_mods_enabled`
 Switching off and uninstalling are never refused. The refusal runs before
 the restore point and before any file work.
 
+It also covers the paths whose game is in saved state rather than in the
+call: finishing a parked FOMOD (`install_fomod`, `install_fomod_auto`,
+checked when it finishes, so a lock turned back on after the token was made
+still applies), the crash hunt (`crash_bisect_start` / `_apply` / `_finish`,
+from the hunt's state), Saints Row 2's GotR options (on), script-extender
+DLLs coming back, `set_mod_option`, and the load-order writers that can
+switch entries back on. `tests/test_forge.py` (`StructuralGateTests`)
+enumerates every backend callable and fails unless it is gated or on an
+allow-list of read-only, switch-off, remove and bookkeeping calls, each
+group with its reason.
+
+The gate fails closed. The game is resolved from the call's app id, then
+the backend's own records (domains the frontend registered, the app ids
+restore points recorded, experimental games, and the Steam library
+manifests for an install folder). When none of them names the game, or the
+lookup throws, the call is refused with `"reason": "game_unknown"` and a
+message saying Forge could not tell which game it is. A folder walk that
+throws for a known game falls back to the list, so a listed game stays
+locked.
+
 The QAM shows the same locked state and the same two buttons at the top of
 the game's sections (`ForgeLockSection` in `src/ForgeLock.tsx`). The QAM's
 other install buttons (Step 1 frameworks, collection and mod installs) are
@@ -147,7 +167,10 @@ were on then back **on**, through `install.ts` like every other switch.
 Nothing is uninstalled or deleted; a mod removed since stays removed and is
 named. With no clean run on record the way back is every mod off. The set
 from before the restore is kept for a week, and **Undo restore** on the game
-page puts it back. A clean run, a new change to the mods, or **Not now**
+page puts it back. The record is cleared only when every change of the undo
+went through; if any was refused (a locked game, a busy folder) it stays,
+the toast names what was not restored, and Undo can be tried again (it then
+switches only what still differs). A clean run, a new change to the mods, or **Not now**
 ends the streak.
 
 Starting the game twice within 15 seconds with the same mods (a launcher

@@ -38132,10 +38132,52 @@ def _forge_folder_hit(game_dir: str) -> dict:
     return hit
 
 
+def _forge_app_for_install_dir(st: dict, install_dir: str) -> int:
+    """The app id of the game installed in steamapps/common/<install_dir>:
+    from the registered games, the experimental games, then the Steam
+    library manifests themselves. 0 when nothing names it."""
+    if not install_dir or os.path.basename(install_dir) != install_dir:
+        return 0
+    want = install_dir.lower()
+    for g in (st.get("games") or {}).values():
+        if isinstance(g, dict) and str(g.get("install_dir") or "").lower() == want and g.get("app_id"):
+            return int(g["app_id"])
+    for key, g in (_load_settings().get("experimental_games") or {}).items():
+        if isinstance(g, dict) and str(g.get("installDirName") or "").lower() == want:
+            try:
+                return int(g.get("appId") or key)
+            except (TypeError, ValueError):
+                pass
+    for lib in _steam_libraries():
+        try:
+            names = os.listdir(lib)
+        except OSError:
+            continue
+        for n in names:
+            m = re.fullmatch(r"appmanifest_(\d+)\.acf", n)
+            if not m:
+                continue
+            try:
+                found = experimental_games.read_appmanifest(os.path.join(lib, n)).get("installdir", "")
+            except Exception:  # noqa: BLE001 - one unreadable manifest is not an answer
+                continue
+            if str(found).lower() == want:
+                return int(m.group(1))
+    return 0
+
+
+def _forge_resolve_app(st: dict, app_id: int = 0, game_domain: str = "", install_dir: str = "") -> int:
+    """The game a gated call is about, from what the call says and then from
+    the backend's own records. 0 when it cannot be told: the gate then
+    refuses (fail closed) rather than guessing the game has no anti-cheat."""
+    return (int(app_id or 0) or _forge_app_for_domain(st, game_domain)
+            or _forge_app_for_install_dir(st, install_dir))
+
+
 def _forge_verdict(app_id: int = 0, game_domain: str = "", install_dir: str = "",
                    st: dict = None) -> dict:
     st = st if st is not None else _forge_state()
-    app_id = int(app_id or 0) or _forge_app_for_domain(st, game_domain)
+    app_id = _forge_resolve_app(st, app_id, game_domain, install_dir)
     hit = _forge_folder_hit(_forge_game_dir(st, app_id, game_domain, install_dir))
     v = forge_guard.verdict(app_id, forge_guard.load_catalog(FORGE_CATALOG), hit,
                             st.get("overrides") or {})
@@ -38409,9 +38451,12 @@ Plugin.forge_guard_undone = _forge_guard_undone
 Plugin.forge_guard_dismiss = _forge_guard_dismiss
 Plugin.forge_update_dots = _forge_update_dots
 
-# Every call that puts mod files into a game or switches mods on, and the
-# argument that makes a switch call an "on" (None: always gated). Switching
+# Every call that puts mod files into a game or switches mods on, and what
+# makes a switch call an "on": None (always gated), the name of the argument
+# that is truthy for "on", or a function of the bound arguments. Switching
 # off and removing are never refused: that is the safe direction.
+# tests/test_forge.py enumerates every callable and fails unless it is here
+# or on its allow-list of read-only / switch-off / remove calls.
 _FORGE_GATED = {
     "install_mod": None,
     "install_frosty_mod": None,
@@ -38435,7 +38480,114 @@ _FORGE_GATED = {
     "set_experimental_framework_enabled": "enabled",
     "set_framework_enabled": "enabled",
     "set_framework_launch_options": "options",
+    # Finishing a parked FOMOD merges files and activates plugins. Checked
+    # when it finishes, not when the token was made: the lock may have come
+    # back on in between.
+    "install_fomod": None,
+    "install_fomod_auto": None,
+    # Reinstalls a mod from its kept archive with another of its versions.
+    "set_mod_option": None,
+    # Brings parked script-extender DLLs back.
+    "set_script_extender_plugins": "enabled",
+    # The crash hunt switches prefixes of the load order back on, and its
+    # end puts every mod back.
+    "crash_bisect_start": None,
+    "crash_bisect_apply": None,
+    "crash_bisect_finish": None,
+    # Saints Row 2's Gentlemen of the Row optional mods.
+    "set_gotr_all": "enabled",
+    "set_gotr_option": "enabled",
+    # Load-order writers that can switch entries (dependencies, masters,
+    # mods parked by an earlier rule) back on.
+    "set_load_order": None,
+    "fix_load_order": None,
+    "apply_known_verdicts": None,
+    "bg3_disable_broken_deps": None,
+    "set_bg3_module_cap": None,
+    # Rewrites contested game files from the mods' own content.
+    "resolve_file_conflicts": None,
+    # "none" only removes the loaders; anything else may put them back.
+    "set_experimental_framework": lambda a: str(a.get("mode") or "") != "none",
 }
+
+# Not in the call: the game a gated call is about comes from the state it
+# acts on. Each returns (app_id, game_domain, install_dir), or None when
+# there is no such state, in which case the call has nothing to act on and
+# refuses by itself ("expired", "no hunt in progress").
+
+
+def _forge_game_of_fomod(a: dict):
+    entry = PENDING_FOMODS.get(a.get("token"))
+    if not entry:
+        return None
+    return (int(entry.get("app_id") or 0), str(entry.get("game_domain") or ""),
+            str(entry.get("install_dir") or ""))
+
+
+def _forge_game_of_bisect(a: dict):
+    state = _bisect_load()
+    if not state:
+        return None
+    return (int(state.get("app_id") or 0), str(state.get("game_domain") or ""),
+            str(state.get("install_dir") or ""))
+
+
+def _forge_game_of_gotr(a: dict):
+    game = _experimental_game_for(experimental_games.SR2_DOMAIN) or {}
+    return (int(game.get("appId") or 0), experimental_games.SR2_DOMAIN,
+            str(game.get("installDirName") or ""))
+
+
+_FORGE_GAME_FROM = {
+    "install_fomod": _forge_game_of_fomod,
+    "install_fomod_auto": _forge_game_of_fomod,
+    "crash_bisect_apply": _forge_game_of_bisect,
+    "crash_bisect_finish": _forge_game_of_bisect,
+    "set_gotr_all": _forge_game_of_gotr,
+    "set_gotr_option": _forge_game_of_gotr,
+}
+
+FORGE_UNKNOWN_GAME = ("Forge couldn't tell which game this is, so it can't check it for anti-cheat. "
+                      "Nothing was installed or switched on. Open the game in Forge and try again.")
+
+
+def _forge_gate_check(name: str, bound: dict):
+    """None when the call may go ahead, else the refusal. Fails closed: a
+    game that cannot be resolved, or a lookup that throws, is refused."""
+    resolver = _FORGE_GAME_FROM.get(name)
+    try:
+        if resolver is not None:
+            game = resolver(bound)
+            if game is None:
+                return None
+            app_id, domain, install_dir = game
+        else:
+            app_id = int(bound.get("app_id") or 0)
+            domain = str(bound.get("game_domain") or "")
+            install_dir = str(bound.get("install_dir") or "")
+        st = _forge_state()
+        app_id = _forge_resolve_app(st, app_id, domain, install_dir)
+    except Exception as e:  # noqa: BLE001 - an error in the lookup refuses, never allows
+        decky.logger.warning(f"forge: could not tell the game for {name}: {e}")
+        app_id, st = 0, {}
+    if not app_id:
+        decky.logger.info(f"forge: refused {name}: game unknown")
+        return {"ok": False, "error": FORGE_UNKNOWN_GAME, "anticheat_locked": True,
+                "reason": "game_unknown"}
+    try:
+        v = _forge_verdict(app_id, domain, install_dir, st=st)
+    except Exception as e:  # noqa: BLE001 - logged, then the list alone decides
+        decky.logger.warning(f"forge: anti-cheat check for {name} failed: {e}")
+        # The game is known: a broken folder walk must not unlock a game
+        # the list knows, nor brick the rest.
+        v = forge_guard.verdict(app_id, forge_guard.load_catalog(FORGE_CATALOG), {},
+                                st.get("overrides") or {})
+        v["app_id"] = app_id
+    if v.get("locked"):
+        decky.logger.info(f"forge: refused {name} for app {v.get('app_id')} "
+                          f"({', '.join(v.get('products') or [])})")
+        return {"ok": False, "error": forge_guard.lock_message(v), "anticheat_locked": True}
+    return None
 
 
 def _wrap_anticheat_lock() -> None:
@@ -38455,27 +38607,20 @@ def _wrap_anticheat_lock() -> None:
                     bound = sig.bind_partial(self, *args, **kwargs).arguments
                 except TypeError:
                     bound = {}
-                gated = switch is None or bool(bound.get(switch))
+                if switch is None:
+                    gated = True
+                elif callable(switch):
+                    gated = bool(switch(bound))
+                else:
+                    gated = bool(bound.get(switch))
                 if gated:
-                    try:
-                        v = await asyncio.to_thread(
-                            _forge_verdict, int(bound.get("app_id") or 0),
-                            str(bound.get("game_domain") or ""), str(bound.get("install_dir") or ""))
-                    except Exception as e:  # noqa: BLE001 - logged, then the list alone decides
-                        decky.logger.warning(f"forge: anti-cheat check for {name} failed: {e}")
-                        # Fail closed for the games the list knows; a broken
-                        # folder walk must not unlock them, nor brick the rest.
-                        try:
-                            v = forge_guard.verdict(int(bound.get("app_id") or 0),
-                                                    forge_guard.load_catalog(FORGE_CATALOG), {}, {})
-                        except (TypeError, ValueError):
-                            v = {"locked": False}
-                    if v.get("locked"):
-                        decky.logger.info(f"forge: refused {name} for app {v.get('app_id')} "
-                                          f"({', '.join(v.get('products') or [])})")
-                        return {"ok": False, "error": forge_guard.lock_message(v),
-                                "anticheat_locked": True}
+                    refusal = await asyncio.to_thread(_forge_gate_check, name, bound)
+                    if refusal is not None:
+                        return refusal
                 return await original(self, *args, **kwargs)
+            # Read by the structural test; functools.wraps carries it through
+            # every later wrapper.
+            wrapper.__forge_gated__ = True
             return wrapper
 
         setattr(Plugin, name, make(original, sig, switch, name))
@@ -38494,7 +38639,8 @@ _wrap_anticheat_lock()
 # call the anti-cheat gate refused (nothing changed) sends nothing.
 # run_mod_program is left out: it returns before the program has run (the
 # result comes later as "mod_program_done") and never changes which mods are on.
-_FORGE_MOD_CHANGES = tuple(n for n in _FORGE_GATED if n != "run_mod_program") + (
+_FORGE_MOD_CHANGES = tuple(n for n in _FORGE_GATED if n not in (
+    "run_mod_program", "install_fomod", "install_fomod_auto")) + (
     "install_fomod",
     "install_fomod_auto",
     "uninstall_mod",
