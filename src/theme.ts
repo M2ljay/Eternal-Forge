@@ -9,6 +9,11 @@ export const NEXUS_ORANGE_HOVER = "#e6a45a";
 export const NEXUS_ORANGE_PRESSED = "#b9792d";
 
 export const ACCENT_SUCCESS = "#8fd48f";
+
+// Forge's surfaces (the game page Mods section, tile dots) use the Eternal
+// palette instead: AMOLED black, crimson, steel, gunmetal. Defined in
+// forgeRules.ts so its node tests compile without the rest of the theme.
+export { FORGE_BLACK, FORGE_CRIMSON, FORGE_GUNMETAL, FORGE_STEEL } from "./forgeRules";
 export const ACCENT_DANGER = "#ff6b6b";
 
 // Injected once per page that uses the primary button. Hover covers desktop

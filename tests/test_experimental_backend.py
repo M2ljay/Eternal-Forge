@@ -6,7 +6,7 @@ import zipfile
 import unittest
 import unittest.mock
 
-from test_backend import main  # stubs decky/aiohttp and imports main.py
+from test_backend import allow_mods_despite_anticheat, main  # stubs decky/aiohttp and imports main.py
 
 
 def _run(coro):
@@ -17,6 +17,7 @@ class ExperimentalFrameworkTests(unittest.TestCase):
     def setUp(self):
         self.plugin = main.Plugin()
         main._save_settings({})
+        allow_mods_despite_anticheat(2767030)
 
     def _game(self):
         return {"appId": 2767030, "nexusDomain": "marvelrivals",
@@ -141,6 +142,7 @@ class ExperimentalRootInstallTests(unittest.TestCase):
                      "modsSubdir": "SparkingZERO/Content/Paks/~mods",
                      "processName": "SparkingZERO/Binaries/Win64/SparkingZERO-Win64-Shipping.exe"}
         main._save_settings({"experimental_games": {"1790600": self.game}})
+        allow_mods_despite_anticheat(1790600)
 
     def scratch(self, files):
         d = os.path.join(main.DOWNLOADS_DIR, "exp-scratch")

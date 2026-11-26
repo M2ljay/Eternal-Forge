@@ -415,3 +415,40 @@ appears. The Steam game is linked to its GameBanana game by name, or picked
 by hand once and remembered. No account or key is needed. Details, endpoints
 and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
 
+## Fork: Forge on the game page
+
+Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
+
+- **Mods section on Steam's game page.** Above Play on a game's library
+  page: mods on/total, updates, up to six mods with a switch each, Open /
+  Update, Add mods and My Mods. Controller only; B from a page opened here
+  returns to the game page. Any error leaves Steam's page untouched, and the
+  section switches itself off for the session after three.
+- **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
+  BattlEye, Vanguard, Ricochet, FACEIT, EA Javelin, GameGuard...) are locked:
+  installs and switching mods on are refused by the backend, not just hidden.
+  Switching off always works. Sources: a 500-game list generated from
+  AreWeAntiCheatYet (MIT) and the anti-cheat file markers Core's Gaming Mode
+  uses. Every locked game has a one-press "Allow mods anyway" on the game
+  page and in the QAM, labelled with its risk ("play modded offline only"
+  for games with an offline mode, "may get this account banned" for the
+  rest), and "Lock mods again". Elden Ring and Helldivers 2 start locked.
+- **Way back after a crash.** A run of at least 60 seconds with no Windows
+  crash report makes its mods the last known good set. Two shorter (or
+  crashed) runs in a row after a mod change bring one notification and an
+  offer on the game page to restore that set - by switching mods only,
+  never deleting, with Undo.
+- **Update dots.** A crimson dot on library and home tiles of games with mod
+  updates, from a six-hour cache of Nexus versions (three games per check at
+  most, also filled by the Updates page). Pure CSS that matches nothing if
+  Steam changes its markup.
+- **Modded collection.** A Steam collection "Modded" with every game that
+  has at least one mod on, updated when mods are switched, installed or
+  removed (crash restore and anti-cheat lock included) and at load. Offline,
+  no Nexus calls. Forge only ever touches the collection it created: a
+  "Modded" of your own is left alone (Forge's is then "Modded (Forge)"), and
+  games you added by hand are never taken out.
+
+These can be turned off in Settings, under **Game page**. Turning off the
+Modded collection leaves it as it is; **Remove Modded collection** deletes
+only Forge's own.

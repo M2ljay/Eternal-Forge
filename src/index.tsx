@@ -114,6 +114,14 @@ import {
 } from "./api";
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
+import { registerGamePagePatch, unregisterGamePagePatch } from "./gamePagePatch";
+import { ForgeLockSection } from "./ForgeLock";
+import {
+  guardGameStarted,
+  guardGameStopped,
+  registerManagedGames,
+  startForgeBackground,
+} from "./forge";
 import type { PluginUpdate } from "./pluginUpdate";
 import { IntegrityNotice } from "./safeUpdate";
 import {
@@ -4664,6 +4672,7 @@ function Content() {
       <CurrentGameSection />
       {ctx.game ? (
         <>
+          <ForgeLockSection game={ctx.game} />
           <InstalledModsSection />
           <SavesSection />
           <TroubleshootingSection />
@@ -4695,10 +4704,12 @@ function Content() {
 
 export default definePlugin(() => {
   console.log("Forge plugin initializing");
-  void loadExperimentalState();
+  // Forge's anti-cheat gate needs every managed game's domain and app id,
+  // experimental ones included, so registration follows the state load.
+  void loadExperimentalState().then(registerManagedGames);
   const experimentalListener = addEventListener(
     "experimental_changed",
-    () => void loadExperimentalState()
+    () => void loadExperimentalState().then(registerManagedGames)
   );
   const toolListener = addEventListener<
     [domain: string, result: { ok: boolean; count?: number; error?: string; tool?: string; fetched?: string[]; missing?: string[]; restart?: boolean }]
@@ -4757,6 +4768,10 @@ export default definePlugin(() => {
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage, { exact: true });
   routerHook.addRoute(GB_BROWSE_ROUTE, GameBananaPage, { exact: true });
   routerHook.addRoute(GB_MOD_ROUTE, GameBananaModPage, { exact: true });
+  // Forge: the Mods section on Steam's game page, the tile dots and the
+  // crash guard's game-start bookkeeping.
+  registerGamePagePatch();
+  const stopForge = startForgeBackground();
 
   // Feed the QAM Downloads section from anywhere in the UI.
   const progressListener = addEventListener<[p: InstallProgress]>(
@@ -4789,6 +4804,10 @@ export default definePlugin(() => {
   ).GameSessions?.RegisterForAppLifetimeNotifications?.((e) => {
     const game = getSupportedGame(e.unAppID);
     if (!game) return;
+    // Forge's way back after a crash: the mod set at start, the run's
+    // length at exit.
+    if (e.bRunning) guardGameStarted(e.unAppID);
+    else guardGameStopped(e.unAppID);
     if (!e.bRunning) {
       // Mods that failed constantly this session go off now, not after
       // the user notices and hunts for a switch: the plugin's job, not
@@ -4888,6 +4907,9 @@ export default definePlugin(() => {
       routerHook.removeRoute(SETTINGS_ROUTE);
       routerHook.removeRoute(GB_BROWSE_ROUTE);
       routerHook.removeRoute(GB_MOD_ROUTE);
+      routerHook.removeRoute(HEALTH_ROUTE);
+      unregisterGamePagePatch();
+      stopForge();
       removeEventListener("backend_event", listener);
       removeEventListener("install_progress", progressListener);
       removeEventListener("experimental_changed", experimentalListener);

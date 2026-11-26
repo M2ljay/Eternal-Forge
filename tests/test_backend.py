@@ -90,6 +90,15 @@ sys.path.insert(0, REPO_ROOT)
 import main  # noqa: E402
 
 
+def allow_mods_despite_anticheat(*app_ids):
+    """Forge locks games with anti-cheat by default and refuses installs in
+    the backend. Tests of the install machinery for such a game (Elden Ring,
+    Marvel Rivals...) take the per-game override, exactly as a user must."""
+    st = main._forge_state()
+    for app_id in app_ids:
+        st["overrides"][str(int(app_id))] = {"at": 0}
+    main._forge_write(main.FORGE_STATE, st)
+
 
 def _read_main_source() -> str:
     """main.py as text, for the handful of tests that assert on structure
@@ -12592,6 +12601,7 @@ class TestMe3Layout(unittest.TestCase):
         self.root = os.path.join(main.STEAM_COMMON, self.GAME)
         os.makedirs(self.root, exist_ok=True)
         shutil.rmtree(main._me3_profile_dir(self.DOMAIN), ignore_errors=True)
+        allow_mods_despite_anticheat(1245620)
         self.plugin = main.Plugin()
 
     def tearDown(self):

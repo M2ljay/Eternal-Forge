@@ -3,11 +3,14 @@
 // words next to the control that carries it. Values clamp server-side
 // too, so nothing here can wedge the backend.
 import {
+  ButtonItem,
   DropdownItem,
   Focusable,
   ScrollPanelGroup,
   SliderField,
+  ToggleField,
 } from "@decky/ui";
+import { toaster } from "@decky/api";
 import { useEffect, useState } from "react";
 
 import { UserPrefs, getUserPrefs, setUserPrefs } from "./api";
@@ -15,6 +18,66 @@ import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { ExperimentalToggle } from "./ExperimentalSetup";
 import { LibraryScan } from "./LibraryScan";
+import { ForgeSetting, getForgeSetting, setForgeSetting, subscribeForgeSettings } from "./forgeSettings";
+import { OwnedCollection, collectionNote } from "./moddedCollection";
+import { moddedCollectionRecord, removeModdedCollection } from "./moddedSync";
+
+/** One of Forge's frontend switches, kept in step with its stored value
+ * (the Remove button below turns one off from elsewhere). */
+function ForgeToggle({ name, label, description }: { name: ForgeSetting; label: string; description: string }) {
+  const [on, setOn] = useState(() => getForgeSetting(name));
+  useEffect(() => subscribeForgeSettings(() => setOn(getForgeSetting(name))), [name]);
+  return (
+    <ToggleField
+      label={label}
+      description={description}
+      checked={on}
+      onChange={(v: boolean) => {
+        setForgeSetting(name, v);
+        setOn(v);
+      }}
+    />
+  );
+}
+
+/** Which collection is Forge's, and the one button that deletes it. */
+function ModdedCollectionControls() {
+  const [record, setRecord] = useState<OwnedCollection | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const load = () => void moddedCollectionRecord().then(setRecord).catch(() => setRecord(null));
+  useEffect(load, []);
+  useEffect(() => subscribeForgeSettings(load), []);
+  if (record === undefined) return null;
+  return (
+    <ButtonItem
+      layout="below"
+      disabled={busy || !record}
+      description={
+        `${collectionNote(record)} The button deletes only that collection (the games stay in your ` +
+        "library) and turns the switch above off, or it would come back with the next mod change."
+      }
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const r = await removeModdedCollection();
+          toaster.toast({
+            title: r.ok ? (r.removed ? "Modded collection removed" : "Nothing to remove") : "Collection not removed",
+            body: r.ok
+              ? r.removed
+                ? "Only Forge's own collection was deleted."
+                : "Forge's collection was already gone."
+              : r.error ?? "",
+          });
+        } finally {
+          setBusy(false);
+          load();
+        }
+      }}
+    >
+      {busy ? "Removing…" : "Remove Modded collection"}
+    </ButtonItem>
+  );
+}
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -278,6 +341,25 @@ export function SettingsPage() {
                 showValue={false}
                 onChange={(v: number) => update({ min_free_gb: v })}
               />
+            </Section>
+
+            <Section title="Game page" blurb="Forge on Steam's own library pages">
+              <ForgeToggle
+                name="gamePage"
+                label="Mods section on game pages"
+                description="Installed mods, their switches and updates, Add mods, the anti-cheat lock and the way back after a crash, above Play on each game's page. Turn off to leave Steam's page untouched."
+              />
+              <ForgeToggle
+                name="tileDots"
+                label="Update dots on game tiles"
+                description="A small crimson dot on library and home tiles of games with mod updates. Checked against Nexus at most every six hours per game."
+              />
+              <ForgeToggle
+                name="moddedCollection"
+                label="Keep a Modded collection"
+                description="A Steam collection of the games with at least one mod on through Forge, kept up to date as mods are switched on and off. Turning this off leaves the collection as it is; nothing is deleted."
+              />
+              <ModdedCollectionControls />
             </Section>
 
             <Section title="Experimental" blurb="for games without built-in support">

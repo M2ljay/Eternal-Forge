@@ -82,6 +82,16 @@ Progress is shown by **filling the control itself** left-to-right
 (collection rows, the install hero, the QAM prefix-tool button) rather
 than by a separate bar. One language for "this is working" everywhere.
 
+### Forge surfaces
+
+The Mods section on Steam's game page and the tile dots sit on Steam's own
+pages, next to the user's other Eternal apps, so they use the Eternal
+palette instead of brand orange: AMOLED black `#000000` behind, crimson
+`#D7263D` for accents and problems (an update, a lock, the restore offer),
+steel `#C9D1D9` for secondary text, gunmetal `#1A1D21` for surfaces. Focus is
+a crimson edge on a lighter surface; no glow, no haze. The values live in
+`forgeRules.ts` (re-exported by `theme.ts`). See [forge.md](forge.md).
+
 ## Gamepad first
 
 - Anything interactive is a `Focusable` or `DialogButton`; focus order

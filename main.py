@@ -22526,6 +22526,11 @@ query Link($slug: String!, $domainName: String!) {
                 api_key,
             )
             current = {n["modId"]: n for n in nodes}
+            # Forge's tile dots and game page reuse what was just fetched.
+            try:
+                _forge_store_versions(game_domain, nodes)
+            except (OSError, ValueError, TypeError) as e:
+                decky.logger.info(f"forge: update cache not written: {e}")
             updates = {}
             for folder, rec in tracked.items():
                 node = current.get(rec["mod_id"])
@@ -38039,4 +38044,511 @@ Plugin.get_reinstall_target = _get_reinstall_target
 if _INTEGRITY is not None and _INTEGRITY.import_failures:
     decky.logger.error(f"install integrity: modules failed to import: {_INTEGRITY.import_failures}")
 
+
+# ---- Forge: anti-cheat lock, way back after a crash, update counts --------------
+# Pure rules in py_modules/forge_guard.py; this is the state file, the
+# callables and the wrappers that refuse installs on a locked game.
+import forge_guard  # noqa: E402
+
+FORGE_STATE = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "forge.json")
+FORGE_UPDATE_CACHE = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "forge-update-cache.json")
+FORGE_CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules",
+                             "anticheat_games.json")
+_FORGE_LOCK = threading.RLock()
+# game folder -> (checked at, hit). A collection installs hundreds of mods
+# in a row; the folder walk runs once per ten minutes, not once per mod.
+_FORGE_SCAN_CACHE: dict = {}
+_FORGE_SCAN_TTL = 600
+_FORGE_REFRESH_LOCK = None
+
+
+def _forge_read(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _forge_write(path: str, data: dict) -> None:
+    with _FORGE_LOCK:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, path)
+
+
+def _forge_state() -> dict:
+    st = _forge_read(FORGE_STATE)
+    for key in ("games", "overrides", "guard", "modded", "collection"):
+        if not isinstance(st.get(key), dict):
+            st[key] = {}
+    return st
+
+
+def _forge_app_for_domain(st: dict, game_domain: str) -> int:
+    if not game_domain:
+        return 0
+    known = (st.get("games") or {}).get(game_domain) or {}
+    if known.get("app_id"):
+        return int(known["app_id"])
+    settings = _load_settings()
+    ids = settings.get("domain_app_ids") or {}
+    if ids.get(game_domain):
+        return int(ids[game_domain])
+    for key, g in (settings.get("experimental_games") or {}).items():
+        if isinstance(g, dict) and g.get("nexusDomain") == game_domain:
+            try:
+                return int(g.get("appId") or key)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _forge_game_dir(st: dict, app_id: int, game_domain: str = "", install_dir: str = "") -> str:
+    if not install_dir and game_domain:
+        install_dir = ((st.get("games") or {}).get(game_domain) or {}).get("install_dir") or ""
+    if not install_dir and app_id:
+        manifest = _find_in_libraries(f"appmanifest_{int(app_id)}.acf")
+        if manifest:
+            install_dir = experimental_games.read_appmanifest(manifest).get("installdir", "")
+    if not install_dir or os.path.basename(install_dir) != install_dir:
+        return ""
+    path = _game_dir(install_dir)
+    return path if os.path.isdir(path) else ""
+
+
+def _forge_folder_hit(game_dir: str) -> dict:
+    if not game_dir:
+        return {}
+    now = time.time()
+    cached = _FORGE_SCAN_CACHE.get(game_dir)
+    if cached and now - cached[0] < _FORGE_SCAN_TTL:
+        return cached[1]
+    hit = forge_guard.scan_folder(game_dir)
+    _FORGE_SCAN_CACHE[game_dir] = (now, hit)
+    return hit
+
+
+def _forge_verdict(app_id: int = 0, game_domain: str = "", install_dir: str = "",
+                   st: dict = None) -> dict:
+    st = st if st is not None else _forge_state()
+    app_id = int(app_id or 0) or _forge_app_for_domain(st, game_domain)
+    hit = _forge_folder_hit(_forge_game_dir(st, app_id, game_domain, install_dir))
+    v = forge_guard.verdict(app_id, forge_guard.load_catalog(FORGE_CATALOG), hit,
+                            st.get("overrides") or {})
+    v["app_id"] = app_id
+    return v
+
+
+async def _forge_register_games(self, games: list) -> dict:
+    """Domain -> app id and install folder for every game the frontend
+    manages, so a call that names only a domain can still be checked."""
+    with _FORGE_LOCK:
+        st = _forge_state()
+        for g in (games or [])[:500]:
+            if not isinstance(g, (list, tuple)) or len(g) < 3:
+                continue
+            domain, app_id, install_dir = g[0], g[1], g[2]
+            if not re.fullmatch(r"[a-z0-9_-]+", str(domain or "")):
+                continue
+            try:
+                app_id = int(app_id)
+            except (TypeError, ValueError):
+                continue
+            st["games"][domain] = {"app_id": app_id, "install_dir": str(install_dir or "")}
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, "count": len(st["games"])}
+
+
+async def _forge_game_status(self, app_id: int, game_domain: str = "", install_dir: str = "") -> dict:
+    """The game page's Mods section: the anti-cheat verdict and the state of
+    the way back."""
+    app_id = int(app_id or 0)
+    st = _forge_state()
+    v = await asyncio.to_thread(_forge_verdict, app_id, game_domain or "", install_dir or "", st)
+    guard = forge_guard.summary(st["guard"].get(str(app_id)) or {}, time.time())
+    return {"ok": True, "anticheat": v, "guard": guard}
+
+
+async def _forge_set_anticheat_override(self, app_id: int, enabled: bool,
+                                        acknowledgement: str = "") -> dict:
+    """One press from the game page or the QAM, no dialog: the risk is in
+    the button's own label. The flag is what the install gate reads, so
+    nothing unlocks a game but this call. `acknowledgement` is kept for the
+    frontend's call shape and not checked."""
+    app_id = int(app_id or 0)
+    if not app_id:
+        return {"ok": False, "error": "No game"}
+    with _FORGE_LOCK:
+        st = _forge_state()
+        if enabled:
+            v = _forge_verdict(app_id, st=st)
+            if not v["detected"]:
+                return {"ok": False, "error": "This game has no anti-cheat lock."}
+            st["overrides"][str(app_id)] = {"at": int(time.time()), "risk": v.get("risk", "ban")}
+        else:
+            st["overrides"].pop(str(app_id), None)
+        _forge_write(FORGE_STATE, st)
+    decky.logger.info(f"forge: anti-cheat override for {app_id} {'on' if enabled else 'off'}")
+    return {"ok": True}
+
+
+def _forge_guard_update(app_id: int, fn):
+    with _FORGE_LOCK:
+        st = _forge_state()
+        key = str(int(app_id))
+        result = fn(st["guard"].get(key) or {})
+        new_state, out = result if isinstance(result, tuple) else (result, None)
+        st["guard"][key] = new_state
+        _forge_write(FORGE_STATE, st)
+        return new_state, out
+
+
+async def _forge_guard_launch(self, app_id: int, game_domain: str, mods: dict) -> dict:
+    app_id = int(app_id or 0)
+    if not app_id:
+        return {"ok": False}
+    now = time.time()
+    await asyncio.to_thread(_forge_guard_update, app_id,
+                            lambda g: forge_guard.on_launch(g, mods, now))
+    return {"ok": True}
+
+
+def _forge_wer_roots() -> list:
+    if sys.platform != "win32":
+        return []
+    roots = []
+    for base in (os.environ.get("ProgramData") or r"C:\ProgramData",
+                 os.environ.get("LOCALAPPDATA") or ""):
+        if base:
+            for sub in ("ReportArchive", "ReportQueue"):
+                roots.append(os.path.join(base, "Microsoft", "Windows", "WER", sub))
+    return roots
+
+
+def _forge_exe_names(process_name: str, install_dir: str) -> list:
+    names = [process_name] if process_name else []
+    if install_dir and os.path.basename(install_dir) == install_dir:
+        try:
+            names += [n for n in os.listdir(_game_dir(install_dir)) if n.lower().endswith(".exe")][:20]
+        except OSError:
+            pass
+    return names
+
+
+async def _forge_guard_exit(self, app_id: int, process_name: str = "", install_dir: str = "") -> dict:
+    """The game stopped: a clean run becomes the last known good set; a
+    failed start after a mod change counts towards the restore offer."""
+    app_id = int(app_id or 0)
+    if not app_id:
+        return {"ok": False}
+    now = time.time()
+
+    def run():
+        started = float(((_forge_state()["guard"].get(str(app_id)) or {}).get("session") or {})
+                        .get("started") or 0)
+        crash = ""
+        if started:
+            crash = forge_guard.wer_crashed(_forge_exe_names(process_name or "", install_dir or ""),
+                                            started, now, _forge_wer_roots())
+
+        def step(g):
+            g, event = forge_guard.on_exit(g, now, bool(crash))
+            notify = event == "offer" and not g.get("notified")
+            if notify:
+                g = dict(g, notified=True)
+            return g, (event, notify)
+
+        _st, (event, notify) = _forge_guard_update(app_id, step)
+        return event, notify, crash
+
+    event, notify, crash = await asyncio.to_thread(run)
+    if event:
+        decky.logger.info(f"forge: {app_id} exited ({event}{', WER ' + crash if crash else ''})")
+    return {"ok": True, "event": event, "notify": notify}
+
+
+async def _forge_guard_plan(self, app_id: int, mods: dict, kind: str = "restore") -> dict:
+    st = _forge_state()
+    g = st["guard"].get(str(int(app_id or 0))) or {}
+    if kind == "undo":
+        plan = forge_guard.undo_plan(g, mods, time.time())
+    else:
+        plan = forge_guard.restore_plan(g, mods)
+    return {"ok": True, **plan}
+
+
+async def _forge_guard_restored(self, app_id: int, previous: dict) -> dict:
+    now = time.time()
+    await asyncio.to_thread(_forge_guard_update, int(app_id or 0),
+                            lambda g: forge_guard.after_restore(g, previous, now))
+    return {"ok": True}
+
+
+async def _forge_guard_undone(self, app_id: int) -> dict:
+    await asyncio.to_thread(_forge_guard_update, int(app_id or 0),
+                            lambda g: {k: v for k, v in g.items() if k != "undo"})
+    return {"ok": True}
+
+
+async def _forge_guard_dismiss(self, app_id: int) -> dict:
+    await asyncio.to_thread(_forge_guard_update, int(app_id or 0),
+                            lambda g: dict(g, offer=False, notified=True, fails=0, fail_set=None))
+    return {"ok": True}
+
+
+def _forge_store_versions(game_domain: str, nodes: list) -> None:
+    """Keep the Nexus versions any update check fetched, so the tile dots
+    and the game page reuse them instead of asking again."""
+    versions = {str(n.get("modId")): n.get("version") or "" for n in nodes or []
+                if isinstance(n, dict) and n.get("modId")}
+    with _FORGE_LOCK:
+        cache = _forge_read(FORGE_UPDATE_CACHE)
+        games = cache.setdefault("games", {})
+        games[game_domain] = {"at": int(time.time()), "versions": versions}
+        _forge_write(FORGE_UPDATE_CACHE, cache)
+
+
+def _forge_tracked(records: dict) -> list:
+    return [int(r["mod_id"]) for r in (records or {}).values()
+            if isinstance(r, dict) and r.get("mod_id") and r.get("source") != "companion"]
+
+
+async def _forge_update_dots(self, domains: list, refresh: bool = False) -> dict:
+    """Mods with an update, per game, from cached Nexus versions. With
+    refresh, games whose cache is older than six hours are fetched again -
+    at most three per call and one fetching call per 20 seconds, so a
+    library of modded games never turns into a burst of API calls."""
+    global _FORGE_REFRESH_LOCK
+    domains = [d for d in (domains or [])[:200] if re.fullmatch(r"[a-z0-9_-]+", str(d or ""))]
+    installed = _load_settings().get("installed") or {}
+    refreshed = []
+    if refresh and domains:
+        if _FORGE_REFRESH_LOCK is None:
+            _FORGE_REFRESH_LOCK = asyncio.Lock()
+        async with _FORGE_REFRESH_LOCK:
+            cache = _forge_read(FORGE_UPDATE_CACHE)
+            now = time.time()
+            if now - float(cache.get("last_net") or 0) >= forge_guard.REFRESH_SPACING_SECONDS:
+                stale = forge_guard.stale_domains(
+                    cache.get("games") or {}, domains, now,
+                    lambda d: bool(_forge_tracked(installed.get(d) or {})))
+                api_key = _load_settings().get("api_key") if stale else None
+                if stale and api_key:
+                    with _FORGE_LOCK:
+                        cache = _forge_read(FORGE_UPDATE_CACHE)
+                        cache["last_net"] = int(now)
+                        _forge_write(FORGE_UPDATE_CACHE, cache)
+                    for d in stale[:forge_guard.REFRESH_PER_CALL]:
+                        try:
+                            game_id = await _resolve_game_id(d, api_key)
+                            nodes = await _legacy_mods_in_batches(
+                                game_id, _forge_tracked(installed.get(d) or {}), " modId version ", api_key)
+                            _forge_store_versions(d, nodes)
+                            refreshed.append(d)
+                        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, KeyError,
+                                TypeError, ValueError) as e:
+                            decky.logger.info(f"forge: update check for {d} failed: {type(e).__name__}")
+    cache = (_forge_read(FORGE_UPDATE_CACHE).get("games") or {})
+    out = {}
+    for d in domains:
+        entry = cache.get(d) or {}
+        folders = forge_guard.updates_from_versions(
+            installed.get(d) or {}, entry.get("versions") or {}, _norm_version, _is_newer_version)
+        out[d] = {"count": len(folders), "folders": folders, "at": int(entry.get("at") or 0)}
+    return {"ok": True, "games": out, "refreshed": refreshed}
+
+
+async def _forge_note_modded(self, entries: list, complete: bool = False) -> dict:
+    """[app_id, domain, mods on] per game, counted by the frontend from
+    get_installed_mods. complete: these are all the managed games (the
+    load-time scan), so any other game is no longer modded."""
+    now = time.time()
+    with _FORGE_LOCK:
+        st = _forge_state()
+        st["modded"] = forge_guard.note_modded(st["modded"], (entries or [])[:2000], now, bool(complete))
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, "modded": forge_guard.modded_apps(st["modded"])}
+
+
+async def _forge_modded_state(self) -> dict:
+    """What the Modded collection reconcile needs, all local: the games
+    with a mod on, the domains that have install records at all (the only
+    ones worth scanning at load) and Forge's own collection record."""
+    st = _forge_state()
+    return {"ok": True, "modded": forge_guard.modded_apps(st["modded"]),
+            "domains": _modded_domains(_load_settings()),
+            "collection": forge_guard.clean_collection_record(st["collection"])}
+
+
+async def _forge_set_modded_collection(self, record: dict) -> dict:
+    """Remember the collection Forge created ({} forgets it). Only a
+    collection recorded here is ever changed or deleted by Forge."""
+    rec = forge_guard.clean_collection_record(record)
+    with _FORGE_LOCK:
+        st = _forge_state()
+        st["collection"] = rec
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, "collection": rec}
+
+
+Plugin.forge_register_games = _forge_register_games
+Plugin.forge_note_modded = _forge_note_modded
+Plugin.forge_modded_state = _forge_modded_state
+Plugin.forge_set_modded_collection = _forge_set_modded_collection
+Plugin.forge_game_status = _forge_game_status
+Plugin.forge_set_anticheat_override = _forge_set_anticheat_override
+Plugin.forge_guard_launch = _forge_guard_launch
+Plugin.forge_guard_exit = _forge_guard_exit
+Plugin.forge_guard_plan = _forge_guard_plan
+Plugin.forge_guard_restored = _forge_guard_restored
+Plugin.forge_guard_undone = _forge_guard_undone
+Plugin.forge_guard_dismiss = _forge_guard_dismiss
+Plugin.forge_update_dots = _forge_update_dots
+
+# Every call that puts mod files into a game or switches mods on, and the
+# argument that makes a switch call an "on" (None: always gated). Switching
+# off and removing are never refused: that is the safe direction.
+_FORGE_GATED = {
+    "install_mod": None,
+    "install_frosty_mod": None,
+    "install_collection_direct": None,
+    "install_collection_bundles": None,
+    "apply_collection_plugins": None,
+    "apply_known_prerequisites": None,
+    "install_framework": None,
+    "run_prefix_tool": None,
+    "setup_merge_support": None,
+    "install_user_tool": None,
+    "apply_mod_setup": None,
+    "apply_experimental_tool": None,
+    "install_reshade": None,
+    "repair_failing_mods": None,
+    "run_mod_program": None,
+    "set_mod_enabled": "enabled",
+    "set_all_mods_enabled": "enabled",
+    "set_frosty_mod_enabled": "enabled",
+    "set_plugin_enabled": "enabled",
+    "set_experimental_framework_enabled": "enabled",
+    "set_framework_enabled": "enabled",
+    "set_framework_launch_options": "options",
+}
+
+
+def _wrap_anticheat_lock() -> None:
+    for name, switch in _FORGE_GATED.items():
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+        try:
+            sig = inspect.signature(original)
+        except (TypeError, ValueError):
+            continue
+
+        def make(original, sig, switch, name):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                try:
+                    bound = sig.bind_partial(self, *args, **kwargs).arguments
+                except TypeError:
+                    bound = {}
+                gated = switch is None or bool(bound.get(switch))
+                if gated:
+                    try:
+                        v = await asyncio.to_thread(
+                            _forge_verdict, int(bound.get("app_id") or 0),
+                            str(bound.get("game_domain") or ""), str(bound.get("install_dir") or ""))
+                    except Exception as e:  # noqa: BLE001 - logged, then the list alone decides
+                        decky.logger.warning(f"forge: anti-cheat check for {name} failed: {e}")
+                        # Fail closed for the games the list knows; a broken
+                        # folder walk must not unlock them, nor brick the rest.
+                        try:
+                            v = forge_guard.verdict(int(bound.get("app_id") or 0),
+                                                    forge_guard.load_catalog(FORGE_CATALOG), {}, {})
+                        except (TypeError, ValueError):
+                            v = {"locked": False}
+                    if v.get("locked"):
+                        decky.logger.info(f"forge: refused {name} for app {v.get('app_id')} "
+                                          f"({', '.join(v.get('products') or [])})")
+                        return {"ok": False, "error": forge_guard.lock_message(v),
+                                "anticheat_locked": True}
+                return await original(self, *args, **kwargs)
+            return wrapper
+
+        setattr(Plugin, name, make(original, sig, switch, name))
+
+
+_wrap_anticheat_lock()
+
+
+# ---- Forge: tell the frontend when a game's mods may have changed ------------
+# The Modded collection follows which games have a mod on. Every call that can
+# put a mod in, switch one, or take one out ends with a "forge_mods_changed"
+# event naming the game (domain, app id; "" / 0 when the call does not say),
+# and the frontend recounts that game from disk, debounced. The crash guard's
+# restore and the anti-cheat lock's "switch mods off" go through these same
+# calls, so they are covered without knowing about them. Wrapped last, so a
+# call the anti-cheat gate refused (nothing changed) sends nothing.
+# run_mod_program is left out: it returns before the program has run (the
+# result comes later as "mod_program_done") and never changes which mods are on.
+_FORGE_MOD_CHANGES = tuple(n for n in _FORGE_GATED if n != "run_mod_program") + (
+    "install_fomod",
+    "install_fomod_auto",
+    "uninstall_mod",
+    "uninstall_all_mods",
+    "uninstall_collection",
+    "reset_game_modding",
+    "uninstall_frosty_mod",
+    "reset_frosty",
+    "park_failing_mods",
+    "disable_failing_mods",
+    "disable_plugins",
+    "disable_blocked_plugins",
+)
+
+
+def _wrap_mod_change_events() -> None:
+    for name in _FORGE_MOD_CHANGES:
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+        try:
+            sig = inspect.signature(original)
+        except (TypeError, ValueError):
+            continue
+
+        def make(original, sig):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                result = await original(self, *args, **kwargs)
+                if isinstance(result, dict) and result.get("anticheat_locked"):
+                    return result
+                try:
+                    bound = sig.bind_partial(self, *args, **kwargs).arguments
+                except TypeError:
+                    bound = {}
+                domain = bound.get("game_domain")
+                domain = domain if isinstance(domain, str) and re.fullmatch(r"[a-z0-9_-]+", domain) else ""
+                try:
+                    app_id = int(bound.get("app_id") or 0)
+                except (TypeError, ValueError):
+                    app_id = 0
+                try:
+                    await decky.emit("forge_mods_changed", domain, app_id)
+                except Exception as e:  # noqa: BLE001 - the change itself already happened
+                    decky.logger.info(f"forge: mods-changed event not sent: {e}")
+                return result
+            return wrapper
+
+        setattr(Plugin, name, make(original, sig))
+
+
+_wrap_mod_change_events()
+
+
+# Last, so every job callable is counted - Forge's included - and the count
+# wraps the anti-cheat lock rather than the other way round.
 _wrap_jobs()

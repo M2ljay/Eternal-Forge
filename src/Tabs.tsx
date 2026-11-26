@@ -4,7 +4,7 @@
 import { Focusable, Navigation, QuickAccessTab } from "@decky/ui";
 import { GamepadButton } from "@decky/ui";
 
-import { popsToExitToQam } from "./navRules";
+import { exitReturnsToGamePage, popsToExitToQam } from "./navRules";
 import { NEXUS_ORANGE } from "./theme";
 
 export interface TabDef {
@@ -37,9 +37,20 @@ export const TABS: TabDef[] = [
 // pops Steam's own screens. So the counter lives here and pushes go through
 // pushOurPage - there is no second place to forget.
 let ourDepth = 0;
+// Pages opened from a game's own page (Forge's Mods section) go back to
+// that page on B, not to the QAM: the user never opened the QAM.
+let fromGamePage = false;
 
 export function resetTabStack(): void {
   ourDepth = 0;
+  fromGamePage = false;
+}
+
+/** Open one of our pages from Steam's game page. B unwinds back to it. */
+export function pushFromGamePage(route: string): void {
+  resetTabStack();
+  fromGamePage = true;
+  pushOurPage(route);
 }
 
 /** Push one of our full-screen pages, counting it. */
@@ -119,6 +130,11 @@ export function exitTabsToQam(): void {
   // reasoning in navRules.popsToExitToQam, with tests.
   const pops = popsToExitToQam(ourDepth);
   ourDepth = 0;
+  if (exitReturnsToGamePage(fromGamePage)) {
+    fromGamePage = false;
+    for (let i = 0; i < pops; i++) Navigation.NavigateBack();
+    return;
+  }
   Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
   setTimeout(() => {
     for (let i = 0; i < pops; i++) Navigation.NavigateBack();

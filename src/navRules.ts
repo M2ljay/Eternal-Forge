@@ -52,3 +52,10 @@ export function backAction(page: PageId): BackAction {
 export function popsToExitToQam(depth: number): number {
   return Math.max(0, Math.floor(depth));
 }
+
+/** Leaving our pages when they were opened from Steam's game page: pop back
+ * to that page and leave the QAM shut. Opening it there would put a panel
+ * over the game the user was looking at, which they never asked for. */
+export function exitReturnsToGamePage(openedFromGamePage: boolean): boolean {
+  return openedFromGamePage;
+}

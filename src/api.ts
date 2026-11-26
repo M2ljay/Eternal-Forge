@@ -2854,3 +2854,95 @@ export const getReinstallTarget = callable<
     message?: string;
   }
 >("get_reinstall_target");
+
+// ---- Forge: game page Mods section, anti-cheat lock, way back after a crash ----
+import type { AntiCheatVerdict, RestorePlan } from "./forgeRules";
+
+export interface ForgeGuardSummary {
+  offer: boolean;
+  fails: number;
+  lkg_at: number;
+  undo: boolean;
+  last_run: { seconds: number; crashed: boolean; at: number } | null;
+}
+
+/** [domain, appId, installDir] for every managed game, so the backend can
+ * check a call that names only a domain. */
+export const forgeRegisterGames = callable<
+  [games: [string, number, string][]],
+  { ok: boolean; count?: number }
+>("forge_register_games");
+
+export const forgeGameStatus = callable<
+  [app_id: number, game_domain: string, install_dir: string],
+  { ok: boolean; anticheat: AntiCheatVerdict & { app_id: number }; guard: ForgeGuardSummary }
+>("forge_game_status");
+
+/** acknowledgement must be the exact phrase the backend expects; the UI
+ * only sends it after its confirmation dialog. */
+export const forgeSetAnticheatOverride = callable<
+  [app_id: number, enabled: boolean, acknowledgement: string],
+  { ok: boolean; error?: string }
+>("forge_set_anticheat_override");
+
+export const forgeGuardLaunch = callable<
+  [app_id: number, game_domain: string, mods: Record<string, boolean>],
+  { ok: boolean }
+>("forge_guard_launch");
+
+export const forgeGuardExit = callable<
+  [app_id: number, process_name: string, install_dir: string],
+  { ok: boolean; event?: "" | "clean" | "failed" | "offer"; notify?: boolean }
+>("forge_guard_exit");
+
+export const forgeGuardPlan = callable<
+  [app_id: number, mods: Record<string, boolean>, kind: "restore" | "undo"],
+  { ok: boolean; available?: boolean } & RestorePlan
+>("forge_guard_plan");
+
+export const forgeGuardRestored = callable<
+  [app_id: number, previous: Record<string, boolean>],
+  { ok: boolean }
+>("forge_guard_restored");
+
+export const forgeGuardUndone = callable<[app_id: number], { ok: boolean }>("forge_guard_undone");
+export const forgeGuardDismiss = callable<[app_id: number], { ok: boolean }>("forge_guard_dismiss");
+
+/** Cached mod-update counts per game; refresh lets the backend re-ask
+ * Nexus for games whose cache is old (it caps and spaces those calls). */
+export const forgeUpdateDots = callable<
+  [domains: string[], refresh: boolean],
+  {
+    ok: boolean;
+    games: Record<string, { count: number; folders: string[]; at: number }>;
+    refreshed: string[];
+  }
+>("forge_update_dots");
+
+/** [appId, domain, mods on] per game, counted from get_installed_mods (-1:
+ * could not read, keep what was known). complete: the entries are every
+ * managed game, so any other game stops counting as modded. */
+export const forgeNoteModded = callable<
+  [entries: [number, string, number][], complete: boolean],
+  { ok: boolean; modded: number[] }
+>("forge_note_modded");
+
+export interface ForgeModdedCollectionRecord {
+  id?: string;
+  name?: string;
+  added?: number[];
+  clash?: string;
+}
+
+/** Local only: the games with a mod on, the domains with install records,
+ * and the record of the collection Forge created ({} when none). */
+export const forgeModdedState = callable<
+  [],
+  { ok: boolean; modded: number[]; domains: string[]; collection: ForgeModdedCollectionRecord }
+>("forge_modded_state");
+
+/** Record (or with {} forget) the collection Forge created. */
+export const forgeSetModdedCollection = callable<
+  [record: ForgeModdedCollectionRecord],
+  { ok: boolean; collection: ForgeModdedCollectionRecord }
+>("forge_set_modded_collection");
