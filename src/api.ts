@@ -2946,3 +2946,56 @@ export const forgeSetModdedCollection = callable<
   [record: ForgeModdedCollectionRecord],
   { ok: boolean; collection: ForgeModdedCollectionRecord }
 >("forge_set_modded_collection");
+
+// ---- Forge: save backups through Ludusavi (optional) ---------------------------
+import type { SaveBackupGame } from "./forgeRules";
+
+export interface SaveBackupStatus {
+  ok: boolean;
+  found: boolean;
+  path: string;
+  enabled: boolean;
+  skip_minutes: number;
+  hint: string;
+  install_command: string;
+  game: SaveBackupGame;
+}
+
+export interface SaveBackupEntry {
+  id: string;
+  when: string;
+  at: number;
+  comment: string;
+  locked: boolean;
+  os: string;
+}
+
+/** Local only: is Ludusavi installed, the switch, and this game's last
+ * backup. recheck looks for Ludusavi again now (Settings). */
+export const forgeSaveBackupStatus = callable<[app_id: number, recheck?: boolean], SaveBackupStatus>(
+  "forge_save_backup_status"
+);
+
+export const forgeSaveBackupSettings = callable<
+  [enabled: boolean, skip_minutes?: number],
+  { ok: boolean; enabled: boolean; skip_minutes: number }
+>("forge_save_backup_settings");
+
+/** Before the crash guard's restore and Undo. Never a reason not to go
+ * ahead: the change runs whatever this answers. */
+export const forgeSaveBackup = callable<
+  [app_id: number, game_name: string, reason: string],
+  { ok: boolean; ran?: boolean; skipped?: string; error?: string; missing?: boolean }
+>("forge_save_backup");
+
+export const forgeSaveBackupList = callable<
+  [app_id: number, game_name: string],
+  { ok: boolean; found?: boolean; title?: string; backups?: SaveBackupEntry[]; path?: string; error?: string }
+>("forge_save_backup_list");
+
+/** Takes a fresh backup first and restores only if it worked. confirmed:
+ * sent only after the user's confirmation. */
+export const forgeSaveRestore = callable<
+  [app_id: number, game_name: string, backup_id: string, confirmed: boolean],
+  { ok: boolean; error?: string; backup_failed?: boolean; title?: string }
+>("forge_save_restore");

@@ -14,7 +14,11 @@ import {
   FORGE_STEEL,
   GAME_PAGE_ROWS,
   PATCH_FAILURE_LIMIT,
+  SAVE_BACKUP_HINT,
   appsWithUpdates,
+  backupAge,
+  backupFailToast,
+  backupRowLabel,
   countLabel,
   dotCss,
   lockBody,
@@ -22,8 +26,11 @@ import {
   modSet,
   overrideLabel,
   offerBody,
+  restoreConfirmBody,
   rowsToShow,
+  saveBackupLine,
   sectionMode,
+  skipWindowLabel,
   undoOutcome,
 } from "../.test-build/forgeRules.js";
 import { exitReturnsToGamePage } from "../.test-build/navRules.js";
@@ -246,4 +253,50 @@ test("the game page calls forgeGuardUndone only through undoOutcome's verdict", 
   const calls = code.match(/forgeGuardUndone\(/g) ?? [];
   assert.equal(calls.length, 1);
   assert.match(code, /if \(outcome\.clearRecord\) await forgeGuardUndone\(appId\)/);
+});
+
+// ---- save backups (Ludusavi) --------------------------------------------------
+
+test("save line: silent without Ludusavi, then last backup and a failure note", () => {
+  const now = 1_000_000;
+  assert.equal(saveBackupLine(false, undefined, now), null);
+  assert.deepEqual(saveBackupLine(true, undefined, now), { text: "No save backup yet", failed: "" });
+  const ok = { last_backup_at: now - 12 * 60, last_at: now - 12 * 60, last_ok: true, last_error: "" };
+  assert.deepEqual(saveBackupLine(true, ok, now), { text: "Last save backup: 12 min ago", failed: "" });
+  const failedLater = { last_backup_at: now - 3 * 3600, last_at: now - 60, last_ok: false, last_error: "x" };
+  assert.deepEqual(saveBackupLine(true, failedLater, now), {
+    text: "Last save backup: 3 h ago",
+    failed: "Save backup failed",
+  });
+});
+
+test("backup ages", () => {
+  assert.equal(backupAge(100, 120), "just now");
+  assert.equal(backupAge(0, 86400 + 5), "yesterday");
+  assert.equal(backupAge(0, 5 * 86400), "5 days ago");
+  assert.equal(backupAge(200, 100), "just now");
+});
+
+test("restore list rows carry date, age, comment and lock", () => {
+  const now = Date.UTC(2026, 10, 26, 12) / 1000;
+  const row = backupRowLabel({ at: now - 2 * 86400, comment: "before DLC", locked: true }, now);
+  assert.match(row, /2026, \d\d:\d\d \(2 days ago\) - before DLC - kept$/);
+  assert.equal(backupRowLabel({ at: 0, when: "sometime" }, now), "sometime");
+});
+
+test("restore confirmation says a fresh backup comes first", () => {
+  const body = restoreConfirmBody("Hades", "1 Nov 2026, 10:00");
+  assert.match(body, /first backs up Hades's current saves/);
+  assert.match(body, /nothing is restored/);
+});
+
+test("a failed backup is a small note, never a stop", () => {
+  assert.deepEqual(backupFailToast("Ludusavi took longer than 60 seconds, so the backup was stopped."), {
+    title: "Save backup failed",
+    body: "Ludusavi took longer than 60 seconds, so the backup was stopped. The mod change went ahead.",
+  });
+  assert.equal(backupFailToast("").body, "The mod change went ahead.");
+  assert.equal(SAVE_BACKUP_HINT, "Install Ludusavi to back up saves before mod changes");
+  assert.equal(skipWindowLabel(0), "Back up before every mod change");
+  assert.equal(skipWindowLabel(30), "At most one backup per game every 30 min");
 });

@@ -10,6 +10,7 @@ import { DOT_STYLE_ID, appsWithUpdates, dotCss, modSet, offerToast } from "./for
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { getSupportedGame, managedGames, modeParams } from "./games";
 import { startModdedCollection } from "./moddedSync";
+import { startSaveBackupEvents } from "./SaveBackup";
 import { subscribeGameState } from "./state";
 
 /** Domain, app id and folder of every managed game, for the backend's
@@ -77,8 +78,10 @@ export function startForgeBackground(): () => void {
     writeStyle(getForgeSetting("tileDots") ? lastCss : "")
   );
   const stopModded = startModdedCollection();
+  const stopSaveEvents = startSaveBackupEvents();
   return () => {
     stopModded();
+    stopSaveEvents();
     clearTimeout(first);
     clearInterval(every);
     unsubState();

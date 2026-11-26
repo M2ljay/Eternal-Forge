@@ -1,7 +1,7 @@
 # Forge on the game page
 
 Five features that live on Steam's own library pages rather than in the
-Quick Access Menu. Built on Windows (Decky Loader in Steam Big Picture,
+Quick Access Menu, plus save backups through Ludusavi before mod changes. Built on Windows (Decky Loader in Steam Big Picture,
 started by Core), and nothing in them is Windows-only except the crash
 report check.
 
@@ -12,10 +12,13 @@ report check.
 | Way back after a crash | `src/forge.ts` (game start/exit), the section's offer | `forge_guard_*` |
 | Update dots on tiles | `src/forge.ts` (one stylesheet) | `forge_update_dots`, cache filled by `check_updates` too |
 | Steam collection "Modded" | `src/moddedSync.ts`, rules in `src/moddedCollection.ts` | `forge_note_modded`, `forge_modded_state`, `forge_set_modded_collection`, the `forge_mods_changed` event |
+| Save backups (Ludusavi, optional) | `src/SaveBackup.tsx`, the section's save line | `py_modules/save_backup.py`, `forge_save_*`, `_wrap_save_backups` in `main.py`, the `forge_save_backup` event |
 
 Pure rules are in `src/forgeRules.ts` (tested by `tests/forge.test.mjs`),
 `src/moddedCollection.ts` (tested by `tests/moddedCollection.test.mjs`)
-and `py_modules/forge_guard.py` (tested by `tests/test_forge.py`).
+and `py_modules/forge_guard.py` (tested by `tests/test_forge.py`). The
+save backups are tested by `tests/test_save_backup.py` against a fake
+`ludusavi` that answers like the real one's `--api` mode.
 
 The frontend parts can be switched off in the plugin's Settings, under
 **Game page**.
@@ -287,3 +290,102 @@ complete 20 seconds after load on every start (a user's "Modded" that has
 not loaded yet would look like a free name), and that a collection's `id`
 is set once `Save()` has returned (the code falls back to finding it by its
 new name).
+
+## Save backups before mod changes (Ludusavi)
+
+Forge can back a game's saves up with
+[Ludusavi](https://github.com/mtkennerly/ludusavi) (MIT) before it changes
+that game's mods. Ludusavi is **optional** and is never installed by Forge:
+
+```
+winget install -e --id mtkennerly.ludusavi
+```
+
+### Finding it
+
+`ludusavi` / `ludusavi.exe` on the loader's PATH first, then the places a
+loader started before the install would not see on PATH: winget's
+`%LOCALAPPDATA%\Microsoft\WinGet\Links` and
+`Packages\mtkennerly.ludusavi_*` (the winget package is a portable zip,
+command alias `ludusavi`), the same under `%ProgramFiles%\WinGet`, and
+Scoop's `apps\ludusavi\current` and `shims` (under `%SCOOP%` or
+`%USERPROFILE%\scoop`, and `%SCOOP_GLOBAL%` or `%ProgramData%\scoop`). The
+answer is cached for five minutes; Settings looks again when it opens.
+
+Without it, Settings shows one line (*Install Ludusavi to back up saves
+before mod changes*), the game page says nothing about saves, and nothing
+else changes.
+
+### When a backup runs
+
+- **Before every call that puts mods in or switches them on** for a game:
+  the same list the anti-cheat lock guards (`_FORGE_GATED`, the "on"
+  direction only), so installs, collections, frameworks, enabling a mod or
+  all mods, load-order writers and the rest are covered wherever they are
+  started from. Switching off and uninstalling never back up. The wrapper
+  sits **inside** the anti-cheat lock: a call the lock refuses backs up
+  nothing.
+- **Before the crash guard's restore and before Undo**, from the game page
+  (`forge_save_backup`).
+- **Before a save restore**, always (see below).
+
+A backup for a game is **skipped** when one for that game already ran (worked
+or not) within the window: 30 minutes by default, 0 to 120 in Settings. A
+collection of 300 mods is one backup, and a broken Ludusavi is not retried
+before each of them. Concurrent calls for one game wait for the one backup
+in progress.
+
+**Time box: 60 seconds** for the title lookup and the backup together. When
+it runs out Ludusavi is stopped (`subprocess.run(timeout=...)` kills it).
+**A backup never blocks the mod change**: a timeout, a crash, files Ludusavi
+could not read, an unknown game, or an error inside Forge's own code is
+logged, sent as a `forge_save_backup` event (one small toast, *Save backup
+failed ... The mod change went ahead.*), and the call goes on. Ludusavi runs
+with `CREATE_NO_WINDOW`: it is a console program and would otherwise flash a
+window over the game.
+
+### Ludusavi's command line (checked against v0.31.0)
+
+All in `--api` mode (JSON on stdout; stdout can be blank on some errors,
+stderr carries human-readable warnings). `--try-manifest-update` keeps an
+offline PC working, since Ludusavi otherwise fails when its manifest
+download fails.
+
+| Step | Command |
+|---|---|
+| Ludusavi's name for the game | `ludusavi --try-manifest-update find --api --steam-id <app id>`, then by the exact Steam name, then `--normalized` (a name matching more than one title is not used). Non-Steam shortcuts (app ids with the top bit set) skip the Steam id. Remembered in `forge.json` for a week, a miss for a day |
+| Backup | `ludusavi --try-manifest-update backup --force --api <title>`. Worked when `games.<title>.decision` is `Processed`, no file has `failed`, and `errors.someGamesFailed` is unset. No save files found counts as worked (nothing to lose). A failed cloud sync still counts: the local copy is made |
+| List | `ludusavi backups --api <title>` -> `games.<title>.backups[]` with `name` (the id), `when` (RFC 3339, UTC), `comment`, `locked`, `os` |
+| Restore | `ludusavi --try-manifest-update restore --force --api --backup <id> <title>` |
+
+Backups go to the folder **Ludusavi's own configuration** names; Forge
+passes no `--path` and never edits the config. Cloud sync follows Ludusavi's
+setting too. With `--force`, a cloud conflict is left alone rather than
+resolved (Ludusavi's own behaviour). One trade-off: if a cloud upload is
+still running when the 60-second box ends, Ludusavi is stopped mid-sync and
+will report the cloud as out of step the next time it runs.
+
+### Game page and Settings
+
+With Ludusavi installed, the Mods section shows **Last save backup:
+12 min ago** (or *No save backup yet*), an amber *Save backup failed* when
+the latest attempt did not work, and **Restore saves...**. Both also show on
+anti-cheat locked games: a backup only reads the game, and a restore puts
+saves back, not mod files.
+
+**Restore saves...** lists Ludusavi's backups of the game, newest first, and
+restores one only after a confirmation. The backend refuses without that
+confirmation flag, then takes a **fresh backup of the current saves first**
+(the switch and the skip window do not apply to this one); if that backup
+fails, nothing is restored. The frontend also refuses while the game is
+running.
+
+Settings, under **Game page**: **Back up saves before mod changes** (on by
+default; kept in `forge.json` because the backend acts on it) and the skip
+window. The restore's own backup runs even with the switch off.
+
+**Not verified on a TV or a real Ludusavi yet**: the command lines and the
+JSON fields come from Ludusavi's documentation and source (v0.31.0), and the
+tests run against a fake that answers the same way. Check on the PC that a
+Steam game's title is found by its id, that a backup appears in Ludusavi's
+folder, and that the restore list matches Ludusavi's own.

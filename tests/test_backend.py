@@ -115,6 +115,11 @@ def _test_forge_resolve_app(st, app_id=0, game_domain="", install_dir=""):
 
 main._forge_resolve_app = _test_forge_resolve_app
 
+# Forge backs saves up through Ludusavi before installs when it is installed.
+# A developer machine may well have it: the suite must never run the real one
+# against real games. test_save_backup.py points this at a fake.
+main._LUDUSAVI_FIND = lambda: ""
+
 
 def real_forge_resolver():
     """A patch context restoring main._forge_resolve_app for one test."""

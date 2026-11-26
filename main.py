@@ -38082,7 +38082,7 @@ def _forge_write(path: str, data: dict) -> None:
 
 def _forge_state() -> dict:
     st = _forge_read(FORGE_STATE)
-    for key in ("games", "overrides", "guard", "modded", "collection"):
+    for key in ("games", "overrides", "guard", "modded", "collection", "saves"):
         if not isinstance(st.get(key), dict):
             st[key] = {}
     return st
@@ -38551,20 +38551,33 @@ FORGE_UNKNOWN_GAME = ("Forge couldn't tell which game this is, so it can't check
                       "Nothing was installed or switched on. Open the game in Forge and try again.")
 
 
+def _forge_call_game(name: str, bound: dict):
+    """(app_id, game_domain, install_dir) a gated call names, from its
+    arguments or the state it acts on; None when it has no such state."""
+    resolver = _FORGE_GAME_FROM.get(name)
+    if resolver is not None:
+        return resolver(bound)
+    return (int(bound.get("app_id") or 0), str(bound.get("game_domain") or ""),
+            str(bound.get("install_dir") or ""))
+
+
+def _forge_switches_on(switch, bound: dict) -> bool:
+    """Whether a _FORGE_GATED call puts mods in or switches them on."""
+    if switch is None:
+        return True
+    if callable(switch):
+        return bool(switch(bound))
+    return bool(bound.get(switch))
+
+
 def _forge_gate_check(name: str, bound: dict):
     """None when the call may go ahead, else the refusal. Fails closed: a
     game that cannot be resolved, or a lookup that throws, is refused."""
-    resolver = _FORGE_GAME_FROM.get(name)
     try:
-        if resolver is not None:
-            game = resolver(bound)
-            if game is None:
-                return None
-            app_id, domain, install_dir = game
-        else:
-            app_id = int(bound.get("app_id") or 0)
-            domain = str(bound.get("game_domain") or "")
-            install_dir = str(bound.get("install_dir") or "")
+        game = _forge_call_game(name, bound)
+        if game is None:
+            return None
+        app_id, domain, install_dir = game
         st = _forge_state()
         app_id = _forge_resolve_app(st, app_id, domain, install_dir)
     except Exception as e:  # noqa: BLE001 - an error in the lookup refuses, never allows
@@ -38590,6 +38603,277 @@ def _forge_gate_check(name: str, bound: dict):
     return None
 
 
+# ---- Forge: save backups through Ludusavi before risky mod changes -----------
+# Optional: Ludusavi is the user's own install (winget), found on PATH or in
+# winget's and Scoop's folders, and never installed or configured from here.
+# Before a gated call puts mods in or switches them on, the game's saves are
+# backed up once (skipped when a backup for that game ran in the last N
+# minutes), time-boxed, and the call goes ahead whatever happens: a failed
+# backup is logged and reported with the "forge_save_backup" event, never a
+# refusal. Applied before the anti-cheat lock, so a refused call backs up
+# nothing. Rules and the Ludusavi command line: py_modules/save_backup.py.
+import save_backup  # noqa: E402
+
+_SAVES_LOCK = threading.Lock()
+_SAVES_GAME_LOCKS: dict = {}
+_LUDUSAVI = {"path": "", "at": 0.0}
+_LUDUSAVI_RECHECK = 300
+_LUDUSAVI_FIND = save_backup.find_ludusavi
+_LUDUSAVI_RUN = save_backup.run_ludusavi
+
+
+def _ludusavi_path(recheck: bool = False) -> str:
+    now = time.monotonic()
+    if recheck or not _LUDUSAVI["at"] or now - _LUDUSAVI["at"] >= _LUDUSAVI_RECHECK:
+        try:
+            _LUDUSAVI["path"] = _LUDUSAVI_FIND() or ""
+        except Exception as e:  # noqa: BLE001 - not found is the answer
+            decky.logger.info(f"forge: ludusavi lookup failed: {e}")
+            _LUDUSAVI["path"] = ""
+        _LUDUSAVI["at"] = now
+    return _LUDUSAVI["path"]
+
+
+def _saves_settings(st: dict) -> dict:
+    saves = st.get("saves") or {}
+    return {"enabled": saves.get("enabled") is not False,
+            "skip_minutes": save_backup.clamp_minutes(saves.get("skip_minutes",
+                                                                save_backup.DEFAULT_SKIP_MINUTES))}
+
+
+def _saves_game(st: dict, app_id: int) -> dict:
+    games = (st.get("saves") or {}).get("games")
+    entry = games.get(str(int(app_id))) if isinstance(games, dict) else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def _saves_update(app_id: int, changes: dict) -> None:
+    with _FORGE_LOCK:
+        st = _forge_state()
+        games = st["saves"].setdefault("games", {})
+        if not isinstance(games, dict):
+            games = st["saves"]["games"] = {}
+        key = str(int(app_id))
+        games[key] = dict(games.get(key) or {}, **changes)
+        _forge_write(FORGE_STATE, st)
+
+
+def _saves_steam_name(app_id: int) -> str:
+    if not app_id or app_id >= 0x80000000:
+        return ""
+    manifest = _find_in_libraries(f"appmanifest_{int(app_id)}.acf")
+    return experimental_games.read_appmanifest(manifest).get("name", "") if manifest else ""
+
+
+def _saves_title(exe: str, app_id: int, game_name: str, runner) -> str:
+    """Ludusavi's title for the game, remembered in forge.json (a miss for
+    a day, a hit for a week)."""
+    now = time.time()
+    known = save_backup.cached_title(_saves_game(_forge_state(), app_id), now)
+    if known is not None:
+        return known
+    name = game_name or _saves_steam_name(app_id)
+    title = save_backup.find_title(exe, app_id, name, runner=runner, env=_host_env())
+    _saves_update(app_id, {"title": title, "title_at": int(now)})
+    return title
+
+
+def _saves_game_lock(app_id: int) -> threading.Lock:
+    with _SAVES_LOCK:
+        return _SAVES_GAME_LOCKS.setdefault(int(app_id), threading.Lock())
+
+
+def _saves_backup_blocking(app_id: int, game_name: str, reason: str, required: bool) -> dict:
+    """One backup of one game. required (before a save restore): the
+    switch and the skip window do not apply. Never raises."""
+    exe = _ludusavi_path()
+    if not exe:
+        return {"ok": False, "ran": False, "missing": True, "error": save_backup.INSTALL_HINT}
+    with _saves_game_lock(app_id):
+        st = _forge_state()
+        prefs = _saves_settings(st)
+        entry = _saves_game(st, app_id)
+        now = time.time()
+        if not required and not prefs["enabled"]:
+            return {"ok": True, "ran": False, "skipped": "off"}
+        if not required and save_backup.should_skip(entry.get("last_at"), now, prefs["skip_minutes"]):
+            return {"ok": True, "ran": False, "skipped": "recent", "last_at": entry.get("last_at")}
+        runner = save_backup.deadline_runner(_LUDUSAVI_RUN, save_backup.BACKUP_TIMEOUT, time.monotonic)
+        title = _saves_title(exe, app_id, game_name, runner)
+        if not title:
+            result = {"ok": False, "unknown": True,
+                      "error": "Ludusavi doesn't know this game, so its saves were not backed up."}
+        else:
+            result = save_backup.backup(exe, title, runner=runner, env=_host_env())
+        changes = {"last_at": int(now), "last_ok": bool(result.get("ok")),
+                   "last_error": "" if result.get("ok") else str(result.get("error") or "")[:300],
+                   "last_reason": str(reason or "")[:60]}
+        if result.get("ok"):
+            changes["last_backup_at"] = int(time.time())
+        if result.get("unknown") and title:
+            changes["title_at"] = 0  # look the title up again next time
+        _saves_update(app_id, changes)
+        level = decky.logger.info if result.get("ok") else decky.logger.warning
+        level(f"forge: save backup for {app_id} ({title or 'unknown title'}, {reason}): "
+              f"{'ok, ' + str(result.get('files', 0)) + ' files' if result.get('ok') else result.get('error')}")
+        return dict(result, ran=True, title=title)
+
+
+async def _saves_backup(app_id: int, game_name: str = "", reason: str = "",
+                        required: bool = False) -> dict:
+    try:
+        app_id = int(app_id or 0)
+    except (TypeError, ValueError):
+        app_id = 0
+    if not app_id:
+        return {"ok": False, "ran": False, "error": "No game"}
+    try:
+        result = await asyncio.to_thread(_saves_backup_blocking, app_id, str(game_name or ""),
+                                         str(reason or ""), bool(required))
+    except Exception as e:  # noqa: BLE001 - a save backup never breaks what it protects
+        decky.logger.warning(f"forge: save backup for {app_id} errored: {e}")
+        result = {"ok": False, "ran": True, "error": f"Save backup failed: {e}"}
+    if result.get("ran"):
+        try:
+            await decky.emit("forge_save_backup", app_id, {
+                "ok": bool(result.get("ok")), "error": str(result.get("error") or ""),
+                "reason": str(reason or ""), "at": int(time.time())})
+        except Exception as e:  # noqa: BLE001 - the backup itself is done
+            decky.logger.info(f"forge: save-backup event not sent: {e}")
+    return result
+
+
+async def _forge_save_backup_status(self, app_id: int = 0, recheck: bool = False) -> dict:
+    """For Settings and the game page: is Ludusavi there, the switch, the
+    skip window, and this game's last backup. Local only, no Ludusavi run."""
+    exe = await asyncio.to_thread(_ludusavi_path, bool(recheck))
+    st = _forge_state()
+    entry = _saves_game(st, int(app_id or 0)) if app_id else {}
+    return {"ok": True, "found": bool(exe), "path": exe, **_saves_settings(st),
+            "hint": save_backup.INSTALL_HINT, "install_command": save_backup.INSTALL_COMMAND,
+            "game": {"last_backup_at": int(entry.get("last_backup_at") or 0),
+                     "last_at": int(entry.get("last_at") or 0),
+                     "last_ok": bool(entry.get("last_ok")),
+                     "last_error": str(entry.get("last_error") or ""),
+                     "title": entry.get("title") if isinstance(entry.get("title"), str) else ""}}
+
+
+async def _forge_save_backup_settings(self, enabled: bool, skip_minutes: int = None) -> dict:
+    with _FORGE_LOCK:
+        st = _forge_state()
+        st["saves"]["enabled"] = bool(enabled)
+        if skip_minutes is not None:
+            st["saves"]["skip_minutes"] = save_backup.clamp_minutes(skip_minutes)
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, **_saves_settings(st)}
+
+
+async def _forge_save_backup(self, app_id: int, game_name: str = "", reason: str = "") -> dict:
+    """Before the crash guard's restore or its Undo: the same backup a mod
+    install gets (switch and skip window apply). Never refuses the change
+    that follows; the frontend goes ahead whatever this says."""
+    return await _saves_backup(app_id, game_name, reason or "manual", required=False)
+
+
+async def _forge_save_backup_list(self, app_id: int, game_name: str = "") -> dict:
+    """Ludusavi's backups of the game, newest first, for "Restore saves"."""
+    app_id = int(app_id or 0)
+    exe = await asyncio.to_thread(_ludusavi_path)
+    if not exe:
+        return {"ok": False, "found": False, "error": save_backup.INSTALL_HINT}
+
+    def run():
+        runner = save_backup.deadline_runner(_LUDUSAVI_RUN, save_backup.LOOKUP_TIMEOUT * 2,
+                                             time.monotonic)
+        title = _saves_title(exe, app_id, str(game_name or ""), runner)
+        if not title:
+            return {"ok": False, "found": True,
+                    "error": "Ludusavi doesn't know this game, so it has no backups of it."}
+        return dict(save_backup.list_backups(exe, title, runner=runner, env=_host_env()),
+                    found=True, title=title)
+
+    try:
+        return await asyncio.to_thread(run)
+    except Exception as e:  # noqa: BLE001
+        decky.logger.warning(f"forge: listing save backups for {app_id} failed: {e}")
+        return {"ok": False, "found": True, "error": str(e)}
+
+
+async def _forge_save_restore(self, app_id: int, game_name: str, backup_id: str,
+                              confirmed: bool = False) -> dict:
+    """Put one of Ludusavi's backups back, only after the user confirmed,
+    and only once a fresh backup of the current saves has worked: the save
+    being replaced is never lost. Allowed for anti-cheat locked games (saves,
+    not mod files)."""
+    app_id = int(app_id or 0)
+    if not confirmed:
+        return {"ok": False, "error": "Restoring saves needs a confirmation."}
+    if not app_id or not isinstance(backup_id, str) or not backup_id:
+        return {"ok": False, "error": "No backup chosen."}
+    fresh = await _saves_backup(app_id, game_name, "before save restore", required=True)
+    if not fresh.get("ok"):
+        return {"ok": False, "backup_failed": True,
+                "error": "The current saves could not be backed up first, so nothing was restored. "
+                         + str(fresh.get("error") or "")}
+    exe = _ludusavi_path()
+    title = fresh.get("title") or ""
+
+    def run():
+        result = save_backup.restore(exe, title, backup_id, runner=_LUDUSAVI_RUN, env=_host_env())
+        level = decky.logger.info if result.get("ok") else decky.logger.warning
+        level(f"forge: save restore for {app_id} ({title}, backup {backup_id}): "
+              f"{'ok' if result.get('ok') else result.get('error')}")
+        return result
+
+    try:
+        result = await asyncio.to_thread(run)
+    except Exception as e:  # noqa: BLE001
+        result = {"ok": False, "error": str(e)}
+    return dict(result, title=title)
+
+
+Plugin.forge_save_backup_status = _forge_save_backup_status
+Plugin.forge_save_backup_settings = _forge_save_backup_settings
+Plugin.forge_save_backup = _forge_save_backup
+Plugin.forge_save_backup_list = _forge_save_backup_list
+Plugin.forge_save_restore = _forge_save_restore
+
+
+def _wrap_save_backups() -> None:
+    for name, switch in _FORGE_GATED.items():
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+        try:
+            sig = inspect.signature(original)
+        except (TypeError, ValueError):
+            continue
+
+        def make(original, sig, switch, name):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                try:
+                    bound = sig.bind_partial(self, *args, **kwargs).arguments
+                    game = _forge_call_game(name, bound) if _forge_switches_on(switch, bound) else None
+                    # Cheap when Ludusavi is not installed: no game lookup at all.
+                    app_id = 0
+                    if game and await asyncio.to_thread(_ludusavi_path):
+                        app_id = await asyncio.to_thread(
+                            lambda: _forge_resolve_app(_forge_state(), *game))
+                    if app_id:
+                        await _saves_backup(app_id, "", name)
+                except Exception as e:  # noqa: BLE001 - never in the way of the mod change
+                    decky.logger.warning(f"forge: save backup before {name} skipped: {e}")
+                return await original(self, *args, **kwargs)
+            return wrapper
+
+        setattr(Plugin, name, make(original, sig, switch, name))
+
+
+# Inside the anti-cheat lock (wrapped first): a refused call backs up nothing.
+_wrap_save_backups()
+
+
 def _wrap_anticheat_lock() -> None:
     for name, switch in _FORGE_GATED.items():
         original = getattr(Plugin, name, None)
@@ -38607,13 +38891,7 @@ def _wrap_anticheat_lock() -> None:
                     bound = sig.bind_partial(self, *args, **kwargs).arguments
                 except TypeError:
                     bound = {}
-                if switch is None:
-                    gated = True
-                elif callable(switch):
-                    gated = bool(switch(bound))
-                else:
-                    gated = bool(bound.get(switch))
-                if gated:
+                if _forge_switches_on(switch, bound):
                     refusal = await asyncio.to_thread(_forge_gate_check, name, bound)
                     if refusal is not None:
                         return refusal

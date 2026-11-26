@@ -346,7 +346,7 @@ ALLOWED_UNGATED = {
         "check_game_file", "check_plugin_masters", "check_updates", "crash_bisect_status",
         "crash_since", "experimental_folder_options", "export_mod_setup", "find_collection",
         "find_experimental_game", "forge_game_status", "forge_guard_plan", "forge_modded_state",
-        "forge_update_dots", "gb_get_game", "gb_get_mod", "gb_list_mods", "gb_search_games",
+        "forge_save_backup_list", "forge_save_backup_status", "forge_update_dots", "gb_get_game", "gb_get_mod", "gb_list_mods", "gb_search_games",
         "gb_update_target", "get_auth_status", "get_blamed_folders", "get_collection",
         "get_collection_attention", "get_collection_extras", "get_collection_manifest",
         "get_collection_support", "get_collection_verdicts", "get_collections", "get_debug_info",
@@ -386,6 +386,8 @@ ALLOWED_UNGATED = {
         "endorse_collection", "finish_vr_recording", "forge_guard_dismiss", "forge_guard_exit",
         "forge_guard_launch", "forge_guard_restored", "forge_guard_undone", "forge_note_modded",
         "forge_register_games", "forge_set_anticheat_override", "forge_set_modded_collection",
+        # Ludusavi copies the saves into its own backup folder.
+        "forge_save_backup", "forge_save_backup_settings",
         "gb_link_game", "gb_unlink_game", "mark_launch_options_set", "mark_vr_releases_seen",
         "note_update_hold", "record_collection_installed", "refresh_content_gate",
         "register_collection", "release_update_hold", "save_experimental_game", "save_mod_setup",
@@ -406,6 +408,9 @@ ALLOWED_UNGATED = {
     "game settings and prefix": {
         "apply_display_fix", "copy_saves_to_modded", "enable_papyrus_logging",
         "fix_prefix_runtime", "restore_point_saves", "seed_game_ini",
+        # Ludusavi puts a save backup back, after a confirmation and a fresh
+        # backup of the current saves.
+        "forge_save_restore",
     },
 }
 

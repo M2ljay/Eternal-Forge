@@ -225,3 +225,91 @@ export function undoOutcome(failed: string[]): { clearRecord: boolean; title: st
     body: `${failed.slice(0, 3).join("; ")}${more}. Undo stays on the game page to try again.`,
   };
 }
+
+// ---- Save backups (Ludusavi) ---------------------------------------------------
+// Ludusavi is optional. Without it the game page says nothing about saves and
+// Settings shows one calm line; with it, the backend backs a game's saves up
+// before mods go in or on (skipped within the window), and the game page shows
+// when that last worked and offers "Restore saves...".
+
+export const SAVE_BACKUP_HINT = "Install Ludusavi to back up saves before mod changes";
+
+export interface SaveBackupGame {
+  last_backup_at: number;
+  last_at: number;
+  last_ok: boolean;
+  last_error: string;
+  title?: string;
+}
+
+/** "just now", "12 min ago", "3 h ago", "yesterday", "5 days ago". */
+export function backupAge(at: number, now: number): string {
+  const s = Math.max(0, Math.floor(now - at));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  const days = Math.floor(s / 86400);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** The game page's save line: null when Ludusavi is not installed (the
+ * page stays quiet about saves). failed: the latest attempt did not work,
+ * shown as a small note under the line. */
+export function saveBackupLine(
+  found: boolean,
+  game: SaveBackupGame | undefined,
+  now: number
+): { text: string; failed: string } | null {
+  if (!found) return null;
+  const g = game ?? { last_backup_at: 0, last_at: 0, last_ok: false, last_error: "" };
+  const text = g.last_backup_at
+    ? `Last save backup: ${backupAge(g.last_backup_at, now)}`
+    : "No save backup yet";
+  const failedLatest = g.last_at > 0 && !g.last_ok && g.last_at >= g.last_backup_at;
+  return { text, failed: failedLatest ? "Save backup failed" : "" };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** One of Ludusavi's backups in the Restore list: local date and time, age,
+ * then its comment and lock as Ludusavi shows them. */
+export function backupRowLabel(
+  b: { at: number; when?: string; comment?: string; locked?: boolean },
+  now: number
+): string {
+  let label: string;
+  if (b.at > 0) {
+    const d = new Date(b.at * 1000);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    label = `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm} (${backupAge(b.at, now)})`;
+  } else {
+    label = b.when || "Unknown date";
+  }
+  if (b.comment) label += ` - ${b.comment}`;
+  if (b.locked) label += " - kept";
+  return label;
+}
+
+export function restoreConfirmBody(gameName: string, rowLabel: string): string {
+  return (
+    `Forge first backs up ${gameName}'s current saves with Ludusavi, then puts back the backup from ` +
+    `${rowLabel}. If the first backup fails, nothing is restored. Close the game before restoring.`
+  );
+}
+
+/** The small note when a backup before a mod change did not work. The mod
+ * change itself went ahead. */
+export function backupFailToast(error: string): { title: string; body: string } {
+  const detail = (error || "").trim();
+  return {
+    title: "Save backup failed",
+    body: `${detail ? detail.replace(/\.?$/, ".") + " " : ""}The mod change went ahead.`,
+  };
+}
+
+/** Settings row text for the skip window. */
+export function skipWindowLabel(minutes: number): string {
+  if (minutes <= 0) return "Back up before every mod change";
+  return `At most one backup per game every ${minutes} min`;
+}

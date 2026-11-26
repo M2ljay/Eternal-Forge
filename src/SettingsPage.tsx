@@ -18,6 +18,7 @@ import { PAGE_SCROLLER } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { ExperimentalToggle } from "./ExperimentalSetup";
 import { LibraryScan } from "./LibraryScan";
+import { SaveBackupSettings } from "./SaveBackup";
 import { ForgeSetting, getForgeSetting, setForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { OwnedCollection, collectionNote } from "./moddedCollection";
 import { moddedCollectionRecord, removeModdedCollection } from "./moddedSync";
@@ -361,6 +362,7 @@ export function SettingsPage() {
                 description="A Steam collection of the games with at least one mod on through Forge, kept up to date as mods are switched on and off. Turning this off leaves the collection as it is; nothing is deleted."
               />
               <ModdedCollectionControls />
+              <SaveBackupSettings />
             </Section>
 
             <Section title="Experimental" blurb="for games without built-in support">

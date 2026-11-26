@@ -19,7 +19,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   ForgeGuardSummary,
   InstalledMod,
+  SaveBackupStatus,
   forgeGameStatus,
+  forgeSaveBackupStatus,
   forgeGuardDismiss,
   forgeGuardPlan,
   forgeGuardRestored,
@@ -43,6 +45,7 @@ import {
   offerBody,
   overrideLabel,
   rowsToShow,
+  saveBackupLine,
   sectionMode,
   undoOutcome,
 } from "./forgeRules";
@@ -52,7 +55,8 @@ import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } fr
 import { toggleMod } from "./install";
 import { notifyGameStateChanged, setBrowseGame, setDetailOrigin, setSelectedMod, subscribeGameState } from "./state";
 import { pushFromGamePage } from "./Tabs";
-import { GUNMETAL_RAISED, WHITE } from "./palette";
+import { backupBeforeChange, openRestoreSaves, subscribeSaveBackups } from "./SaveBackup";
+import { AMBER, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
 
 // Our own routes (registered in index.tsx).
 const BROWSE_ROUTE = "/nexus-mods";
@@ -149,6 +153,7 @@ export function GameModsSection({ appId }: { appId: number }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [enabledSetting, setEnabledSetting] = useState(() => getForgeSetting("gamePage"));
+  const [saves, setSaves] = useState<SaveBackupStatus | undefined>();
   const seq = useRef(0);
 
   const refresh = (refreshUpdates = false) => {
@@ -156,6 +161,9 @@ export function GameModsSection({ appId }: { appId: number }) {
     const current = () => mine === seq.current;
     forgeGameStatus(appId, game?.nexusDomain ?? "", game?.installDirName ?? "")
       .then((r) => current() && r.ok && setStatus({ anticheat: r.anticheat, guard: r.guard }))
+      .catch(() => undefined);
+    forgeSaveBackupStatus(appId)
+      .then((r) => current() && r.ok && setSaves(r))
       .catch(() => undefined);
     if (!game) return;
     getInstalledMods(
@@ -176,10 +184,14 @@ export function GameModsSection({ appId }: { appId: number }) {
     refresh(true);
     const unsubState = subscribeGameState(() => refresh(false));
     const unsubSettings = subscribeForgeSettings(() => setEnabledSetting(getForgeSetting("gamePage")));
+    const unsubSaves = subscribeSaveBackups((id) => {
+      if (id === appId) forgeSaveBackupStatus(appId).then((r) => r.ok && setSaves(r)).catch(() => undefined);
+    });
     return () => {
       seq.current++;
       unsubState();
       unsubSettings();
+      unsubSaves();
     };
   }, [appId]);
 
@@ -270,6 +282,7 @@ export function GameModsSection({ appId }: { appId: number }) {
           strCancelButtonText="Not now"
           onOK={() =>
             void run(async () => {
+              await backupBeforeChange(appId, game.displayName, "crash restore");
               const failed = await applyChanges(game, plan.changes);
               await forgeGuardRestored(appId, current);
               toaster.toast({
@@ -286,6 +299,7 @@ export function GameModsSection({ appId }: { appId: number }) {
     void run(async () => {
       if (!game) return;
       const plan = await forgeGuardPlan(appId, modSet(list), "undo");
+      await backupBeforeChange(appId, game.displayName, "undo restore");
       const failed = await applyChanges(game, plan.changes);
       // Keep the record unless everything went back: a refused change
       // (locked game, busy folder) must leave Undo available to retry.
@@ -305,8 +319,16 @@ export function GameModsSection({ appId }: { appId: number }) {
       await lockModsAgain(appId);
     });
 
+  const restoreSaves = () =>
+    void run(async () => {
+      await openRestoreSaves(appId, game?.displayName ?? "this game", () => refresh(false));
+    });
+
   const shown = expanded ? list : rowsToShow(list, updates);
   const locked = mode === "locked";
+  // Saves: only with Ludusavi installed, and for locked games too (a
+  // backup only reads the game).
+  const saveLine = mode === "mods" || locked ? saveBackupLine(Boolean(saves?.found), saves?.game, Date.now() / 1000) : null;
 
   return (
     <Focusable
@@ -414,6 +436,13 @@ export function GameModsSection({ appId }: { appId: number }) {
         </Focusable>
       )}
 
+      {saveLine && (
+        <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap", fontSize: "12px" }}>
+          <span style={{ color: STEEL_MUTED }}>{saveLine.text}</span>
+          {saveLine.failed && <span style={{ color: AMBER }}>{saveLine.failed}</span>}
+        </div>
+      )}
+
       {mode === "setup" && !locked && (
         <div style={{ fontSize: "13px" }}>
           Mods are not set up for this game yet. Open the Quick Access Menu, Forge, to set it up.
@@ -433,6 +462,11 @@ export function GameModsSection({ appId }: { appId: number }) {
           <Button onClick={() => setExpanded(false)}>Show fewer</Button>
         )}
         {mode === "mods" && list.length > 0 && <Button onClick={openManager}>My Mods</Button>}
+        {saveLine && (
+          <Button disabled={busy} onClick={restoreSaves}>
+            Restore saves...
+          </Button>
+        )}
         {guard.undo && game && (
           <Button disabled={busy} onClick={undoRestore}>
             Undo restore

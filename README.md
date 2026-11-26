@@ -449,6 +449,18 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   "Modded" of your own is left alone (Forge's is then "Modded (Forge)"), and
   games you added by hand are never taken out.
 
+- **Save backups before mod changes (optional).** With
+  [Ludusavi](https://github.com/mtkennerly/ludusavi) installed
+  (`winget install -e --id mtkennerly.ludusavi`; Forge never installs it),
+  a game's saves are backed up into Ludusavi's own backup folder before
+  Forge installs or switches on its mods, and before a crash restore or
+  Undo. At most once per game in 30 minutes (configurable), time-boxed to
+  60 seconds, and a failed backup never stops the mod change (a small note
+  says so). The game page shows the last backup and **Restore saves...**,
+  which restores only after a confirmation and a fresh backup of the
+  current saves. Without Ludusavi, Settings shows one line and nothing else
+  changes.
+
 These can be turned off in Settings, under **Game page**. Turning off the
 Modded collection leaves it as it is; **Remove Modded collection** deletes
 only Forge's own.
