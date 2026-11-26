@@ -45,6 +45,7 @@ import { PAGE_SCROLLER } from "./theme";
 import { toaster } from "@decky/api";
 import { getSupportedGame, modeParams } from "./games";
 import { TabBar, exitTabsToQam, handleTabButtons, pushOurPage } from "./Tabs";
+import { alpha, BLACK, CRIMSON, CRIMSON_TEXT, GUNMETAL, GUNMETAL_RAISED, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -87,7 +88,7 @@ function SpeedGraph({ samples, current }: { samples: number[]; current: number }
         width={W}
         height={H}
         style={{
-          background: "rgba(255,255,255,0.05)",
+          background: alpha(WHITE, 0.05),
           borderRadius: "4px",
         }}
       >
@@ -95,13 +96,13 @@ function SpeedGraph({ samples, current }: { samples: number[]; current: number }
           <>
             <polyline
               points={`0,${H} ${points} ${W},${H}`}
-              fill="rgba(218,142,53,0.25)"
+              fill={alpha(CRIMSON, 0.25)}
               stroke="none"
             />
             <polyline
               points={points}
               fill="none"
-              stroke="#da8e35"
+              stroke={CRIMSON}
               strokeWidth="1.5"
             />
           </>
@@ -125,7 +126,7 @@ function Row({
   name: string;
   status: string;
   dim?: boolean;
-  /** In-flight rows fill orange left-to-right - the row IS the bar. */
+  /** In-flight rows fill crimson left-to-right - the row IS the bar. */
   pct?: number;
   /** Actively installing: breathe so it reads as "working", not stuck. */
   pulse?: boolean;
@@ -141,9 +142,9 @@ function Row({
         padding: "8px 12px",
         background:
           pct !== undefined
-            ? `linear-gradient(90deg, rgba(218,142,53,0.45) ${pct}%, rgba(255,255,255,0.05) ${pct}%)`
-            : "rgba(255,255,255,0.05)",
-        color: pct !== undefined ? "#fff" : undefined,
+            ? `linear-gradient(90deg, ${alpha(CRIMSON, 0.45)} ${pct}%, ${alpha(WHITE, 0.05)} ${pct}%)`
+            : alpha(WHITE, 0.05),
+        color: pct !== undefined ? WHITE : undefined,
         transition: "background 0.3s linear",
         borderRadius: "4px",
         fontSize: "13.5px",
@@ -230,7 +231,7 @@ function DiskGauge({
       <svg
         width={W}
         height={H}
-        style={{ background: "rgba(255,255,255,0.05)", borderRadius: "4px" }}
+        style={{ background: alpha(WHITE, 0.05), borderRadius: "4px" }}
       >
         <rect
           x={0}
@@ -238,7 +239,7 @@ function DiskGauge({
           width={W}
           height={14}
           rx={4}
-          fill="rgba(255,255,255,0.10)"
+          fill={alpha(WHITE, 0.10)}
         />
         <rect
           x={0}
@@ -246,7 +247,7 @@ function DiskGauge({
           width={Math.max(2, usedFrac * W)}
           height={14}
           rx={4}
-          fill={nearFloor ? "#e05c5c" : "rgba(218,142,53,0.85)"}
+          fill={nearFloor ? CRIMSON : alpha(CRIMSON, 0.85)}
         />
         {/* the min-free floor: downloads stop past this line */}
         <line
@@ -254,7 +255,7 @@ function DiskGauge({
           x2={floorFrac * W}
           y1={H / 2 - 11}
           y2={H / 2 + 11}
-          stroke="#e05c5c"
+          stroke={CRIMSON}
           strokeWidth={1.5}
           strokeDasharray="3,2"
         />
@@ -263,7 +264,7 @@ function DiskGauge({
         style={{
           fontSize: "12px",
           opacity: 0.85,
-          color: nearFloor ? "#e05c5c" : undefined,
+          color: nearFloor ? CRIMSON_TEXT : undefined,
         }}
       >
         {freeGb >= 100 ? Math.round(freeGb) : freeGb.toFixed(1)} GB free
@@ -274,7 +275,7 @@ function DiskGauge({
 
 /** The collection in flight IS the page's centerpiece: blurred cover art
  * as a backdrop, the cover proper as a card, live counts, an honest
- * pace-based ETA, and a glowing brand-orange progress bar. */
+ * pace-based ETA, and a solid crimson progress bar. */
 function CollectionHero({
   run,
   activeNames,
@@ -302,8 +303,8 @@ function CollectionHero({
         borderRadius: "12px",
         overflow: "hidden",
         marginBottom: "18px",
-        border: "1px solid rgba(218,142,53,0.35)",
-        background: "#14161c",
+        border: `1px solid ${GUNMETAL_RAISED}`,
+        background: GUNMETAL,
       }}
     >
       {/* Backdrop: the collection's own art, blurred into atmosphere. */}
@@ -327,7 +328,7 @@ function CollectionHero({
           position: "absolute",
           inset: 0,
           background:
-            "linear-gradient(105deg, rgba(10,11,15,0.92) 0%, rgba(10,11,15,0.6) 55%, rgba(218,142,53,0.16) 100%)",
+            `linear-gradient(105deg, ${alpha(BLACK, 0.92)} 0%, ${alpha(BLACK, 0.6)} 55%, ${alpha(BLACK, 0.3)} 100%)`,
         }}
       />
       <div style={{ position: "relative", display: "flex", gap: "16px", padding: "16px" }}>
@@ -340,7 +341,7 @@ function CollectionHero({
               height: "116px",
               objectFit: "cover",
               borderRadius: "8px",
-              boxShadow: "0 4px 18px rgba(0,0,0,0.55)",
+              boxShadow: `0 4px 18px ${alpha(BLACK, 0.55)}`,
               flexShrink: 0,
             }}
           />
@@ -415,7 +416,7 @@ function CollectionHero({
             <div
               style={{
                 height: "8px",
-                background: "rgba(255,255,255,0.12)",
+                background: alpha(WHITE, 0.12),
                 borderRadius: "4px",
                 overflow: "hidden",
               }}
@@ -424,10 +425,9 @@ function CollectionHero({
                 style={{
                   width: `${pct}%`,
                   height: "100%",
-                  background: "linear-gradient(90deg, #da8e35, #f0b160)",
+                  background: CRIMSON,
                   borderRadius: "4px",
                   transition: "width 0.4s ease",
-                  boxShadow: "0 0 10px rgba(218,142,53,0.6)",
                 }}
               />
             </div>

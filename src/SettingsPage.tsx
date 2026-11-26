@@ -14,13 +14,14 @@ import { toaster } from "@decky/api";
 import { useEffect, useState } from "react";
 
 import { UserPrefs, getUserPrefs, setUserPrefs } from "./api";
-import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
+import { PAGE_SCROLLER } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { ExperimentalToggle } from "./ExperimentalSetup";
 import { LibraryScan } from "./LibraryScan";
 import { ForgeSetting, getForgeSetting, setForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { OwnedCollection, collectionNote } from "./moddedCollection";
 import { moddedCollectionRecord, removeModdedCollection } from "./moddedSync";
+import { alpha, AMBER, CRIMSON, GREEN, WHITE } from "./palette";
 
 /** One of Forge's frontend switches, kept in step with its stored value
  * (the Remove button below turns one off from elsewhere). */
@@ -139,7 +140,7 @@ function Section({
           style={{
             width: "4px",
             height: "18px",
-            background: NEXUS_ORANGE,
+            background: CRIMSON,
             borderRadius: "2px",
             alignSelf: "center",
           }}
@@ -149,8 +150,8 @@ function Section({
       </div>
       <div
         style={{
-          background: "rgba(255,255,255,0.04)",
-          border: "1px solid rgba(255,255,255,0.07)",
+          background: alpha(WHITE, 0.04),
+          border: `1px solid ${alpha(WHITE, 0.07)}`,
           borderRadius: "10px",
           padding: "6px 16px",
         }}
@@ -168,8 +169,8 @@ function Caution({ children }: { children: React.ReactNode }) {
       style={{
         padding: "7px 10px",
         margin: "2px 0 10px",
-        background: "rgba(255, 200, 60, 0.10)",
-        borderLeft: "3px solid #ffc83c",
+        background: alpha(AMBER, 0.10),
+        borderLeft: `3px solid ${AMBER}`,
         borderRadius: "4px",
         fontSize: "12px",
         lineHeight: "1.45",
@@ -224,7 +225,7 @@ export function SettingsPage() {
           <span
             style={{
               fontSize: "12px",
-              color: NEXUS_ORANGE,
+              color: GREEN,
               opacity: saved ? 1 : 0,
               transition: "opacity 0.4s ease",
             }}

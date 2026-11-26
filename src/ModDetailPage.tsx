@@ -65,14 +65,11 @@ import {
 } from "./state";
 import { isGameRunning, restartGame, setLaunchOptions } from "./steam";
 import {
-  ACCENT_DANGER,
-  ACCENT_SUCCESS,
   ACTION_BUTTON,
   ACTION_COLUMN,
   ACTION_HERO,
   ACTION_ROW,
   actionColumnWidth,
-  NEXUS_ORANGE,
   PAGE_SCROLLER,
   PRIMARY_BUTTON_CLASS,
   PRIMARY_BUTTON_CSS,
@@ -80,6 +77,7 @@ import {
 } from "./theme";
 import { PageBackdrop, SectionHeading, StatChip, WarningBox } from "./chrome";
 import { DownloadsButton } from "./DownloadsButton";
+import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, GREEN, STEEL, WHITE } from "./palette";
 
 function fmtSize(sizeKb: number): string {
   if (sizeKb >= 1024 * 1024) return `${(sizeKb / 1024 / 1024).toFixed(1)} GB`;
@@ -763,7 +761,7 @@ export function ModDetailPage() {
             position: "fixed",
             inset: 0,
             zIndex: 100,
-            background: "rgba(0, 0, 0, 0.96)",
+            background: alpha(BLACK, 0.96),
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -814,9 +812,9 @@ export function ModDetailPage() {
                 height: "250px",
                 // Never crop the artwork - letterbox odd aspect ratios.
                 objectFit: "contain",
-                background: "rgba(11,14,19,0.85)",
+                background: alpha(BLACK, 0.85),
                 borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.08)",
+                border: `1px solid ${alpha(WHITE, 0.08)}`,
                 display: "block",
               }}
             />
@@ -848,8 +846,8 @@ export function ModDetailPage() {
                 borderRadius: "4px",
                 fontSize: "12.5px",
                 lineHeight: 1.45,
-                background: "rgba(220, 80, 80, 0.14)",
-                border: "1px solid rgba(220, 80, 80, 0.5)",
+                background: alpha(CRIMSON, 0.14),
+                border: `1px solid ${alpha(CRIMSON, 0.5)}`,
               }}
             >
               ⚠ {knownBrokenNote(knownBroken)}
@@ -863,8 +861,8 @@ export function ModDetailPage() {
                 borderRadius: "4px",
                 fontSize: "12.5px",
                 lineHeight: 1.45,
-                background: "rgba(220, 80, 80, 0.14)",
-                border: "1px solid rgba(220, 80, 80, 0.5)",
+                background: alpha(CRIMSON, 0.14),
+                border: `1px solid ${alpha(CRIMSON, 0.5)}`,
               }}
             >
               ⚠ {needsExternal.reason}
@@ -897,8 +895,8 @@ export function ModDetailPage() {
                   fontSize: "10px",
                   fontWeight: 700,
                   letterSpacing: "0.4px",
-                  background: "rgba(200, 130, 50, 0.92)",
-                  color: "#fff",
+                  background: AMBER,
+                  color: BLACK,
                 }}
               >
                 PRE-UPDATE
@@ -959,8 +957,8 @@ export function ModDetailPage() {
                   borderRadius: "999px",
                   fontSize: "12px",
                   whiteSpace: "nowrap",
-                  background: "rgba(255, 120, 150, 0.12)",
-                  border: "1px solid rgba(255, 120, 150, 0.45)",
+                  background: alpha(STEEL, 0.12),
+                  border: `1px solid ${alpha(STEEL, 0.45)}`,
                 }}
               >
                 ❤ Support {uploader.name ?? mod.author}
@@ -972,7 +970,7 @@ export function ModDetailPage() {
           )}
           {installedCopy && (
             <div
-              style={{ marginTop: "8px", fontSize: "13px", color: ACCENT_SUCCESS }}
+              style={{ marginTop: "8px", fontSize: "13px", color: GREEN }}
             >
               ✓ Installed{installedCopy.version ? ` (v${installedCopy.version})` : ""}
               {installedCopy.enabled ? "" : " · currently disabled"}
@@ -983,8 +981,8 @@ export function ModDetailPage() {
               style={{
                 marginTop: "10px",
                 padding: "8px 10px",
-                background: "rgba(255, 200, 60, 0.12)",
-                borderLeft: "3px solid #ffc83c",
+                background: alpha(AMBER, 0.12),
+                borderLeft: `3px solid ${AMBER}`,
                 borderRadius: "4px",
                 fontSize: "13px",
               }}
@@ -998,8 +996,8 @@ export function ModDetailPage() {
               style={{
                 marginTop: "10px",
                 padding: "8px 10px",
-                background: "rgba(255, 200, 60, 0.12)",
-                borderLeft: "3px solid #ffc83c",
+                background: alpha(AMBER, 0.12),
+                borderLeft: `3px solid ${AMBER}`,
                 borderRadius: "4px",
                 fontSize: "13px",
               }}
@@ -1012,8 +1010,8 @@ export function ModDetailPage() {
               style={{
                 marginTop: "10px",
                 padding: "8px 12px 10px",
-                background: "rgba(218, 142, 53, 0.10)",
-                borderLeft: `3px solid ${NEXUS_ORANGE}`,
+                background: alpha(AMBER, 0.10),
+                borderLeft: `3px solid ${AMBER}`,
                 borderRadius: "4px",
                 fontSize: "12px",
                 lineHeight: 1.45,
@@ -1041,8 +1039,8 @@ export function ModDetailPage() {
               style={{
                 marginTop: "10px",
                 padding: "8px 12px 10px",
-                background: "rgba(120, 170, 255, 0.08)",
-                borderLeft: "3px solid rgba(120, 170, 255, 0.6)",
+                background: alpha(STEEL, 0.08),
+                borderLeft: `3px solid ${alpha(STEEL, 0.6)}`,
                 borderRadius: "4px",
               }}
             >
@@ -1131,23 +1129,23 @@ export function ModDetailPage() {
                         textOverflow: "ellipsis",
                         ...(external
                           ? {
-                              background: "rgba(120, 170, 255, 0.15)",
-                              border: "1px solid rgba(120, 170, 255, 0.5)",
+                              background: alpha(STEEL, 0.15),
+                              border: `1px solid ${alpha(STEEL, 0.5)}`,
                             }
                           : have
                           ? {
-                              background: "rgba(143, 212, 143, 0.15)",
-                              border: "1px solid rgba(143, 212, 143, 0.5)",
+                              background: alpha(GREEN, 0.15),
+                              border: `1px solid ${alpha(GREEN, 0.5)}`,
                             }
                           : optional
                           ? {
-                              background: "rgba(255, 255, 255, 0.06)",
-                              border: "1px dashed rgba(255, 255, 255, 0.35)",
+                              background: alpha(WHITE, 0.06),
+                              border: `1px dashed ${alpha(WHITE, 0.35)}`,
                               opacity: 0.8,
                             }
                           : {
-                              background: "rgba(218, 142, 53, 0.15)",
-                              border: `1px solid ${NEXUS_ORANGE}88`,
+                              background: alpha(AMBER, 0.15),
+                              border: `1px solid ${alpha(AMBER, 0.53)}`,
                             }),
                       }}
                     >
@@ -1162,7 +1160,7 @@ export function ModDetailPage() {
                   style={{
                     marginTop: "8px",
                     paddingTop: "7px",
-                    borderTop: "1px solid rgba(255,255,255,0.10)",
+                    borderTop: `1px solid ${alpha(WHITE, 0.10)}`,
                     fontSize: "12px",
                     lineHeight: 1.45,
                   }}
@@ -1172,7 +1170,7 @@ export function ModDetailPage() {
                   </div>
                   {requirementSetupNotes(requirements).map((n) => (
                     <div key={n.modName} style={{ opacity: 0.9 }}>
-                      <span style={{ color: NEXUS_ORANGE }}>{n.modName}</span>
+                      <span style={{ color: AMBER }}>{n.modName}</span>
                       {": "}
                       {n.notes}
                     </div>
@@ -1180,11 +1178,11 @@ export function ModDetailPage() {
                 </div>
               )}
               <div style={{ fontSize: "11px", marginTop: "6px" }}>
-                <span style={{ color: "rgb(143, 212, 143)" }}>● Installed</span>
+                <span style={{ color: GREEN }}>● Installed</span>
                 <span style={{ opacity: 0.5 }}> · </span>
-                <span style={{ color: NEXUS_ORANGE }}>● Needs installing</span>
+                <span style={{ color: AMBER }}>● Needs installing</span>
                 <span style={{ opacity: 0.5 }}> · </span>
-                <span style={{ color: "rgb(120, 170, 255)" }}>
+                <span style={{ color: STEEL }}>
                   ● External link
                 </span>
                 <span style={{ opacity: 0.5 }}> · </span>
@@ -1200,8 +1198,8 @@ export function ModDetailPage() {
           style={{
             marginTop: "12px",
             padding: "10px 12px",
-            background: "rgba(255, 200, 60, 0.12)",
-            borderLeft: "3px solid #ffc83c",
+            background: alpha(AMBER, 0.12),
+            borderLeft: `3px solid ${AMBER}`,
             borderRadius: "4px",
             fontSize: "13px",
             lineHeight: "1.5",
@@ -1237,8 +1235,8 @@ export function ModDetailPage() {
             ...ACTION_HERO,
             ...(primaryBusy
               ? {
-                  background: `linear-gradient(90deg, rgba(218,142,53,0.55) ${primaryPct}%, rgba(255,255,255,0.10) ${primaryPct}%)`,
-                  color: "#fff",
+                  background: `linear-gradient(90deg, ${alpha(CRIMSON, 0.55)} ${primaryPct}%, ${alpha(WHITE, 0.10)} ${primaryPct}%)`,
+                  color: WHITE,
                   transition: "background 0.4s linear",
                 }
               : {}),
@@ -1287,7 +1285,7 @@ export function ModDetailPage() {
         {installedCopy && (
           <DialogButton
             disabled={installingFileId !== undefined}
-            style={{ ...ACTION_BUTTON, color: ACCENT_DANGER }}
+            style={{ ...ACTION_BUTTON, color: CRIMSON_TEXT }}
             onClick={() =>
               showModal(
                 <ConfirmModal
@@ -1373,6 +1371,7 @@ export function ModDetailPage() {
       </Focusable>
       {companions && companions.failed.length > 0 && (
         <WarningBox
+          tone="error"
           title="One required part did not install"
           body={
             `This mod needs more than one file from its page, and ` +
@@ -1396,12 +1395,14 @@ export function ModDetailPage() {
         )}
       {notInstallable && (
         <WarningBox
+          tone="error"
           title="Not installable on this device"
           body={notInstallable}
         />
       )}
       {blocked && (
         <WarningBox
+          tone="error"
           title="This mod cannot install yet"
           body={blocked}
           action={{
@@ -1434,6 +1435,7 @@ export function ModDetailPage() {
       )}
       {installedCopy?.enabled && installedCopy.load_problem && (
         <WarningBox
+          tone={installedCopy.load_state === "failed" ? "error" : "warning"}
           title={
             installedCopy.load_state === "failed"
               ? "Did not load last time you played"
@@ -1497,7 +1499,7 @@ export function ModDetailPage() {
                 display: "inline-block",
                 marginTop: "4px",
                 padding: "3px 12px",
-                background: "rgba(255, 255, 255, 0.08)",
+                background: alpha(WHITE, 0.08),
                 borderRadius: "999px",
                 fontSize: "12px",
               }}
@@ -1531,7 +1533,7 @@ export function ModDetailPage() {
                 if (installingFileId === undefined && !why) onInstall(file);
               }}
               style={{
-                background: "rgba(255, 255, 255, 0.06)",
+                background: alpha(WHITE, 0.06),
                 borderRadius: "6px",
                 padding: "8px 12px",
                 opacity:
@@ -1558,7 +1560,7 @@ export function ModDetailPage() {
                 style={{
                   fontSize: "12px",
                   marginTop: "2px",
-                  color: done ? ACCENT_SUCCESS : NEXUS_ORANGE,
+                  color: done ? GREEN : CRIMSON_TEXT,
                   opacity: why && !busy && !done ? 0.8 : 1,
                 }}
               >

@@ -1,20 +1,17 @@
 import type { CSSProperties } from "react";
 
-// Brand accents for the plugin's full-screen pages. The QAM panel stays
-// native Steam styling on purpose - these are only for our own surfaces.
+import { alpha, BLACK, CRIMSON, CRIMSON_PRESSED, GUNMETAL, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
+
+// Every colour lives in palette.ts (the Core palette: black, gunmetal,
+// steel, one crimson accent, muted green/amber status). This file holds
+// the shared button CSS and layout tokens built from it. The QAM panel
+// stays native Steam styling apart from its status notes.
 //
-// Official Nexus Mods orange (confirmed by Michael, 2026-07-16).
-export const NEXUS_ORANGE = "#da8e35";
-export const NEXUS_ORANGE_HOVER = "#e6a45a";
-export const NEXUS_ORANGE_PRESSED = "#b9792d";
-
-export const ACCENT_SUCCESS = "#8fd48f";
-
-// Forge's surfaces (the game page Mods section, tile dots) use the Eternal
-// palette instead: AMOLED black, crimson, steel, gunmetal. Defined in
-// forgeRules.ts so its node tests compile without the rest of the theme.
+// Forge's surfaces (the game page Mods section, tile dots) read the same
+// values through forgeRules.ts, which keeps its own copies so its node
+// tests compile without the rest of the theme (tests/forge.test.mjs
+// checks the copies still match palette.ts).
 export { FORGE_BLACK, FORGE_CRIMSON, FORGE_GUNMETAL, FORGE_STEEL } from "./forgeRules";
-export const ACCENT_DANGER = "#ff6b6b";
 
 // Injected once per page that uses the primary button. Hover covers desktop
 // pointers; gpfocus is Steam's gamepad-focus class - the Gaming Mode "hover".
@@ -34,18 +31,21 @@ export const WHITE_BUTTON_CLASS = WHITE_BUTTON_CLASS_NAME;
 export const BLUE_BUTTON_CLASS = BLUE_BUTTON_CLASS_NAME;
 export const PRIMARY_BUTTON_CSS = `
 .${PRIMARY_BUTTON_CLASS} {
-  background: ${NEXUS_ORANGE} !important;
-  color: #fff !important;
+  background: ${CRIMSON} !important;
+  color: ${WHITE} !important;
   font-weight: 600;
 }
+/* Focus keeps the crimson fill (white on it is 4.9:1; a lighter crimson
+   would drop under 4.5:1) and adds a white ring as the indicator. */
 .${PRIMARY_BUTTON_CLASS}:hover,
 .${PRIMARY_BUTTON_CLASS}.gpfocus,
 .${PRIMARY_BUTTON_CLASS}.gpfocuswithin {
-  background: ${NEXUS_ORANGE_HOVER} !important;
-  color: #fff !important;
+  background: ${CRIMSON} !important;
+  color: ${WHITE} !important;
+  box-shadow: inset 0 0 0 2px ${WHITE};
 }
 .${PRIMARY_BUTTON_CLASS}:active {
-  background: ${NEXUS_ORANGE_PRESSED} !important;
+  background: ${CRIMSON_PRESSED} !important;
 }
 /* A working install has to LOOK like one even when it has nothing to report.
    Compiling a Frostbite game spends about half a minute indexing the game's
@@ -62,9 +62,9 @@ export const PRIMARY_BUTTON_CSS = `
   inset: 0;
   background: linear-gradient(
     100deg,
-    rgba(255, 255, 255, 0) 20%,
-    rgba(255, 255, 255, 0.22) 50%,
-    rgba(255, 255, 255, 0) 80%
+    ${alpha(WHITE, 0)} 20%,
+    ${alpha(WHITE, 0.22)} 50%,
+    ${alpha(WHITE, 0)} 80%
   );
   transform: translateX(-100%);
   animation: nexus-busy-sweep 1.6s ease-in-out infinite;
@@ -75,34 +75,36 @@ export const PRIMARY_BUTTON_CSS = `
     transform: translateX(100%);
   }
 }
+/* The emphasised secondary button: steel with black text (12:1). Focus
+   flips to white with a crimson ring - no glow. */
 .${WHITE_BUTTON_CLASS_NAME} {
-  background: rgba(255, 255, 255, 0.6) !important;
-  color: #111 !important;
+  background: ${STEEL} !important;
+  color: ${BLACK} !important;
   transition: background 0.12s ease, transform 0.12s ease,
     box-shadow 0.12s ease;
 }
 .${WHITE_BUTTON_CLASS_NAME}:hover,
 .${WHITE_BUTTON_CLASS_NAME}.gpfocus,
 .${WHITE_BUTTON_CLASS_NAME}.gpfocuswithin {
-  /* Steam's own white-button focus: flip to full white, glow, and a
-     slight grow - the idle state stays dimmer so the pop is obvious. */
-  background: #ffffff !important;
-  color: #000 !important;
+  background: ${WHITE} !important;
+  color: ${BLACK} !important;
   font-weight: 600;
   transform: scale(1.02);
-  box-shadow: inset 0 0 0 2px ${NEXUS_ORANGE},
-    0 0 14px rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 3px ${CRIMSON};
 }
+/* The plain secondary button (was blue): gunmetal with steel text; focus
+   is a lighter surface with a crimson edge, Core's menu style. */
 .${BLUE_BUTTON_CLASS_NAME} {
-  background: rgba(74, 169, 255, 0.22) !important;
-  color: #cfe9ff !important;
+  background: ${GUNMETAL} !important;
+  color: ${STEEL} !important;
 }
 .${BLUE_BUTTON_CLASS_NAME}:hover,
 .${BLUE_BUTTON_CLASS_NAME}.gpfocus,
 .${BLUE_BUTTON_CLASS_NAME}.gpfocuswithin {
-  background: #4aa9ff !important;
-  color: #08243a !important;
+  background: ${GUNMETAL_RAISED} !important;
+  color: ${WHITE} !important;
   font-weight: 600;
+  box-shadow: inset 3px 0 0 ${CRIMSON};
 }
 
 /* The endorse pill has to show focus, or a column of them is unnavigable.
@@ -113,9 +115,9 @@ export const PRIMARY_BUTTON_CSS = `
 .${ENDORSE_PILL_CLASS}.gpfocus,
 .${ENDORSE_PILL_CLASS}.gpfocuswithin,
 .${ENDORSE_PILL_CLASS}:hover {
-  background: rgba(218, 142, 53, 0.42) !important;
-  border-color: ${NEXUS_ORANGE} !important;
-  box-shadow: 0 0 0 2px rgba(218, 142, 53, 0.55);
+  background: ${GUNMETAL_RAISED} !important;
+  border-color: ${CRIMSON} !important;
+  box-shadow: 0 0 0 2px ${CRIMSON};
   transform: scale(1.04);
 }
 .${ENDORSE_PILL_CLASS} {
@@ -130,9 +132,9 @@ export const PRIMARY_BUTTON_CSS = `
 .${LINK_CHIP_CLASS}.gpfocus,
 .${LINK_CHIP_CLASS}.gpfocuswithin,
 .${LINK_CHIP_CLASS}:hover {
-  background: rgba(218, 142, 53, 0.42) !important;
-  border-color: ${NEXUS_ORANGE} !important;
-  box-shadow: 0 0 0 2px rgba(218, 142, 53, 0.55);
+  background: ${GUNMETAL_RAISED} !important;
+  border-color: ${CRIMSON} !important;
+  box-shadow: 0 0 0 2px ${CRIMSON};
   transform: scale(1.04);
 }
 .${LINK_CHIP_CLASS} {
@@ -244,6 +246,9 @@ export const FOOTER_CLEARANCE = 72;
  * padding or the sizing: that is the whole point of it being here. */
 export const PAGE_SCROLLER: CSSProperties = {
   height: "100%",
+  // The Core palette's AMOLED ground; every surface on the page is
+  // gunmetal on top of it.
+  background: BLACK,
   // Without this the padding below is decoration. See THE TRAP above.
   boxSizing: "border-box",
   overflowY: "auto",

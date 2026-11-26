@@ -11,11 +11,12 @@ import { GB_ID_BASE, GbFile, GbMod, InstallProgress, gbGetMod } from "./api";
 import { PayloadChoiceModal } from "./ChoiceModal";
 import { PageBackdrop, SectionHeading, StatChip, WarningBox } from "./chrome";
 import { FomodWizardData, FomodWizardModal } from "./FomodWizard";
-import { GB_YELLOW, fmtBytes, fmtDate, getGbGame, getGbModId } from "./gamebanana";
+import { fmtBytes, fmtDate, getGbGame, getGbModId } from "./gamebanana";
 import { finishFomod, installModWith, removeMod, toggleMod } from "./install";
 import { nameDownload } from "./state";
 import { popOurPage } from "./Tabs";
-import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
+import { PAGE_SCROLLER } from "./theme";
+import { alpha, AMBER, CRIMSON_TEXT, STEEL, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 const DESC_COLLAPSE = 600;
@@ -140,7 +141,7 @@ export function GameBananaModPage() {
       <Scroller focusable={false} style={PAGE_SCROLLER}>
         <PageBackdrop src={mod?.images[0] || mod?.thumbnail} height={250} />
         <div style={{ position: "relative", zIndex: 1 }}>
-          {error && <div style={{ padding: "20px 0", color: NEXUS_ORANGE }}>GameBanana: {error}</div>}
+          {error && <div style={{ padding: "20px 0", color: CRIMSON_TEXT }}>GameBanana: {error}</div>}
           {!mod && !error && <div style={{ padding: "20px 0", opacity: 0.8 }}>Loading…</div>}
           {mod && (
             <>
@@ -153,7 +154,7 @@ export function GameBananaModPage() {
                   />
                 )}
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: GB_YELLOW, letterSpacing: "0.5px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: STEEL, letterSpacing: "0.5px" }}>
                     GAMEBANANA{mod.category ? ` · ${mod.category}` : ""}
                   </div>
                   <h2 style={{ margin: "2px 0 4px" }}>{mod.name}</h2>
@@ -205,7 +206,7 @@ export function GameBananaModPage() {
                       gap: "12px",
                       padding: "8px 12px",
                       borderRadius: "6px",
-                      background: "rgba(255,255,255,0.06)",
+                      background: alpha(WHITE, 0.06),
                     }}
                   >
                     <div style={{ flexGrow: 1, minWidth: 0 }}>
@@ -219,7 +220,7 @@ export function GameBananaModPage() {
                       </div>
                       {f.description && <div style={{ fontSize: "12px", opacity: 0.8 }}>{f.description}</div>}
                       {(f.scan || f.has_exe) && (
-                        <div style={{ fontSize: "12px", color: NEXUS_ORANGE }}>
+                        <div style={{ fontSize: "12px", color: AMBER }}>
                           {f.scan ? `GameBanana's file scan: ${f.scan}. ` : ""}
                           {f.has_exe ? "Contains a program (.exe)." : ""}
                         </div>
@@ -281,7 +282,7 @@ export function GameBananaModPage() {
                       {long && !expanded ? `${text.slice(0, DESC_COLLAPSE)}…` : text}
                     </div>
                     {long && (
-                      <div style={{ color: NEXUS_ORANGE, fontSize: "13px", marginTop: "4px" }}>
+                      <div style={{ color: STEEL, fontSize: "13px", marginTop: "4px" }}>
                         {expanded ? "Show less" : "Show more"}
                       </div>
                     )}

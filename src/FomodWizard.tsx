@@ -4,8 +4,8 @@
 // authoritatively when applying.
 import { DialogButton, Focusable, GamepadButton, ModalRoot } from "@decky/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { alpha, CRIMSON, WHITE } from "./palette";
 
-import { NEXUS_ORANGE } from "./theme";
 
 export interface FomodDepTree {
   kind: "group" | "flag" | "const";
@@ -228,10 +228,10 @@ export function FomodWizardModal({
                     padding: "6px 10px",
                     borderRadius: "4px",
                     background: on
-                      ? "rgba(218, 142, 53, 0.18)"
-                      : "rgba(255,255,255,0.05)",
+                      ? alpha(CRIMSON, 0.18)
+                      : alpha(WHITE, 0.05),
                     border: on
-                      ? `1px solid ${NEXUS_ORANGE}aa`
+                      ? `1px solid ${alpha(CRIMSON, 0.67)}`
                       : "1px solid transparent",
                     opacity: plugin.type === "NotUsable" ? 0.4 : locked ? 0.85 : 1,
                   }}

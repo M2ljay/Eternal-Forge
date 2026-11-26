@@ -52,6 +52,7 @@ import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } fr
 import { toggleMod } from "./install";
 import { notifyGameStateChanged, setBrowseGame, setDetailOrigin, setSelectedMod, subscribeGameState } from "./state";
 import { pushFromGamePage } from "./Tabs";
+import { GUNMETAL_RAISED, WHITE } from "./palette";
 
 // Our own routes (registered in index.tsx).
 const BROWSE_ROUTE = "/nexus-mods";
@@ -74,11 +75,11 @@ const CSS = `
 .${BTN}.gpfocus, .${BTN}.gpfocuswithin, .${BTN}:hover,
 .${ROW}.gpfocus, .${ROW}.gpfocuswithin, .${ROW}:hover {
   border-color: ${FORGE_CRIMSON} !important;
-  background: #262a30 !important;
-  color: #ffffff !important;
+  background: ${GUNMETAL_RAISED} !important;
+  color: ${WHITE} !important;
 }
-.${BTN}.forge-primary { background: ${FORGE_CRIMSON} !important; color: #fff !important; }
-.${BTN}.forge-primary.gpfocus, .${BTN}.forge-primary:hover { border-color: #ffffff !important; }
+.${BTN}.forge-primary { background: ${FORGE_CRIMSON} !important; color: ${WHITE} !important; }
+.${BTN}.forge-primary.gpfocus, .${BTN}.forge-primary:hover { border-color: ${WHITE} !important; }
 `;
 
 interface Status {
@@ -94,7 +95,7 @@ function Chip({ children, crimson }: { children: React.ReactNode; crimson?: bool
         padding: "2px 8px",
         borderRadius: "10px",
         background: crimson ? FORGE_CRIMSON : FORGE_GUNMETAL,
-        color: crimson ? "#fff" : FORGE_STEEL,
+        color: crimson ? WHITE : FORGE_STEEL,
         whiteSpace: "nowrap",
       }}
     >
@@ -325,7 +326,7 @@ export function GameModsSection({ appId }: { appId: number }) {
       <style>{CSS}</style>
       <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
         <div style={{ width: "4px", height: "18px", background: FORGE_CRIMSON, borderRadius: "2px" }} />
-        <div style={{ fontSize: "16px", fontWeight: 700, color: "#fff", letterSpacing: "0.04em" }}>MODS</div>
+        <div style={{ fontSize: "16px", fontWeight: 700, color: WHITE, letterSpacing: "0.04em" }}>MODS</div>
         {mode === "mods" && <Chip>{mods ? countLabel(list) : "Reading..."}</Chip>}
         {mode === "mods" && updates.size > 0 && (
           <Chip crimson>
@@ -354,7 +355,7 @@ export function GameModsSection({ appId }: { appId: number }) {
             gap: "8px",
           }}
         >
-          <div style={{ color: "#fff", fontWeight: 700 }}>Restore last working mods?</div>
+          <div style={{ color: WHITE, fontWeight: 700 }}>Restore last working mods?</div>
           <div style={{ fontSize: "13px" }}>
             {game.displayName} closed early twice since its mods changed. Going back only switches mods
             on and off; nothing is deleted.
@@ -393,7 +394,7 @@ export function GameModsSection({ appId }: { appId: number }) {
                       border: `2px solid ${m.enabled ? FORGE_CRIMSON : FORGE_STEEL}`,
                     }}
                   />
-                  <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#fff" }}>
+                  <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: WHITE }}>
                     {m.name ?? m.folder}
                   </span>
                   {m.version && <span style={{ fontSize: "12px", opacity: 0.8 }}>{m.version}</span>}

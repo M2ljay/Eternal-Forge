@@ -27,7 +27,7 @@ import {
   gbFromLocal,
   isGameBananaId,
 } from "./api";
-import { GB_YELLOW, openGameBananaMod } from "./gamebanana";
+import { openGameBananaMod } from "./gamebanana";
 import { SupportedGame, getActiveGame, managedGames, modeParams } from "./games";
 import { removeMod, toggleMod } from "./install";
 import {
@@ -40,12 +40,11 @@ import {
 } from "./state";
 import {
   BLUE_BUTTON_CLASS,
-  NEXUS_ORANGE,
   PAGE_SCROLLER,
   PRIMARY_BUTTON_CSS,
   WHITE_BUTTON_CLASS,
 } from "./theme";
-import { OrangeToggle } from "./Toggle";
+import { AccentToggle } from "./Toggle";
 import {
   TabBar,
   exitTabsToQam,
@@ -54,6 +53,7 @@ import {
   pushOurPage,
 } from "./Tabs";
 import { collectionCountLine, collectionSwitchPlan } from "./panelRules";
+import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, STEEL, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -104,7 +104,7 @@ function Thumb({
           filter: blur ? "blur(9px)" : undefined,
           borderRadius: "3px",
           flexShrink: 0,
-          background: "#0b0e13",
+          background: BLACK,
         }}
       />
     );
@@ -116,7 +116,7 @@ function Thumb({
         height: `${size.h}px`,
         borderRadius: "3px",
         flexShrink: 0,
-        background: "rgba(255,255,255,0.08)",
+        background: alpha(WHITE, 0.08),
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -178,7 +178,7 @@ function ModRow({
         alignItems: "center",
         gap: "10px",
         padding: "8px 10px",
-        background: "rgba(255,255,255,0.05)",
+        background: alpha(WHITE, 0.05),
         borderRadius: "4px",
         opacity: mod.enabled ? 1 : 0.6,
       }}
@@ -203,7 +203,7 @@ function ModRow({
         </div>
         <div style={{ fontSize: "11.5px", opacity: 0.6 }}>
           {isGameBananaId(mod.mod_id) && (
-            <span style={{ color: GB_YELLOW, fontWeight: 700 }}>GameBanana · </span>
+            <span style={{ color: STEEL, fontWeight: 700 }}>GameBanana · </span>
           )}
           {mod.version ? `v${mod.version}` : "untracked"}
           {mod.enabled ? "" : " · disabled"}
@@ -219,7 +219,7 @@ function ModRow({
               fontSize: "11px",
               marginTop: "2px",
               lineHeight: 1.3,
-              color: NEXUS_ORANGE,
+              color: AMBER,
               opacity: 0.85,
             }}
           >
@@ -231,7 +231,7 @@ function ModRow({
             style={{
               fontSize: "11px",
               marginTop: "2px",
-              color: NEXUS_ORANGE,
+              color: AMBER,
               opacity: 0.85,
             }}
           >
@@ -247,7 +247,7 @@ function ModRow({
               fontSize: "11px",
               marginTop: "2px",
               lineHeight: 1.3,
-              color: NEXUS_ORANGE,
+              color: CRIMSON_TEXT,
             }}
           >
             ⚠ {mod.load_problem}
@@ -258,7 +258,7 @@ function ModRow({
             style={{
               marginTop: "2px",
               fontSize: "11px",
-              color: NEXUS_ORANGE,
+              color: STEEL,
               opacity: 0.9,
             }}
           >
@@ -284,7 +284,7 @@ function ModRow({
         </DialogButton>
       )}
       {mod.togglable !== false && (
-        <OrangeToggle
+        <AccentToggle
           checked={mod.enabled}
           disabled={busy}
           onChange={() => onToggle(game, mod)}
@@ -611,7 +611,7 @@ export function ManagerPage() {
         fontSize: "15px",
         fontWeight: 700,
         padding: "0 0 6px",
-        borderBottom: `2px solid ${NEXUS_ORANGE}55`,
+        borderBottom: `2px solid ${alpha(CRIMSON, 0.33)}`,
         marginBottom: "10px",
       }}
     >
@@ -800,9 +800,9 @@ export function ManagerPage() {
                                 alignItems: "center",
                                 gap: "12px",
                                 padding: "8px 10px",
-                                background: "rgba(218,142,53,0.10)",
+                                background: alpha(CRIMSON, 0.10),
                                 border: `1px solid ${
-                                  open ? NEXUS_ORANGE + "88" : "transparent"
+                                  open ? alpha(CRIMSON, 0.53) : "transparent"
                                 }`,
                                 borderRadius: "6px",
                               }}
@@ -899,7 +899,7 @@ export function ManagerPage() {
                                   </DialogButton>
                                 )}
                               {toggleable.length > 0 && (
-                                <OrangeToggle
+                                <AccentToggle
                                   checked={allOn}
                                   disabled={collBusy}
                                   onChange={(next) =>

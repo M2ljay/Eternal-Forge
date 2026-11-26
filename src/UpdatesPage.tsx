@@ -34,6 +34,7 @@ import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { VrReleases } from "./VrReleases";
 import { UpdateHoldSection } from "./UpdateHold";
 import { UPDATE_HOOKS } from "./safeUpdate";
+import { alpha, AMBER, BLACK, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -245,8 +246,8 @@ export function UpdatesPage() {
               margin: "0 0 14px",
               padding: "10px 12px",
               borderRadius: "6px",
-              background: "rgba(218, 142, 53, 0.12)",
-              border: "1px solid rgba(218, 142, 53, 0.35)",
+              background: alpha(AMBER, 0.12),
+              border: `1px solid ${alpha(AMBER, 0.35)}`,
               maxWidth: "560px",
             }}
           >
@@ -267,7 +268,7 @@ export function UpdatesPage() {
                   margin: "0 0 10px",
                   padding: "8px 10px",
                   borderRadius: "4px",
-                  background: "rgba(0, 0, 0, 0.22)",
+                  background: alpha(BLACK, 0.22),
                   maxHeight: notesOpen ? "none" : "92px",
                   overflow: "hidden",
                 }}
@@ -356,7 +357,7 @@ export function UpdatesPage() {
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 12px",
-                background: "rgba(255,255,255,0.05)",
+                background: alpha(WHITE, 0.05),
                 borderRadius: "4px",
               }}
             >

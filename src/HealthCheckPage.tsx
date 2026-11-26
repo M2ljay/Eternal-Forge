@@ -40,14 +40,18 @@ import { fitReportBody, healthVerdict } from "./panelRules";
 import { installLatest } from "./install";
 import { LINK_CHIP_CLASS, PAGE_SCROLLER } from "./theme";
 import { setDetailOrigin, setSelectedMod } from "./state";
+import { alpha, AMBER, CRIMSON, CRIMSON_TEXT, GREEN, GUNMETAL, GUNMETAL_RAISED, rgbTriplet, STEEL, WHITE } from "./palette";
 
-const WARN = "230, 180, 80";
-const NEXUS_ORANGE = "#da8e35";
+const WARN = rgbTriplet(AMBER);
+const GOOD = rgbTriplet(GREEN);
+// CRIMSON_TEXT, not CRIMSON: the tone is also the finding's headline colour.
+const BAD = rgbTriplet(CRIMSON_TEXT);
+const INFO = rgbTriplet(STEEL);
 
 // The design language says progress is shown by filling the control itself,
-// left to right, in brand orange. There is nothing to fill here - the check
+// left to right, in crimson. There is nothing to fill here - the check
 // cannot report a percentage - so this is the same idea as a sweep: one
-// orange band travelling across the banner, so a slow check reads as working
+// crimson band travelling across the banner, so a slow check reads as working
 // rather than stuck. On a large Fallout 3 collection it is the difference
 // between waiting and reaching for the back button.
 const SWEEP_CSS = `
@@ -64,9 +68,9 @@ const SWEEP_CSS = `
   border-radius: 2px;
   background: linear-gradient(
     90deg,
-    rgba(218,142,53,0) 0%,
-    ${NEXUS_ORANGE} 50%,
-    rgba(218,142,53,0) 100%
+    ${alpha(CRIMSON, 0)} 0%,
+    ${CRIMSON} 50%,
+    ${alpha(CRIMSON, 0)} 100%
   );
   animation: nexusHealthSweep 1.15s ease-in-out infinite;
 }
@@ -143,8 +147,8 @@ function LinkChip({
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
-        background: "rgba(218, 142, 53, 0.15)",
-        border: `1px solid ${NEXUS_ORANGE}88`,
+        background: GUNMETAL,
+        border: `1px solid ${GUNMETAL_RAISED}`,
       }}
     >
       {icon ? `${icon} ` : ""}
@@ -178,7 +182,7 @@ function FindingCard({
         padding: "12px 14px",
         marginBottom: "8px",
         borderRadius: "6px",
-        background: "rgba(255,255,255,0.045)",
+        background: alpha(WHITE, 0.045),
         // A single accent edge in the finding's own colour. Enough to sort
         // the list at a glance without turning the page into a warning sign.
         borderLeft: `3px solid rgba(${tone}, 0.85)`,
@@ -396,7 +400,7 @@ export default function HealthCheckPage() {
             // So the sweep can sit on the banner's own bottom edge.
             position: "relative",
             overflow: "hidden",
-            background: `linear-gradient(135deg, rgba(${verdict.tone}, 0.16), rgba(255,255,255,0.02))`,
+            background: `rgba(${verdict.tone}, 0.12)`,
             border: `1px solid rgba(${verdict.tone}, 0.35)`,
           }}
         >
@@ -472,7 +476,7 @@ export default function HealthCheckPage() {
           <>
             <SectionHeading title="Built for a different Fallout" />
             <FindingCard
-              tone="220, 110, 110"
+              tone={BAD}
               icon={<FaPuzzlePiece size={16} />}
               title="This collection needs an older version of the game"
               detail={
@@ -499,7 +503,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Mods the game refused to load" />
             {(shown?.se_parked.length ?? 0) > 0 && (
               <FindingCard
-                tone="143, 212, 143"
+                tone={GOOD}
                 icon={<FaCheck size={14} />}
                 title={`${report!.se_parked.length} set aside for you`}
                 detail={
@@ -519,7 +523,7 @@ export default function HealthCheckPage() {
             {report!.script_extender.map((p) => (
               <FindingCard
                 key={p.dll}
-                tone={p.outdated ? WARN : "220, 110, 110"}
+                tone={p.outdated ? WARN : BAD}
                 icon={<FaPuzzlePiece size={16} />}
                 title={p.mod || p.dll}
                 detail={
@@ -577,7 +581,7 @@ export default function HealthCheckPage() {
             {log.switched_off.map((s) => (
               <FindingCard
                 key={`off:${s.name}`}
-                tone="143, 212, 143"
+                tone={GOOD}
                 icon={<FaCheck size={14} />}
                 title={`${s.name} — switched off`}
                 detail={
@@ -609,7 +613,7 @@ export default function HealthCheckPage() {
             ))}
             {log.compiled && !staleLog && log.failures.length === 0 && (
               <FindingCard
-                tone="143, 212, 143"
+                tone={GOOD}
                 icon={<FaCheck size={14} />}
                 title="Your script mods all compiled"
                 detail={
@@ -703,7 +707,7 @@ export default function HealthCheckPage() {
             {report!.needs_dlc.map((f) => (
               <FindingCard
                 key={f.name}
-                tone="220, 110, 110"
+                tone={BAD}
                 icon={<FaBoxOpen size={16} />}
                 title={f.name}
                 detail={
@@ -726,7 +730,7 @@ export default function HealthCheckPage() {
             {report!.needs_external.map((f) => (
               <FindingCard
                 key={f.name}
-                tone="150, 160, 220"
+                tone={INFO}
                 icon={<FaExternalLinkAlt size={14} />}
                 title={f.name}
                 detail={
@@ -764,7 +768,7 @@ export default function HealthCheckPage() {
             {report!.known_bad.map((k, i) => (
               <FindingCard
                 key={`bad:${k.name}:${i}`}
-                tone="150, 160, 220"
+                tone={INFO}
                 icon={<FaPuzzlePiece size={16} />}
                 title={k.name}
                 detail={
@@ -824,7 +828,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Fixed for you" />
             <FindingCard
               key="cc-catalog"
-              tone="150, 160, 220"
+              tone={INFO}
               icon={<FaPuzzlePiece size={16} />}
               title="Removed a game file that crashes downgraded Skyrim"
               detail={
@@ -844,7 +848,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Fixed for you" />
             <FindingCard
               key="era-quarantine"
-              tone="150, 160, 220"
+              tone={INFO}
               icon={<FaPuzzlePiece size={16} />}
               title="Switched off mods built for an older game version"
               detail={
@@ -862,7 +866,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Fixed for you" />
             <FindingCard
               key="load-order"
-              tone="150, 160, 220"
+              tone={INFO}
               icon={<FaPuzzlePiece size={16} />}
               title="Corrected the mod load order"
               detail={
@@ -882,7 +886,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Fixed for you" />
             <FindingCard
               key="shader-cache"
-              tone="150, 160, 220"
+              tone={INFO}
               icon={<FaPuzzlePiece size={16} />}
               title="Cleared a shader cache the game refused"
               detail={
@@ -901,7 +905,7 @@ export default function HealthCheckPage() {
             <SectionHeading title="Fixed for you" />
             <FindingCard
               key="debug-quieted"
-              tone="150, 160, 220"
+              tone={INFO}
               icon={<FaPuzzlePiece size={16} />}
               title="Turned off a mod's debug display"
               detail={
@@ -922,7 +926,7 @@ export default function HealthCheckPage() {
             {report!.needs_mods_info.map((f) => (
               <FindingCard
                 key={`info:${f.name}`}
-                tone="150, 160, 220"
+                tone={INFO}
                 icon={<FaPuzzlePiece size={16} />}
                 title={f.name}
                 detail={
@@ -960,7 +964,7 @@ export default function HealthCheckPage() {
             {report!.already_fixed.map((d, i) => (
               <FindingCard
                 key={`${d.name}:${i}`}
-                tone="143, 212, 143"
+                tone={GOOD}
                 icon={<FaCheck size={14} />}
                 title={d.name}
                 detail={

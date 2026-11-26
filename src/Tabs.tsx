@@ -5,7 +5,7 @@ import { Focusable, Navigation, QuickAccessTab } from "@decky/ui";
 import { GamepadButton } from "@decky/ui";
 
 import { exitReturnsToGamePage, popsToExitToQam } from "./navRules";
-import { NEXUS_ORANGE } from "./theme";
+import { alpha, CRIMSON, WHITE } from "./palette";
 
 export interface TabDef {
   id: string;
@@ -188,8 +188,8 @@ export function TabBar({ currentId }: { currentId: string }) {
               borderRadius: "4px",
               fontSize: "13px",
               fontWeight: 600,
-              background: active ? NEXUS_ORANGE : "rgba(255,255,255,0.07)",
-              color: active ? "#1a1d24" : undefined,
+              background: active ? CRIMSON : alpha(WHITE, 0.07),
+              color: active ? WHITE : undefined,
             }}
           >
             {tab.label}

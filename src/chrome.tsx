@@ -4,8 +4,8 @@
 import { ButtonItem, Focusable } from "@decky/ui";
 import { CSSProperties, ReactNode } from "react";
 import { FaExclamationTriangle } from "react-icons/fa";
+import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, GUNMETAL_RAISED, WHITE } from "./palette";
 
-import { NEXUS_ORANGE } from "./theme";
 
 /** Faded artwork banner behind a page header - depth without cost. It
  * scrolls away with the content (absolute inside the scroller), so it
@@ -52,7 +52,7 @@ export function PageBackdrop({
           position: "absolute",
           inset: 0,
           background:
-            "linear-gradient(180deg, rgba(11,14,19,0.15) 0%, rgba(11,14,19,0.55) 55%, rgba(11,14,19,1) 100%)",
+            `linear-gradient(180deg, ${alpha(BLACK, 0.15)} 0%, ${alpha(BLACK, 0.55)} 55%, ${alpha(BLACK, 1)} 100%)`,
         }}
       />
     </div>
@@ -80,7 +80,7 @@ export function SectionHeading({
         style={{
           width: "4px",
           height: "18px",
-          background: NEXUS_ORANGE,
+          background: CRIMSON,
           borderRadius: "2px",
         }}
       />
@@ -108,8 +108,8 @@ export function StatChip({
         gap: "6px",
         padding: "3px 11px",
         borderRadius: "999px",
-        background: "rgba(255,255,255,0.08)",
-        border: "1px solid rgba(255,255,255,0.10)",
+        background: alpha(WHITE, 0.08),
+        border: `1px solid ${alpha(WHITE, 0.10)}`,
         fontSize: "12.5px",
         whiteSpace: "nowrap",
       }}
@@ -150,7 +150,7 @@ export function StackedThumb({
     bottom: `${offset}px`,
     left: `${offset * 2}px`,
     width: `${width}px`,
-    background: `rgba(255,255,255,${opacity})`,
+    background: alpha(WHITE, opacity),
     borderRadius: `${radius}px`,
   });
   return (
@@ -177,7 +177,7 @@ export function StackedThumb({
             width: `${width}px`,
             height: "100%",
             objectFit: fit,
-            background: "#0b0e13",
+            background: BLACK,
             borderRadius: `${radius}px`,
             display: "block",
           }}
@@ -190,7 +190,7 @@ export function StackedThumb({
             left: 0,
             width: `${width}px`,
             height: "100%",
-            background: "#23262e",
+            background: GUNMETAL_RAISED,
             borderRadius: `${radius}px`,
           }}
         />
@@ -204,7 +204,7 @@ export function StackedThumb({
  * Toasts truncate, and they leave. Michael: "you forget how little
  * information will fit on a toast message - i think there needs to an
  * orange warning info box or something so the user is informed why it
- * install blocked". A blocked install has to say what is in the way AND
+ * install blocked". (Amber now, crimson for errors: the Core palette.) A blocked install has to say what is in the way AND
  * what to do about it, which is two clauses more than a toast will show,
  * so it stays on the page until the situation changes.
  */
@@ -212,6 +212,7 @@ export function WarningBox({
   title,
   body,
   action,
+  tone = "warning",
 }: {
   title: string;
   body: string;
@@ -221,7 +222,12 @@ export function WarningBox({
    * would be nice if we add a 'manage my mods' button to the end of the
    * message so users can easily go there and turn others off". */
   action?: { label: string; onClick: () => void };
+  /** Amber for "worth knowing"; crimson for a failure or a conflict that
+   * stops something (the Core palette uses crimson for problems). */
+  tone?: "warning" | "error";
 }) {
+  const accent = tone === "error" ? CRIMSON : AMBER;
+  const icon = tone === "error" ? CRIMSON_TEXT : AMBER;
   return (
     <div
       style={{
@@ -231,15 +237,15 @@ export function WarningBox({
         margin: "10px 0",
         padding: "11px 13px",
         borderRadius: "6px",
-        // Orange, and a left bar so it reads as a warning at a glance
+        // Tinted, with a left bar, so it reads as a warning at a glance
         // rather than as another panel of body text.
-        background: "rgba(215, 130, 40, 0.14)",
-        borderLeft: "3px solid rgba(240, 145, 40, 0.95)",
+        background: alpha(accent, 0.14),
+        borderLeft: `3px solid ${accent}`,
       }}
     >
       <FaExclamationTriangle
         size={15}
-        style={{ color: "rgb(240, 165, 70)", flexShrink: 0, marginTop: "2px" }}
+        style={{ color: icon, flexShrink: 0, marginTop: "2px" }}
       />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: "14px" }}>{title}</div>
@@ -278,7 +284,7 @@ export function AdultBadge() {
         right: "6px",
         padding: "2px 7px",
         borderRadius: "4px",
-        background: "rgba(0,0,0,0.72)",
+        background: alpha(BLACK, 0.72),
         fontSize: "11px",
         fontWeight: 700,
         letterSpacing: "0.5px",

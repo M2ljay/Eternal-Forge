@@ -17,9 +17,7 @@ import { FaThumbsUp } from "react-icons/fa";
 import { getEndorsement, setEndorsement } from "./api";
 import { ENDORSE_PILL_CLASS } from "./theme";
 import { endorseControl } from "./panelRules";
-
-const NEXUS_ORANGE = "#da8e35";
-const GREEN = "143, 212, 143";
+import { alpha, GREEN, GUNMETAL, GUNMETAL_RAISED, STEEL } from "./palette";
 
 /** THE endorse control. One component so the same action cannot end up
  * looking like three different things - which it did: a pill on the mod
@@ -46,13 +44,14 @@ export function EndorsePill({
 }) {
   const tone = endorsed
     ? {
-        background: `rgba(${GREEN}, 0.15)`,
-        border: `1px solid rgba(${GREEN}, 0.5)`,
-        color: `rgb(${GREEN})`,
+        background: alpha(GREEN, 0.15),
+        border: `1px solid ${alpha(GREEN, 0.5)}`,
+        color: GREEN,
       }
     : {
-        background: "rgba(218, 142, 53, 0.15)",
-        border: `1px solid ${NEXUS_ORANGE}88`,
+        background: GUNMETAL,
+        border: `1px solid ${GUNMETAL_RAISED}`,
+        color: STEEL,
       };
   return (
     <Focusable

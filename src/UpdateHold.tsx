@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 
 import { getUpdateHold, getWaitingUpdates, setUpdateHoldEnabled } from "./api";
 import { managedGames } from "./games";
-import { OrangeToggle } from "./Toggle";
+import { AccentToggle } from "./Toggle";
 import { applyUpdateHold } from "./holdUpdates";
+import { alpha, AMBER } from "./palette";
 
 export function UpdateHoldSection() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -34,7 +35,7 @@ export function UpdateHoldSection() {
             {held.length ? ` Held now: ${held.length} game${held.length === 1 ? "" : "s"}.` : ""}
           </div>
         </div>
-        <OrangeToggle
+        <AccentToggle
           checked={enabled}
           onChange={async (next) => {
             setEnabled(next);
@@ -50,7 +51,7 @@ export function UpdateHoldSection() {
             marginTop: "8px",
             padding: "8px 12px",
             borderRadius: "4px",
-            background: "rgba(218, 142, 53, 0.12)",
+            background: alpha(AMBER, 0.12),
             fontSize: "12.5px",
           }}
         >

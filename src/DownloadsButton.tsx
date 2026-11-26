@@ -13,7 +13,8 @@ import {
   subscribeDownloads,
 } from "./state";
 import { DOWNLOADS_ROUTE, pushOurPage } from "./Tabs";
-import { ACTION_BUTTON, NEXUS_ORANGE } from "./theme";
+import { ACTION_BUTTON } from "./theme";
+import { CRIMSON_TEXT } from "./palette";
 
 /** Says where it goes, not what it is: an icon-only download glyph next
  * to an Install button reads as a second download button. Sized like
@@ -34,7 +35,7 @@ export function DownloadsButton() {
       onClick={() => pushOurPage(DOWNLOADS_ROUTE)}
       style={{
         ...ACTION_BUTTON,
-        ...(busy ? { color: NEXUS_ORANGE, fontWeight: 600 } : {}),
+        ...(busy ? { color: CRIMSON_TEXT, fontWeight: 600 } : {}),
       }}
     >
       <span

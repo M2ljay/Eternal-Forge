@@ -71,7 +71,8 @@ import {
   handleTabButtons,
   pushOurPage,
 } from "./Tabs";
-import { NEXUS_ORANGE, PAGE_SCROLLER, PRIMARY_BUTTON_CSS } from "./theme";
+import { PAGE_SCROLLER, PRIMARY_BUTTON_CSS } from "./theme";
+import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -84,44 +85,44 @@ const PITCH = ROW_H + GAP;
 const LO_CSS = `
 .nexus-lo-row { transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease; }
 .nexus-lo-row.gpfocus, .nexus-lo-row.gpfocuswithin {
-  background: rgba(255,255,255,0.13) !important;
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.92);
+  background: ${GUNMETAL_RAISED} !important;
+  box-shadow: inset 0 0 0 2px ${CRIMSON};
 }
 .nexus-lo-carried, .nexus-lo-carried.gpfocus, .nexus-lo-carried.gpfocuswithin {
-  background: rgba(218,142,53,0.24) !important;
-  box-shadow: 0 14px 30px rgba(0,0,0,0.6), inset 0 0 0 2px ${NEXUS_ORANGE} !important;
+  background: ${alpha(CRIMSON, 0.24)} !important;
+  box-shadow: 0 14px 30px ${alpha(BLACK, 0.6)}, inset 0 0 0 2px ${CRIMSON} !important;
 }
-.nexus-lo-blocked { box-shadow: inset 0 0 0 2px rgba(255,107,107,0.95) !important; }
+.nexus-lo-blocked { box-shadow: inset 0 0 0 2px ${alpha(CRIMSON, 0.95)} !important; }
 .nexus-lo-num {
   width: 50px; height: 100%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600;
-  opacity: 0.7; border-left: 3px solid rgba(218,142,53,0.32);
+  opacity: 0.7; border-left: 3px solid ${alpha(STEEL, 0.32)};
   border-radius: 6px 0 0 6px;
 }
-.nexus-lo-master .nexus-lo-num { border-left-color: rgba(218,142,53,0.8); }
-.nexus-lo-num.locked { opacity: 0.45; border-left-color: rgba(255,255,255,0.22); }
-.nexus-lo-carried .nexus-lo-num { opacity: 1; color: ${NEXUS_ORANGE}; font-size: 15px; }
+.nexus-lo-master .nexus-lo-num { border-left-color: ${STEEL}; }
+.nexus-lo-num.locked { opacity: 0.45; border-left-color: ${alpha(WHITE, 0.22)}; }
+.nexus-lo-carried .nexus-lo-num { opacity: 1; color: ${CRIMSON_TEXT}; font-size: 15px; }
 .nexus-lo-tag {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; padding: 3px 7px;
-  border-radius: 4px; background: rgba(255,255,255,0.08); opacity: 0.8; flex-shrink: 0;
+  border-radius: 4px; background: ${alpha(WHITE, 0.08)}; opacity: 0.8; flex-shrink: 0;
 }
 .nexus-lo-pill {
   min-width: 54px; box-sizing: border-box; text-align: center; font-size: 12px;
   font-weight: 700; padding: 5px 10px; border-radius: 999px; flex-shrink: 0;
-  background: rgba(255,255,255,0.12); display: inline-flex; gap: 5px;
+  background: ${alpha(WHITE, 0.12)}; display: inline-flex; gap: 5px;
   align-items: center; justify-content: center; cursor: pointer;
 }
-.nexus-lo-pill.on { background: ${NEXUS_ORANGE}; color: #1a1d24; }
+.nexus-lo-pill.on { background: ${CRIMSON}; color: ${WHITE}; }
 @keyframes nexus-lo-shake {
   0% { transform: translateX(0); } 25% { transform: translateX(-4px); }
   50% { transform: translateX(4px); } 75% { transform: translateX(-2px); }
   100% { transform: translateX(0); }
 }
 .nexus-lo-bump { animation: nexus-lo-shake 0.22s ease; }
-.nexus-lo-chip { padding: 6px 14px; border-radius: 4px; font-size: 13px; font-weight: 600; background: rgba(255,255,255,0.07); }
-.nexus-lo-chip.active { background: ${NEXUS_ORANGE}; color: #1a1d24; }
-.nexus-lo-chip.gpfocus, .nexus-lo-chip.gpfocuswithin { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9); }
+.nexus-lo-chip { padding: 6px 14px; border-radius: 4px; font-size: 13px; font-weight: 600; background: ${alpha(WHITE, 0.07)}; }
+.nexus-lo-chip.active { background: ${CRIMSON}; color: ${WHITE}; }
+.nexus-lo-chip.gpfocus, .nexus-lo-chip.gpfocuswithin { box-shadow: inset 0 -3px 0 ${CRIMSON}; }
 `;
 
 interface Carry {
@@ -216,8 +217,8 @@ const Row = memo(function Row({
         padding: "0 12px 0 0",
         borderRadius: "6px",
         background: entry.master
-          ? "rgba(218,142,53,0.07)"
-          : "rgba(255,255,255,0.05)",
+          ? alpha(CRIMSON, 0.07)
+          : alpha(WHITE, 0.05),
         opacity: off && !carried ? 0.55 : 1,
         transform: shift ? `translateY(${shift}px)` : undefined,
         position: "relative",
@@ -243,7 +244,7 @@ const Row = memo(function Row({
           style={{
             fontSize: "12px",
             opacity: note ? 0.95 : 0.65,
-            color: note ? NEXUS_ORANGE : undefined,
+            color: note ? AMBER : undefined,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -1031,9 +1032,9 @@ export default function LoadOrderPage() {
                   padding: "16px 18px",
                   borderRadius: "8px",
                   background: carry
-                    ? "linear-gradient(160deg, rgba(218,142,53,0.22), rgba(255,255,255,0.03))"
-                    : "rgba(255,255,255,0.05)",
-                  border: `1px solid ${carry ? NEXUS_ORANGE + "88" : "rgba(255,255,255,0.08)"}`,
+                    ? `linear-gradient(160deg, ${alpha(CRIMSON, 0.22)}, ${alpha(WHITE, 0.03)})`
+                    : alpha(WHITE, 0.05),
+                  border: `1px solid ${carry ? alpha(CRIMSON, 0.53) : alpha(WHITE, 0.08)}`,
                   minHeight: "200px",
                   transition: "background 0.2s ease, border-color 0.2s ease",
                 }}
@@ -1045,7 +1046,7 @@ export default function LoadOrderPage() {
                         display: "flex",
                         alignItems: "center",
                         gap: "8px",
-                        color: NEXUS_ORANGE,
+                        color: CRIMSON_TEXT,
                         fontSize: "12px",
                         fontWeight: 700,
                         letterSpacing: "0.6px",
@@ -1073,8 +1074,8 @@ export default function LoadOrderPage() {
                           marginTop: "14px",
                           padding: "10px 12px",
                           borderRadius: "6px",
-                          background: "rgba(255,107,107,0.16)",
-                          borderLeft: "3px solid rgba(255,107,107,0.9)",
+                          background: alpha(CRIMSON, 0.16),
+                          borderLeft: `3px solid ${alpha(CRIMSON, 0.9)}`,
                           fontSize: "13px",
                           lineHeight: 1.45,
                         }}
@@ -1128,7 +1129,7 @@ export default function LoadOrderPage() {
                         <div>
                           {inspected.needs.map(pluginTitle).join(", ")}
                           {inspected.missing.length > 0 && (
-                            <span style={{ color: NEXUS_ORANGE }}>
+                            <span style={{ color: AMBER }}>
                               {inspected.needs.length > 0 ? ", " : ""}
                               {inspected.missing.map(pluginTitle).join(", ")} (not installed)
                             </span>
@@ -1153,7 +1154,7 @@ export default function LoadOrderPage() {
                       </div>
                     )}
                     {inspected.skipped && (
-                      <div style={{ fontSize: "13px", marginTop: "10px", color: NEXUS_ORANGE, lineHeight: 1.45 }}>
+                      <div style={{ fontSize: "13px", marginTop: "10px", color: AMBER, lineHeight: 1.45 }}>
                         Switched off by the plugin: {inspected.skipped}.
                       </div>
                     )}

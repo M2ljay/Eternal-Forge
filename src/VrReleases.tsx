@@ -6,6 +6,7 @@ import { toaster } from "@decky/api";
 import { useEffect, useState } from "react";
 
 import { VrRelease, addVrRepo, getVrReleases, markVrReleasesSeen, removeVrRepo } from "./api";
+import { alpha, AMBER, WHITE } from "./palette";
 
 const SMALL = { minWidth: "0", width: "auto", padding: "6px 14px", fontSize: "12.5px", flexShrink: 0 } as const;
 
@@ -82,7 +83,7 @@ export function VrReleases() {
               alignItems: "center",
               gap: "8px",
               padding: "8px 12px",
-              background: it.new ? "rgba(218, 142, 53, 0.12)" : "rgba(255,255,255,0.05)",
+              background: it.new ? alpha(AMBER, 0.12) : alpha(WHITE, 0.05),
               borderRadius: "4px",
             }}
           >

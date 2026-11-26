@@ -440,6 +440,11 @@ export function installedDepsNote(
  * Somebody opens a diagnostics screen already frustrated, so the first
  * thing on it should be a verdict they can read from a sofa - not a table
  * they have to interpret. The tone doubles as the page's accent colour.
+ *
+ * Tones are Core palette values (palette.ts) as "r, g, b", written out
+ * because this file compiles alone for its node test: crimson text
+ * (CRIMSON_TEXT, readable as a headline) for working and for problems,
+ * steel for nothing yet, green for clean, amber for "needs attention".
  */
 export function healthVerdict(
   checked: number,
@@ -458,7 +463,7 @@ export function healthVerdict(
       detail:
         "Asking Nexus what each installed mod says it needs, and looking " +
         "for it on this device.",
-      tone: "218, 142, 53",
+      tone: "234, 90, 104",
       clean: false,
     };
   }
@@ -468,7 +473,7 @@ export function healthVerdict(
       detail:
         "Install some mods and come back — this screen checks that each " +
         "one has what it needs to actually work.",
-      tone: "255, 255, 255",
+      tone: "201, 209, 217",
       clean: false,
     };
   }
@@ -479,7 +484,7 @@ export function healthVerdict(
         "One script failed to compile, and the game stops loading all of " +
         "them when that happens — not just the one that broke. It has been " +
         "switched off for you, so start the game once and check back.",
-      tone: "220, 110, 110",
+      tone: "234, 90, 104",
       clean: false,
     };
   }
@@ -487,7 +492,7 @@ export function healthVerdict(
     return {
       headline: "Everything checks out",
       detail: `All ${checked} of your mods have what they need.`,
-      tone: "143, 212, 143",
+      tone: "111, 163, 127",
       clean: true,
     };
   }
@@ -498,7 +503,7 @@ export function healthVerdict(
       `Out of ${checked} mods checked. ` +
       "None of this stops you playing right now, but each one means a mod " +
       "is not doing what you installed it for.",
-    tone: "230, 180, 80",
+    tone: "201, 139, 74",
     clean: false,
   };
 }

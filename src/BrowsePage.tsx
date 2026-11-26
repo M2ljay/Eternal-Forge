@@ -56,10 +56,11 @@ import {
 // props.
 const Scroller: any = ScrollPanelGroup;
 import { AdultBadge, PageBackdrop, SectionHeading, StackedThumb } from "./chrome";
-import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
+import { PAGE_SCROLLER } from "./theme";
 import { storeHeaderPlan, STORE_HEADER_EDGE } from "./panelRules";
 import { TabBar, exitTabsToQam, handleTabButtons, pushOurPage } from "./Tabs";
-import { GB_YELLOW, openGameBanana } from "./gamebanana";
+import { openGameBanana } from "./gamebanana";
+import { alpha, AMBER, BLACK, CRIMSON, GREEN, GUNMETAL, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
 
 const SORT_OPTIONS = [
   { data: "featured", label: "Featured" },
@@ -106,10 +107,10 @@ const SHOW_VERIFIED_BADGES = false;
 function VerifiedBadge({ state }: { state: CollectionVerdictState }) {
   const look =
     state === "played"
-      ? { text: "VERIFIED ON DECK", bg: "rgba(70, 170, 90, 0.92)" }
+      ? { text: "VERIFIED ON DECK", bg: GREEN, fg: BLACK }
       : state === "booted"
-      ? { text: "BOOTED HERE", bg: "rgba(90, 130, 200, 0.9)" }
-      : { text: "INSTALLED HERE", bg: "rgba(255, 255, 255, 0.16)" };
+      ? { text: "BOOTED HERE", bg: STEEL, fg: BLACK }
+      : { text: "INSTALLED HERE", bg: GUNMETAL_RAISED, fg: WHITE };
   return (
     <div
       style={{
@@ -124,7 +125,7 @@ function VerifiedBadge({ state }: { state: CollectionVerdictState }) {
         fontWeight: 700,
         letterSpacing: "0.4px",
         background: look.bg,
-        color: "#fff",
+        color: look.fg,
       }}
     >
       {state === "played" && <FaCheck size={8} />}
@@ -242,7 +243,7 @@ function CollectionCard({
       style={{
         display: "flex",
         gap: "10px",
-        background: "rgba(255,255,255,0.06)",
+        background: alpha(WHITE, 0.06),
         borderRadius: "6px",
         overflow: "hidden",
         padding: "8px",
@@ -295,8 +296,8 @@ function CollectionCard({
               fontSize: "9.5px",
               fontWeight: 700,
               letterSpacing: "0.4px",
-              background: "rgba(200, 130, 50, 0.92)",
-              color: "#fff",
+              background: AMBER,
+              color: BLACK,
             }}
           >
             {c.built_for
@@ -327,7 +328,7 @@ function StatsLine({ mod, author }: { mod: NexusMod; author?: boolean }) {
         display: "inline-flex",
         alignItems: "center",
         gap: "8px",
-        color: "rgba(255,255,255,0.82)",
+        color: alpha(WHITE, 0.82),
       }}
     >
       {author && <span>{mod.author}</span>}
@@ -368,7 +369,7 @@ function HeroCard({
         borderRadius: "8px",
         overflow: "hidden",
         aspectRatio: "16 / 8",
-        background: "#1a1d24",
+        background: GUNMETAL,
       }}
     >
       {heroSrc && (
@@ -395,7 +396,7 @@ function HeroCard({
           bottom: 0,
           padding: "26px 14px 10px",
           background:
-            "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.88) 85%)",
+            `linear-gradient(180deg, ${alpha(BLACK, 0)} 0%, ${alpha(BLACK, 0.88)} 85%)`,
         }}
       >
         <div
@@ -431,8 +432,8 @@ function UnsupportedBadge({ reason }: { reason: string }) {
         fontSize: "10.5px",
         fontWeight: 700,
         letterSpacing: "0.3px",
-        background: "rgba(20, 22, 28, 0.88)",
-        color: "#f0a746",
+        background: alpha(GUNMETAL, 0.88),
+        color: AMBER,
       }}
     >
       Not installable here
@@ -458,7 +459,7 @@ function ModTile({
     <Focusable
       onActivate={() => openMod(game, mod)}
       style={{
-        background: "rgba(255, 255, 255, 0.06)",
+        background: alpha(WHITE, 0.06),
         borderRadius: "6px",
         overflow: "hidden",
       }}
@@ -486,7 +487,7 @@ function ModTile({
           {unsupported && <UnsupportedBadge reason={unsupported} />}
         </div>
       ) : (
-        <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#23262e", position: "relative" }}>
+        <div style={{ width: "100%", aspectRatio: "16 / 9", background: GUNMETAL_RAISED, position: "relative" }}>
           {unsupported && <UnsupportedBadge reason={unsupported} />}
         </div>
       )}
@@ -518,8 +519,8 @@ function ModTile({
               fontSize: "9.5px",
               fontWeight: 700,
               letterSpacing: "0.4px",
-              background: "rgba(200, 130, 50, 0.92)",
-              color: "#fff",
+              background: AMBER,
+              color: BLACK,
             }}
           >
             PRE-UPDATE
@@ -539,8 +540,8 @@ function ModTile({
               fontSize: "9.5px",
               fontWeight: 700,
               letterSpacing: "0.4px",
-              background: "rgba(170, 60, 60, 0.92)",
-              color: "#fff",
+              background: alpha(CRIMSON, 0.92),
+              color: WHITE,
             }}
           >
             DESKTOP APP ONLY
@@ -570,8 +571,8 @@ function ViewAllCard({
         alignItems: "center",
         justifyContent: "center",
         borderRadius: "6px",
-        background: "rgba(218, 142, 53, 0.12)",
-        border: `1px solid ${NEXUS_ORANGE}55`,
+        background: GUNMETAL,
+        border: `1px solid ${GUNMETAL_RAISED}`,
         fontWeight: 600,
         fontSize: "15px",
       }}
@@ -1201,12 +1202,12 @@ export function BrowsePage() {
             position: "sticky",
             top: 0,
             zIndex: 3,
-            // The page's own dark ground, so content passing behind is
-            // hidden rather than ghosting through the tabs.
-            background: "#0e141b",
+            // The page's own black ground (PAGE_SCROLLER), so content
+            // passing behind is hidden rather than ghosting through the tabs.
+            background: BLACK,
             margin: "0 -24px",
             padding: "0 24px 6px",
-            boxShadow: "0 6px 12px -8px rgba(0,0,0,0.9)",
+            boxShadow: `0 6px 12px -8px ${alpha(BLACK, 0.9)}`,
           }}
         >
           <TabBar currentId="store" />
@@ -1451,8 +1452,8 @@ export function BrowsePage() {
             style={{
               padding: "8px 11px",
               margin: "4px 0 12px",
-              background: "rgba(218,142,53,0.10)",
-              borderLeft: `3px solid ${NEXUS_ORANGE}`,
+              background: GUNMETAL,
+              borderLeft: `3px solid ${STEEL}`,
               borderRadius: "4px",
               fontSize: "12.5px",
               lineHeight: 1.45,
@@ -1492,8 +1493,8 @@ export function BrowsePage() {
                       alignItems: "center",
                       justifyContent: "center",
                       borderRadius: "6px",
-                      background: "rgba(218, 142, 53, 0.12)",
-                      border: `1px solid ${NEXUS_ORANGE}55`,
+                      background: GUNMETAL,
+                      border: `1px solid ${GUNMETAL_RAISED}`,
                       fontWeight: 600,
                       fontSize: "13.5px",
                       minHeight: "80px",
@@ -1515,13 +1516,13 @@ export function BrowsePage() {
                 margin: "10px 0 4px",
                 padding: "10px 14px",
                 borderRadius: "6px",
-                background: "rgba(245, 197, 66, 0.08)",
-                border: `1px solid ${GB_YELLOW}55`,
+                background: GUNMETAL,
+                border: `1px solid ${GUNMETAL_RAISED}`,
                 fontSize: "13.5px",
               }}
             >
               <span>
-                <b style={{ color: GB_YELLOW }}>GameBanana</b> · more mods for {game.displayName}
+                <b style={{ color: STEEL }}>GameBanana</b> · more mods for {game.displayName}
               </span>
               <span style={{ fontWeight: 600 }}>Browse →</span>
             </Focusable>
@@ -1627,9 +1628,9 @@ export function BrowsePage() {
                       fontWeight: 600,
                       background:
                         searchScope === scope
-                          ? NEXUS_ORANGE
-                          : "rgba(255,255,255,0.08)",
-                      color: searchScope === scope ? "#1a1d24" : undefined,
+                          ? CRIMSON
+                          : alpha(WHITE, 0.08),
+                      color: searchScope === scope ? WHITE : undefined,
                     }}
                   >
                     {scope === "mods"

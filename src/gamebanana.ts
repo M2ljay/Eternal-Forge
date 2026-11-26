@@ -6,9 +6,6 @@ import { pushOurPage } from "./Tabs";
 
 export const GB_BROWSE_ROUTE = "/nexus-mods/gamebanana";
 export const GB_MOD_ROUTE = "/nexus-mods/gamebanana/mod";
-/** GameBanana marks its own things in its yellow, so a row says where it came from at a glance. */
-export const GB_YELLOW = "#f5c542";
-
 let gbGame: SupportedGame | undefined;
 let gbModId: number | undefined;
 

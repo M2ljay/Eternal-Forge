@@ -417,7 +417,7 @@ test("the store pins both its nav and its search out of the scroll", () => {
       "half that was still cut off after the tab bar was fixed"
   );
   assert.ok(
-    /background:\s*"#/.test(block.slice(0, block.indexOf(">"))),
+    /background:\s*("#|BLACK\b|GUNMETAL\b)/.test(block.slice(0, block.indexOf(">"))),
     "a pinned block with no opaque background lets the rails ghost through it"
   );
   assert.ok(
@@ -473,8 +473,10 @@ test("a blocked install explains itself on the page, not in a toast", () => {
   );
   const chrome = read("chrome.tsx");
   assert.ok(
-    /background:\s*"rgba\(21[0-9], 1[0-9][0-9], [0-9]+, /.test(chrome),
-    "the warning box is not orange - it reads as another panel of text"
+    /background:\s*alpha\(accent, /.test(chrome) &&
+      /const accent = tone === "error" \? CRIMSON : AMBER;/.test(chrome),
+    "the warning box is not tinted amber (or crimson for errors) - it reads " +
+      "as another panel of text"
   );
 });
 

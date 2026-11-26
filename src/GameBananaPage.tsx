@@ -22,9 +22,10 @@ import {
   gbUnlinkGame,
 } from "./api";
 import { AdultBadge, PageBackdrop, SectionHeading } from "./chrome";
-import { GB_YELLOW, fmtDate, getGbGame, openGameBananaMod } from "./gamebanana";
+import { fmtDate, getGbGame, openGameBananaMod } from "./gamebanana";
 import { TabBar, handleTabButtons, popOurPage } from "./Tabs";
-import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
+import { PAGE_SCROLLER } from "./theme";
+import { alpha, BLACK, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -50,9 +51,9 @@ function GbTile({
   return (
     <Focusable
       onActivate={onOpen}
-      style={{ background: "rgba(255, 255, 255, 0.06)", borderRadius: "6px", overflow: "hidden" }}
+      style={{ background: alpha(WHITE, 0.06), borderRadius: "6px", overflow: "hidden" }}
     >
-      <div style={{ position: "relative", overflow: "hidden", aspectRatio: "16 / 9", background: "#23262e" }}>
+      <div style={{ position: "relative", overflow: "hidden", aspectRatio: "16 / 9", background: GUNMETAL_RAISED }}>
         {mod.thumbnail && (
           <img
             src={mod.thumbnail}
@@ -79,8 +80,8 @@ function GbTile({
               borderRadius: "3px",
               fontSize: "9.5px",
               fontWeight: 700,
-              background: "rgba(70, 170, 90, 0.92)",
-              color: "#fff",
+              background: GREEN,
+              color: BLACK,
             }}
           >
             INSTALLED
@@ -172,7 +173,7 @@ function LinkGame({
           Link
         </DialogButton>
       </Focusable>
-      {note && <div style={{ color: NEXUS_ORANGE, marginTop: "8px" }}>{note}</div>}
+      {note && <div style={{ color: CRIMSON_TEXT, marginTop: "8px" }}>{note}</div>}
     </div>
   );
 }
@@ -270,7 +271,7 @@ export function GameBananaPage() {
                 {game.displayName}
               </h2>
               <div style={{ fontSize: "13px", opacity: 0.7 }}>
-                <span style={{ color: GB_YELLOW, fontWeight: 700 }}>GameBanana</span>
+                <span style={{ color: STEEL, fontWeight: 700 }}>GameBanana</span>
                 {linked ? ` · ${linked.name}` : ""}
                 {linked && total !== undefined ? ` · ${total.toLocaleString()} mods` : ""}
               </div>
@@ -309,7 +310,7 @@ export function GameBananaPage() {
             )}
           </Focusable>
 
-          {error && <div style={{ padding: "12px 0", color: NEXUS_ORANGE }}>GameBanana: {error}</div>}
+          {error && <div style={{ padding: "12px 0", color: CRIMSON_TEXT }}>GameBanana: {error}</div>}
           {linked === undefined && !error && <div style={{ padding: "20px 0", opacity: 0.8 }}>Finding this game on GameBanana…</div>}
           {linked === null && (
             <LinkGame

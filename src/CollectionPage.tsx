@@ -137,6 +137,7 @@ import {
   WarningBox,
 } from "./chrome";
 import { DownloadsButton } from "./DownloadsButton";
+import { alpha, AMBER, CRIMSON, CRIMSON_TEXT, GREEN, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -2063,8 +2064,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                   borderRadius: "4px",
                   fontSize: "12.5px",
                   lineHeight: 1.45,
-                  background: "rgba(220, 80, 80, 0.14)",
-                  border: "1px solid rgba(220, 80, 80, 0.5)",
+                  background: alpha(CRIMSON, 0.14),
+                  border: `1px solid ${alpha(CRIMSON, 0.5)}`,
                 }}
               >
                 {/* whiteSpace preserves the blank lines around the
@@ -2083,8 +2084,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                   borderRadius: "4px",
                   fontSize: "12px",
                   lineHeight: 1.45,
-                  background: "rgba(218, 142, 53, 0.12)",
-                  border: "1px solid rgba(218, 142, 53, 0.4)",
+                  background: alpha(CRIMSON, 0.12),
+                  border: `1px solid ${alpha(CRIMSON, 0.4)}`,
                 }}
               >
                 {conflictIssue}
@@ -2128,8 +2129,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                 margin: "0 0 12px",
                 padding: "8px 10px",
                 borderRadius: "4px",
-                background: "rgba(255, 200, 60, 0.10)",
-                border: "1px solid rgba(255, 200, 60, 0.35)",
+                background: alpha(AMBER, 0.10),
+                border: `1px solid ${alpha(AMBER, 0.35)}`,
                 lineHeight: 1.45,
               }}
             >
@@ -2160,12 +2161,12 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               ...ACTION_HERO,
               ...(installing
                 ? {
-                    background: `linear-gradient(90deg, rgba(218,142,53,0.55) ${
+                    background: `linear-gradient(90deg, ${alpha(CRIMSON, 0.55)} ${
                       getAggregateDownloadPercent(run) ?? 0
-                    }%, rgba(255,255,255,0.10) ${
+                    }%, ${alpha(WHITE, 0.10)} ${
                       getAggregateDownloadPercent(run) ?? 0
                     }%)`,
-                    color: "#fff",
+                    color: WHITE,
                     transition: "background 0.4s linear",
                   }
                 : {}),
@@ -2318,8 +2319,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               margin: "-6px 0 12px",
               padding: "8px 10px",
               borderRadius: "4px",
-              background: "rgba(143, 212, 143, 0.10)",
-              border: "1px solid rgba(143, 212, 143, 0.35)",
+              background: alpha(GREEN, 0.10),
+              border: `1px solid ${alpha(GREEN, 0.35)}`,
               lineHeight: 1.45,
             }}
           >
@@ -2333,8 +2334,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               margin: "-6px 0 12px",
               padding: "8px 10px",
               borderRadius: "4px",
-              background: "rgba(255, 255, 255, 0.06)",
-              border: "1px solid rgba(255, 255, 255, 0.18)",
+              background: alpha(WHITE, 0.06),
+              border: `1px solid ${alpha(WHITE, 0.18)}`,
               lineHeight: 1.45,
             }}
           >
@@ -2348,8 +2349,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               margin: "-6px 0 12px",
               padding: "8px 10px",
               borderRadius: "4px",
-              background: "rgba(143, 212, 143, 0.10)",
-              border: "1px solid rgba(143, 212, 143, 0.35)",
+              background: alpha(GREEN, 0.10),
+              border: `1px solid ${alpha(GREEN, 0.35)}`,
               lineHeight: 1.45,
             }}
           >
@@ -2364,8 +2365,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               margin: "-6px 0 12px",
               padding: "8px 10px",
               borderRadius: "4px",
-              background: "rgba(255, 200, 60, 0.12)",
-              border: "1px solid rgba(255, 200, 60, 0.4)",
+              background: alpha(AMBER, 0.12),
+              border: `1px solid ${alpha(AMBER, 0.4)}`,
               lineHeight: 1.45,
             }}
           >
@@ -2430,8 +2431,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                 margin: "-6px 0 12px",
                 padding: "8px 10px",
                 borderRadius: "4px",
-                background: "rgba(255, 200, 60, 0.12)",
-                border: "1px solid rgba(255, 200, 60, 0.4)",
+                background: alpha(AMBER, 0.12),
+                border: `1px solid ${alpha(AMBER, 0.4)}`,
                 lineHeight: 1.45,
               }}
             >
@@ -2466,8 +2467,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                 padding: "8px 10px",
                 borderRadius: "4px",
                 lineHeight: 1.45,
-                background: "rgba(218, 142, 53, 0.12)",
-                border: "1px solid rgba(218, 142, 53, 0.4)",
+                background: alpha(AMBER, 0.12),
+                border: `1px solid ${alpha(AMBER, 0.4)}`,
               }}
             >
               {(() => {
@@ -2602,8 +2603,8 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
               padding: "8px 10px",
               borderRadius: "4px",
               lineHeight: 1.45,
-              background: "rgba(218, 142, 53, 0.12)",
-              border: "1px solid rgba(218, 142, 53, 0.4)",
+              background: alpha(CRIMSON, 0.12),
+              border: `1px solid ${alpha(CRIMSON, 0.4)}`,
             }}
           >
             ⏭ {brokenSkips.length} mod
@@ -2675,7 +2676,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
             style={{
               fontSize: "12.5px",
               opacity: 0.75,
-              color: "#ffc83c",
+              color: CRIMSON_TEXT,
               margin: "-6px 0 12px",
             }}
           >
@@ -2689,7 +2690,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
         )}
 
         {error && (
-          <div style={{ color: "#ff8a8a", padding: "8px 0" }}>{error}</div>
+          <div style={{ color: CRIMSON_TEXT, padding: "8px 0" }}>{error}</div>
         )}
 
         {detail && (
@@ -2744,17 +2745,17 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                   onActivate={open ? undefined : () => toggleExpand(f)}
                   style={{
                     padding: "6px 10px",
-                    // Downloading rows fill orange left-to-right with the
+                    // Downloading rows fill crimson left-to-right with the
                     // live percent - the row IS the progress bar.
                     background:
                       pct !== undefined
-                        ? `linear-gradient(90deg, rgba(218,142,53,0.45) ${pct}%, rgba(255,255,255,0.05) ${pct}%)`
+                        ? `linear-gradient(90deg, ${alpha(CRIMSON, 0.45)} ${pct}%, ${alpha(WHITE, 0.05)} ${pct}%)`
                         : needsChoices
-                        ? "rgba(74,169,255,0.10)"
-                        : "rgba(255,255,255,0.05)",
-                    color: pct !== undefined ? "#fff" : undefined,
+                        ? alpha(AMBER, 0.10)
+                        : alpha(WHITE, 0.05),
+                    color: pct !== undefined ? WHITE : undefined,
                     borderLeft: needsChoices
-                      ? "3px solid #4aa9ff"
+                      ? `3px solid ${AMBER}`
                       : "3px solid transparent",
                     transition: "background 0.3s linear",
                     borderRadius: "4px",
@@ -2780,7 +2781,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                       {f.modName}
                       {f.version ? ` · v${f.version}` : ""}
                       {needsChoices && (
-                        <span style={{ color: "#4aa9ff" }}>
+                        <span style={{ color: AMBER }}>
                           {" "}
                           · needs choices
                         </span>
@@ -2803,7 +2804,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                           </span>
                         )}
                       {isConflict && (
-                        <span style={{ color: "#ffc83c" }}>
+                        <span style={{ color: CRIMSON_TEXT }}>
                           {" "}
                           · script conflict
                         </span>
@@ -2812,7 +2813,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                           time the user wonders why this one has no tick. */}
                       {parkedReason === "older-game" &&
                         !fileIn(f) && (
-                          <span style={{ color: "#ffc83c" }}>
+                          <span style={{ color: AMBER }}>
                             {" "}
                             · skipped · built for an older patch
                           </span>
@@ -2833,7 +2834,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                         gap: "10px",
                         marginTop: "6px",
                         paddingTop: "6px",
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
+                        borderTop: `1px solid ${alpha(WHITE, 0.08)}`,
                       }}
                     >
                       {info === undefined && (
@@ -2959,9 +2960,9 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                     padding: "5px 10px",
                     background:
                       pct !== undefined
-                        ? `linear-gradient(90deg, rgba(218,142,53,0.45) ${pct}%, rgba(255,255,255,0.03) ${pct}%)`
-                        : "rgba(255,255,255,0.03)",
-                    color: pct !== undefined ? "#fff" : undefined,
+                        ? `linear-gradient(90deg, ${alpha(CRIMSON, 0.45)} ${pct}%, ${alpha(WHITE, 0.03)} ${pct}%)`
+                        : alpha(WHITE, 0.03),
+                    color: pct !== undefined ? WHITE : undefined,
                     transition: "background 0.3s linear",
                     borderRadius: "4px",
                     fontSize: "12.5px",
@@ -2997,7 +2998,7 @@ const EXTRACT_AHEAD = prefs?.prefs?.extract_ahead ?? 2;
                         gap: "10px",
                         marginTop: "6px",
                         paddingTop: "6px",
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
+                        borderTop: `1px solid ${alpha(WHITE, 0.08)}`,
                       }}
                     >
                       {info === undefined && (

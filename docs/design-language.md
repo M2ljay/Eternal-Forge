@@ -2,7 +2,8 @@
 
 Rules for the plugin's own full-screen pages (Store, Mod detail,
 Collection detail, Downloads, My Mods, Updates). The QAM panel
-deliberately stays native Steam styling and is out of scope.
+deliberately stays native Steam styling; only its status notes and
+progress fills take the palette below.
 
 Written down because "looks about right" kept producing rows of buttons
 at four different widths. Every size here should be derivable from a
@@ -61,7 +62,7 @@ Shared in `chrome.tsx` so the three full-screen pages read as one app:
 - **`PageBackdrop`** — the page's own artwork, faded and (for arbitrary
   mod art) blurred, behind the header. It scrolls away with the content
   so it never competes once the user is reading.
-- **`SectionHeading`** — the brand-orange accent bar plus a title. This
+- **`SectionHeading`** — the crimson accent bar plus a title. This
   is the 10-foot-UI signpost; use it for every section, not `<h3>`.
 - **`StatChip`** — header facts (endorsements, downloads, version, mod
   count, size) as pills rather than a dot-separated sentence, so they
@@ -74,9 +75,62 @@ Shared in `chrome.tsx` so the three full-screen pages read as one app:
 
 ## Colour
 
-Brand orange `#da8e35` marks the primary action, section accents, and
-progress. It is not decoration - if something is orange, it is either
-the main action or it is happening right now.
+Forge uses the **Core palette**, the one shared by every plugin that sits
+under Core, so it reads as part of the same set. Every value lives in
+`src/palette.ts`; nothing else in `src/` writes a colour literal
+(`tests/forge.test.mjs` fails on one). `forgeRules.ts` keeps copies of
+four tokens because it compiles alone for its node tests, and the same
+test checks they still match.
+
+| Token | Value | Use |
+|---|---|---|
+| `BLACK` | `#000000` | the page ground (`PAGE_SCROLLER`), AMOLED. Never a grey panel background |
+| `GUNMETAL` | `#1A1D21` | surfaces: rows, cards, chips, unselected buttons |
+| `GUNMETAL_RAISED` | `#2A2F36` | nested surfaces, borders, the focused surface |
+| `STEEL` | `#C9D1D9` | secondary text, icons, outlines, links; also "neutral / info" |
+| `STEEL_MUTED` | `#9AA4AE` | hint text |
+| `WHITE` / `TEXT` | `#FFFFFF` / `#E6EAEE` | primary text |
+| `CRIMSON` | `#D7263D` | the one accent: selected, active, progress, the primary action, AND errors, conflicts, the anti-cheat lock |
+| `CRIMSON_TEXT` | `#EA5A68` | crimson as words (see Contrast) |
+| `GREEN` | `#6FA37F` | installed, enabled, up to date, endorsed, saved |
+| `AMBER` | `#C98B4A` | update available, pending, needs installing, partial, "worth knowing" |
+
+Small translucent white lifts (`alpha(WHITE, 0.05)` and similar) are
+allowed for hairlines and row lifts over black; they add no hue. Mod
+thumbnails and Nexus artwork are never tinted.
+
+**What each colour means:**
+
+- **Crimson** is the only accent. If something is crimson it is either
+  selected, the main action, happening right now, or a problem. The
+  primary button is a crimson fill; progress is a crimson fill; the tab,
+  chip or toggle that is on is crimson with white text. Errors, script
+  and file conflicts, mods left out because they break the game, and the
+  anti-cheat lock are crimson too. `WarningBox` takes `tone="error"` for
+  failures and refusals.
+- **Amber** is "needs something from you, or later": an update is
+  waiting, a required mod still needs installing, a mod was switched off,
+  a setup note from the author, the default `WarningBox`. It leans orange
+  so it never reads as gold.
+- **Green** is "done and fine".
+- **Steel** is neutral: info notes, external links, labels, a source's
+  name (GameBanana's own yellow is not used: third-party brand colours
+  are not UI accents).
+- **Gold and yellow are gone.** No `#ffc83c`, no Nexus orange, no blue.
+
+**Focus:** a gunmetal-raised surface plus a crimson indicator (a ring,
+a 3px left bar, or a 3px underline), matching Core's QAM and Steam menu
+style. The primary button keeps its crimson fill on focus and gains a
+white ring. No glow, no haze, no gradient backgrounds; a dark scrim over
+artwork (the page backdrop, the collection card) is the only gradient,
+and it is black.
+
+**Contrast:** text on gunmetal is at least 4.5:1. Plain `CRIMSON` is
+only 4.2:1 on black and 3.4:1 on gunmetal, so crimson words use
+`CRIMSON_TEXT` (5.0:1 on gunmetal); fills, bars, dots and borders keep
+`CRIMSON`. White on a crimson fill is 4.9:1. Green and amber are 5.8:1
+on gunmetal as text, but white text on them is not readable, so a green
+or amber badge carries black text.
 
 Progress is shown by **filling the control itself** left-to-right
 (collection rows, the install hero, the QAM prefix-tool button) rather
@@ -85,12 +139,12 @@ than by a separate bar. One language for "this is working" everywhere.
 ### Forge surfaces
 
 The Mods section on Steam's game page and the tile dots sit on Steam's own
-pages, next to the user's other Eternal apps, so they use the Eternal
-palette instead of brand orange: AMOLED black `#000000` behind, crimson
-`#D7263D` for accents and problems (an update, a lock, the restore offer),
-steel `#C9D1D9` for secondary text, gunmetal `#1A1D21` for surfaces. Focus is
-a crimson edge on a lighter surface; no glow, no haze. The values live in
-`forgeRules.ts` (re-exported by `theme.ts`). See [forge.md](forge.md).
+pages and use the same palette: black behind, crimson for accents and
+problems (an update, a lock, the restore offer), steel for secondary text,
+gunmetal for surfaces. The crimson update dots on library tiles are an
+approved design and stay crimson even though "update available" is amber
+elsewhere. Focus is a crimson edge on a lighter surface. See
+[forge.md](forge.md).
 
 ## Gamepad first
 

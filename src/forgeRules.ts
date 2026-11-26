@@ -4,7 +4,9 @@
 // compiles this one file and checks it under node.
 
 /** Forge palette: AMOLED black, crimson for accents and problems, steel
- * for secondary text, gunmetal surfaces. No glow, no haze. */
+ * for secondary text, gunmetal surfaces. No glow, no haze. Copies of the
+ * Core tokens in palette.ts, kept here because this file compiles alone;
+ * tests/forge.test.mjs fails if they drift. */
 export const FORGE_BLACK = "#000000";
 export const FORGE_CRIMSON = "#D7263D";
 export const FORGE_STEEL = "#C9D1D9";

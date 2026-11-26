@@ -287,6 +287,7 @@ import {
   mergeStepSummary,
   offersMergeSupport,
 } from "./mergeSupport";
+import { alpha, AMBER, BLACK, CRIMSON, STEEL, WHITE } from "./palette";
 
 /** QAM row shortcut: jump from an installed mod straight to its detail page
  * (to re-check requirements, files, or updates). */
@@ -326,8 +327,8 @@ interface BackendInfo {
 
 const ping = callable<[emit_event?: boolean], BackendInfo>("ping");
 
-/** Brand-orange call-to-action for the QAM (hover/focus states included). */
-function OrangeActionButton({
+/** Crimson call-to-action for the QAM (hover/focus states included). */
+function PrimaryActionButton({
   onClick,
   children,
 }: {
@@ -379,7 +380,7 @@ function LaunchOptionsModal({
           fontSize: "12px",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
-          background: "rgba(0,0,0,0.35)",
+          background: alpha(BLACK, 0.35),
           padding: "8px",
           borderRadius: "4px",
           margin: "10px 0",
@@ -675,7 +676,7 @@ function CurrentGameSection() {
   // Only used to size the launch notice, so undefined just means silent.
   const [modCount, setModCount] = useState<number | undefined>();
 
-  // Same visual language as the download rows: the button FILLS orange.
+  // Same visual language as the download rows: the button FILLS crimson.
   // No percentage exists for an exe patcher, so the fill tracks elapsed
   // time against the tool's own budget - honest, and it always moves.
   const [toolPct, setToolPct] = useState(0);
@@ -1176,8 +1177,8 @@ function CurrentGameSection() {
               style={{
                 padding: "8px 10px",
                 margin: "4px 0",
-                background: "rgba(255, 200, 60, 0.12)",
-                borderLeft: "3px solid #ffc83c",
+                background: alpha(AMBER, 0.12),
+                borderLeft: `3px solid ${AMBER}`,
                 borderRadius: "4px",
                 fontSize: "12px",
                 lineHeight: "1.45",
@@ -1215,7 +1216,7 @@ function CurrentGameSection() {
     return (
       <PanelSection title="Nexus Mods">
         <PanelSectionRow>
-          <OrangeActionButton
+          <PrimaryActionButton
             onClick={() => {
               setBrowseGame(undefined);
               resetTabStack();
@@ -1224,7 +1225,7 @@ function CurrentGameSection() {
             }}
           >
             Open Mod Browser
-          </OrangeActionButton>
+          </PrimaryActionButton>
         </PanelSectionRow>
       </PanelSection>
     );
@@ -1631,8 +1632,8 @@ function CurrentGameSection() {
                     style={{
                       padding: "7px 10px",
                       margin: "0 0 8px",
-                      background: "rgba(224, 92, 92, 0.12)",
-                      borderLeft: "3px solid #e05c5c",
+                      background: alpha(CRIMSON, 0.12),
+                      borderLeft: `3px solid ${CRIMSON}`,
                       borderRadius: "4px",
                       fontSize: "12px",
                       lineHeight: 1.45,
@@ -1653,7 +1654,7 @@ function CurrentGameSection() {
                     style={{
                       padding: "8px 10px",
                       margin: "0 0 8px",
-                      background: "rgba(255,255,255,0.05)",
+                      background: alpha(WHITE, 0.05),
                       borderRadius: "4px",
                       fontSize: "12px",
                       lineHeight: 1.5,
@@ -1711,8 +1712,8 @@ function CurrentGameSection() {
                   <style>{`
                     .nexus-tool-fill button,
                     .nexus-tool-fill .DialogButton {
-                      background: linear-gradient(90deg, rgba(218,142,53,0.55) var(--tool-pct), rgba(255,255,255,0.08) var(--tool-pct)) !important;
-                      color: #fff !important;
+                      background: linear-gradient(90deg, ${alpha(CRIMSON, 0.55)} var(--tool-pct), ${alpha(WHITE, 0.08)} var(--tool-pct)) !important;
+                      color: ${WHITE} !important;
                       transition: background 0.4s linear;
                     }
                   `}</style>
@@ -1784,7 +1785,7 @@ function CurrentGameSection() {
           )}
           <PanelSectionRow>
             <Field label={`Step ${fwSteps.browse}`} childrenLayout="below">
-              <OrangeActionButton
+              <PrimaryActionButton
                 onClick={() => {
                   setBrowseGame(game);
                   resetTabStack();
@@ -1793,7 +1794,7 @@ function CurrentGameSection() {
                 }}
               >
                 Open Mod Browser
-              </OrangeActionButton>
+              </PrimaryActionButton>
             </Field>
           </PanelSectionRow>
           <PanelSectionRow>
@@ -2038,8 +2039,8 @@ function CurrentGameSection() {
               <style>{`
                 .nexus-tool-fill button,
                 .nexus-tool-fill .DialogButton {
-                  background: linear-gradient(90deg, rgba(218,142,53,0.55) var(--tool-pct), rgba(255,255,255,0.08) var(--tool-pct)) !important;
-                  color: #fff !important;
+                  background: linear-gradient(90deg, ${alpha(CRIMSON, 0.55)} var(--tool-pct), ${alpha(WHITE, 0.08)} var(--tool-pct)) !important;
+                  color: ${WHITE} !important;
                   transition: background 0.5s linear;
                 }
               `}</style>
@@ -2101,13 +2102,13 @@ function CurrentGameSection() {
                         minWidth: 0,
                         padding: "8px 10px",
                         fontSize: "13px",
-                        // Off-white, not brand orange. Orange is reserved
+                        // Steel, not crimson. Crimson is reserved
                         // for the one primary action or for something
-                        // happening right now, and three orange buttons in
+                        // happening right now, and three crimson buttons in
                         // a row of setup steps makes none of them read as
                         // the one to press.
-                        background: "rgba(240, 240, 238, 0.92)",
-                        color: "#1c1c1c",
+                        background: alpha(STEEL, 0.92),
+                        color: BLACK,
                       }}
                       onClick={async () => {
                     for (const tool of autoTools) {
@@ -2206,7 +2207,7 @@ function CurrentGameSection() {
                     style={{
                       padding: "8px 10px",
                       margin: "0 0 8px",
-                      background: "rgba(255,255,255,0.05)",
+                      background: alpha(WHITE, 0.05),
                       borderRadius: "4px",
                       fontSize: "12px",
                       lineHeight: 1.5,
@@ -2239,8 +2240,8 @@ function CurrentGameSection() {
                         style={{
                           padding: "7px 10px",
                           margin: "0 0 8px",
-                          background: "rgba(224, 92, 92, 0.12)",
-                          borderLeft: "3px solid #e05c5c",
+                          background: alpha(CRIMSON, 0.12),
+                          borderLeft: `3px solid ${CRIMSON}`,
                           borderRadius: "4px",
                           fontSize: "12px",
                           lineHeight: 1.45,
@@ -2308,7 +2309,7 @@ function CurrentGameSection() {
                 label={game.me3 ? "Step 4" : game.prefixTools ? "Step 4" : "Step 3"}
                 childrenLayout="below"
               >
-                <OrangeActionButton
+                <PrimaryActionButton
                   onClick={() => {
                     setBrowseGame(game);
                     resetTabStack();
@@ -2317,10 +2318,10 @@ function CurrentGameSection() {
                   }}
                 >
                   Open Mod Browser
-                </OrangeActionButton>
+                </PrimaryActionButton>
               </Field>
             ) : (
-              <OrangeActionButton
+              <PrimaryActionButton
                 onClick={() => {
                   setBrowseGame(game);
                   resetTabStack();
@@ -2329,7 +2330,7 @@ function CurrentGameSection() {
                 }}
               >
                 Open Mod Browser
-              </OrangeActionButton>
+              </PrimaryActionButton>
             )}
           </PanelSectionRow>
           {/* Seamless Co-op matches players on a shared password. It sits
@@ -2365,7 +2366,7 @@ function CurrentGameSection() {
                       {coopMasked ? (
                         <div
                           style={{
-                            background: "rgba(0, 0, 0, 0.2)",
+                            background: alpha(BLACK, 0.2),
                             borderRadius: "2px",
                             padding: "10px 12px",
                             fontSize: "14px",
@@ -2772,8 +2773,8 @@ function FailedModsModal({
         style={{
           marginTop: "12px",
           padding: "8px 10px",
-          background: "rgba(120, 170, 255, 0.10)",
-          borderLeft: "3px solid #78aaff",
+          background: alpha(STEEL, 0.10),
+          borderLeft: `3px solid ${STEEL}`,
           borderRadius: "4px",
           fontSize: "13px",
           lineHeight: "1.45",
@@ -4276,8 +4277,8 @@ function SavesSection() {
                 style={{
                   padding: "8px 10px",
                   margin: "12px 0 4px",
-                  background: "rgba(255, 200, 60, 0.12)",
-                  borderLeft: "3px solid #ffc83c",
+                  background: alpha(AMBER, 0.12),
+                  borderLeft: `3px solid ${AMBER}`,
                   borderRadius: "4px",
                   fontSize: "12px",
                   lineHeight: "1.45",
@@ -4513,7 +4514,7 @@ function DownloadsButton() {
   }, []);
   const active = getDownloads().length;
   const run = getCollectionRun();
-  // The button itself is the progress bar: orange fills left-to-right
+  // The button itself is the progress bar: crimson fills left-to-right
   // with the aggregate percent (all active downloads averaged; during a
   // collection run, finished mods blend with the live one).
   const pct = getAggregateDownloadPercent(run);
@@ -4529,15 +4530,15 @@ function DownloadsButton() {
           keeps the fill AND brightens with an inset ring on focus. */}
       <style>{`
         .nexus-dl-fill {
-          background: linear-gradient(90deg, rgba(218,142,53,0.55) var(--dl-pct), rgba(255,255,255,0.08) var(--dl-pct)) !important;
-          color: #fff !important;
+          background: linear-gradient(90deg, ${alpha(CRIMSON, 0.55)} var(--dl-pct), ${alpha(WHITE, 0.08)} var(--dl-pct)) !important;
+          color: ${WHITE} !important;
           transition: background 0.3s linear;
         }
         .nexus-dl-fill:hover,
         .nexus-dl-fill.gpfocus,
         .nexus-dl-fill.gpfocuswithin {
-          background: linear-gradient(90deg, rgba(230,164,90,0.8) var(--dl-pct), rgba(255,255,255,0.16) var(--dl-pct)) !important;
-          box-shadow: inset 0 0 0 2px #fff;
+          background: linear-gradient(90deg, ${alpha(CRIMSON, 0.8)} var(--dl-pct), ${alpha(WHITE, 0.16)} var(--dl-pct)) !important;
+          box-shadow: inset 0 0 0 2px ${WHITE};
         }
       `}</style>
       <DialogButton

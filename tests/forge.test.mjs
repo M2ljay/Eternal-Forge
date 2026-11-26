@@ -4,12 +4,14 @@
 // src/navRules.ts standalone, then executes this file)
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import {
   FailureBudget,
   FORGE_BLACK,
   FORGE_CRIMSON,
+  FORGE_GUNMETAL,
+  FORGE_STEEL,
   GAME_PAGE_ROWS,
   PATCH_FAILURE_LIMIT,
   appsWithUpdates,
@@ -31,6 +33,33 @@ const readCode = (f) =>
   read(f)
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/(^|[^:'"\\])\/\/[^\n]*/gm, "$1");
+
+// ---- palette ---------------------------------------------------------------
+
+test("forgeRules' palette copies match palette.ts (the one token module)", () => {
+  const pal = read("palette.ts");
+  const token = (name) => {
+    const m = pal.match(new RegExp(`export const ${name} = "(#[0-9A-Fa-f]{6})";`));
+    assert.ok(m, `palette.ts no longer defines ${name}`);
+    return m[1].toUpperCase();
+  };
+  assert.equal(FORGE_BLACK.toUpperCase(), token("BLACK"));
+  assert.equal(FORGE_CRIMSON.toUpperCase(), token("CRIMSON"));
+  assert.equal(FORGE_GUNMETAL.toUpperCase(), token("GUNMETAL"));
+  assert.equal(FORGE_STEEL.toUpperCase(), token("STEEL"));
+});
+
+test("no colour literal in src outside palette.ts and forgeRules' copies", () => {
+  const dir = new URL("../src/", import.meta.url);
+  const offenders = [];
+  for (const f of readdirSync(dir)) {
+    if (!/\.tsx?$/.test(f) || f === "palette.ts" || f === "forgeRules.ts") continue;
+    const code = readCode(f);
+    const hits = code.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d/g);
+    if (hits) offenders.push(`${f}: ${hits.join(", ")}`);
+  }
+  assert.deepEqual(offenders, [], "colours belong in palette.ts");
+});
 
 // ---- failure budget ---------------------------------------------------------
 
