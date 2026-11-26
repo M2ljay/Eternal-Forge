@@ -8,10 +8,12 @@ from __future__ import annotations
 import datetime
 import html
 import re
-import xml.etree.ElementTree as ET
 
 HUB_REPO = "MrSurviv0r/MRSURVIV0R-S-VR-HUB"
-_ATOM = "{http://www.w3.org/2005/Atom}"
+# Decky's frozen Windows Python ships without xml.etree, so GitHub's Atom
+# feed is read with these patterns rather than an XML parser.
+_ENTRY_RE = re.compile(r"<entry\b[^>]*>(.*?)</entry\s*>", re.S)
+_LINK_RE = re.compile(r"<link\b[^>]*?\bhref\s*=\s*([\"'])(.*?)\1", re.S)
 _REPO_RE = re.compile(r"^(?:https?://github\.com/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?(?:[#?].*)?$")
 # A mod about VR: the word VR on its own (not "VRAM", "VRR"), or the
 # usual VR framework names.
@@ -30,8 +32,14 @@ def repo_slug(text: str) -> str:
     return f"{owner}/{repo}"
 
 
-def _text(el) -> str:
-    return (el.text or "").strip() if el is not None else ""
+def _tag(block: str, name: str) -> str:
+    """Text of the first <name> element in *block*, entities decoded once."""
+    m = re.search(rf"<{name}\b[^>]*?(?:/>|>(.*?)</{name}\s*>)", block, re.S)
+    if not m or m.group(1) is None:
+        return ""
+    raw = m.group(1)
+    cdata = re.fullmatch(r"\s*<!\[CDATA\[(.*)\]\]>\s*", raw, re.S)
+    return (cdata.group(1) if cdata else html.unescape(raw)).strip()
 
 
 def _strip(markup: str) -> str:
@@ -40,21 +48,21 @@ def _strip(markup: str) -> str:
 
 def parse_atom(xml_text: str, limit: int = 8) -> list:
     """[{id, title, url, date (epoch), text}] from a GitHub releases feed."""
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError:
+    text = xml_text if isinstance(xml_text, str) else ""
+    if not re.search(r"<feed\b", text):
         return []
     out = []
-    for e in root.findall(f"{_ATOM}entry")[:limit]:
-        link = e.find(f"{_ATOM}link")
-        when = _text(e.find(f"{_ATOM}updated"))
+    for m in list(_ENTRY_RE.finditer(text))[:limit]:
+        e = m.group(1)
+        link = _LINK_RE.search(e)
+        when = _tag(e, "updated")
         try:
             ts = int(datetime.datetime.fromisoformat(when.replace("Z", "+00:00")).timestamp())
         except ValueError:
             ts = 0
-        out.append({"id": _text(e.find(f"{_ATOM}id")), "title": _text(e.find(f"{_ATOM}title")),
-                    "url": link.get("href") if link is not None else "", "date": ts,
-                    "text": _strip(_text(e.find(f"{_ATOM}content")))[:4000]})
+        out.append({"id": _tag(e, "id"), "title": _tag(e, "title"),
+                    "url": html.unescape(link.group(2)) if link else "", "date": ts,
+                    "text": _strip(_tag(e, "content"))[:4000]})
     return out
 
 

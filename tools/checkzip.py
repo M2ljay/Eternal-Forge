@@ -13,7 +13,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from makestore import check_zip  # noqa: E402
+from makestore import check_zip, plugin_folder  # noqa: E402
 
 
 def main(zip_path: str) -> int:
@@ -23,7 +23,8 @@ def main(zip_path: str) -> int:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     pkg = json.load(io.open(os.path.join(root, "package.json"), encoding="utf-8"))
     plug = json.load(io.open(os.path.join(root, "plugin.json"), encoding="utf-8"))
-    problems = check_zip(zip_path, plug["name"], pkg["version"])
+    folder = plugin_folder(pkg, plug)
+    problems = check_zip(zip_path, plug["name"], pkg["version"], folder)
     if problems:
         print(f"This zip will not install ({os.path.basename(zip_path)}):")
         for p in problems:
@@ -31,7 +32,7 @@ def main(zip_path: str) -> int:
         return 1
     print(
         f"OK: {os.path.basename(zip_path)} installs as "
-        f"{plug['name']!r} v{pkg['version']}"
+        f"{plug['name']!r} v{pkg['version']} into folder {folder!r}"
     )
     return 0
 

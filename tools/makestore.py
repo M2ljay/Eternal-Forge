@@ -23,6 +23,7 @@ Usage:  python tools/makestore.py dist/Nexus-Mods-0.259.0.zip [notes.md]
 import hashlib
 import io
 import json
+import re
 import os
 import sys
 import zipfile
@@ -34,8 +35,27 @@ REPO = "RedRanger14/decky-nexus"
 REQUIRED = ("plugin.json", "package.json", "main.py", "dist/index.js")
 
 
-def check_zip(zip_path: str, plugin_name: str, version: str) -> list:
+def plugin_folder(pkg: dict, plug: dict) -> str:
+    """The folder the zip unpacks into on the device.
+
+    Not always plugin.json's name. Decky v3 finds an installed plugin by
+    plugin.json's name (browser.py: find_plugin_folder) but keys its
+    settings, data and logs by the FOLDER (plugin/plugin.py and
+    sandboxed_plugin.py: DECKY_PLUGIN_SETTINGS_DIR = settings/<folder>).
+    The plugin was renamed to "Forge" while its folder stays "Nexus Mods",
+    so the user's API key, settings and mod state stay where they are.
+    package.json "pluginFolder" pins it; without one it is the name.
+    """
+    return pkg.get("pluginFolder") or plug["name"]
+
+
+def check_zip(zip_path: str, plugin_name: str, version: str,
+              folder: str = "") -> list:
     """Everything that would make Decky or install.sh refuse this zip.
+
+    `folder` is the zip's one top-level folder (see plugin_folder); it
+    defaults to plugin_name. The plugin.json inside must carry plugin_name,
+    because that is the name Decky's updater looks the plugin up by.
 
     This runs at the one step nobody can skip on the way to publishing: the
     store index is generated FROM the artifact, so a zip that cannot install
@@ -74,26 +94,63 @@ def check_zip(zip_path: str, plugin_name: str, version: str) -> list:
             f"(e.g. {backslashed[0]!r}) - build with tools/makezip.py"
         )
 
+    folder = folder or plugin_name
     tops = {n.split("/")[0] for n in names if "\\" not in n}
     if len(tops) != 1:
         problems.append(f"expected ONE top-level folder, found {sorted(tops)}")
-    elif tops != {plugin_name}:
+    elif tops != {folder}:
         problems.append(
-            f"top-level folder is {tops.pop()!r} but plugin.json says "
-            f"{plugin_name!r} - Decky and install.sh both use the "
-            f"plugin.json name, so the two must match exactly"
+            f"top-level folder is {tops.pop()!r} but it must be "
+            f"{folder!r} - the folder Decky installs into, and the one the "
+            f"user's settings and API key are kept under"
         )
     else:
         for rel in REQUIRED:
-            if f"{plugin_name}/{rel}" not in names:
-                problems.append(f"missing {plugin_name}/{rel}")
+            if f"{folder}/{rel}" not in names:
+                problems.append(f"missing {folder}/{rel}")
+        try:
+            inner_name = json.loads(
+                zipfile.ZipFile(zip_path)
+                .read(f"{folder}/plugin.json")
+                .decode("utf-8")
+            ).get("name")
+            if inner_name != plugin_name:
+                problems.append(
+                    f"zip's plugin.json name is {inner_name!r} but this "
+                    f"repo's is {plugin_name!r}"
+                )
+        except (KeyError, OSError, ValueError, AttributeError):
+            pass  # a missing plugin.json is reported above
+
+        # The frontend reaches its backend by the name compiled into
+        # dist/index.js. anygame.64 shipped a bundle still built as "Nexus
+        # Mods" against a plugin.json of "Forge": the backend started, the
+        # frontend's calls went to a plugin that no longer existed, and every
+        # page sat on its loading spinner.
+        try:
+            bundle = zipfile.ZipFile(zip_path).read(f"{folder}/dist/index.js").decode("utf-8", "replace")
+            if "pluginJson.name" not in bundle and "plugin_default.name" not in bundle:
+                m = re.search(r'manifest\s*=\s*\{\s*"?name"?\s*:\s*"([^"]*)"', bundle)
+                if m is None:
+                    problems.append("dist/index.js: cannot find the plugin name it was built with")
+                elif m.group(1) != plugin_name:
+                    problems.append(
+                        f"dist/index.js was built as {m.group(1)!r} but plugin.json "
+                        f"says {plugin_name!r}: rebuild the frontend"
+                    )
+            elif not re.search(r'name\s*:\s*"' + re.escape(plugin_name) + '"', bundle):
+                problems.append(f"dist/index.js does not carry the plugin name {plugin_name!r}: rebuild the frontend")
+        except (KeyError, OSError):
+            pass  # a missing dist/index.js is reported above
+
+        problems += _check_manifest(zip_path, infos, folder, version)
 
     # The version in the zip is the one that will run, whatever the
     # filename claims.
     try:
         inner = json.loads(
             zipfile.ZipFile(zip_path)
-            .read(f"{plugin_name}/package.json")
+            .read(f"{folder}/package.json")
             .decode("utf-8")
         )
         if inner.get("version") != version:
@@ -103,6 +160,55 @@ def check_zip(zip_path: str, plugin_name: str, version: str) -> list:
             )
     except (KeyError, OSError, ValueError):
         pass  # already reported as a missing file above
+    return problems
+
+
+MANIFEST = "forge-manifest.json"
+
+
+def _check_manifest(zip_path: str, infos: list, folder: str, version: str) -> list:
+    """The install manifest must be there, first, and true to the zip.
+
+    The backend checks the installed plugin against it at start
+    (py_modules/forge_integrity.py) and tells the user when a Windows update
+    stopped part-way. FIRST because Decky extracts in zip order and stops at
+    the first file Windows refuses: only a manifest written before the rest
+    survives to describe what is missing. True to the zip because a manifest
+    that disagrees with its own build would tell every user their install is
+    broken.
+    """
+    name = f"{folder}/{MANIFEST}"
+    files = [i for i in infos if not i.filename.endswith("/")]
+    if not any(i.filename == name for i in files):
+        return [f"missing {name} (build with tools/make_release.sh)"]
+    problems = []
+    if files[0].filename != name:
+        problems.append(f"{name} must be the zip's first file, not {files[0].filename!r}")
+    z = zipfile.ZipFile(zip_path)
+    try:
+        manifest = json.loads(z.read(name).decode("utf-8"))
+        listed = {e["path"]: e for e in manifest["files"]}
+    except (ValueError, KeyError, TypeError) as exc:
+        return problems + [f"{name} cannot be read: {exc}"]
+    if manifest.get("format") != 1:
+        problems.append(f"{name} is format {manifest.get('format')!r}, expected 1")
+    if manifest.get("version") != version:
+        problems.append(f"{name} is for {manifest.get('version')!r}, not {version!r}")
+    in_zip = {}
+    for i in files:
+        if i.filename == name or not i.filename.startswith(folder + "/"):
+            continue
+        in_zip[i.filename[len(folder) + 1:]] = i
+    for rel in sorted(set(in_zip) - set(listed)):
+        problems.append(f"{name} does not list {rel}")
+    for rel in sorted(set(listed) - set(in_zip)):
+        problems.append(f"{name} lists {rel}, which is not in the zip")
+    for rel in sorted(set(in_zip) & set(listed)):
+        e, info = listed[rel], in_zip[rel]
+        if e.get("size") != info.file_size:
+            problems.append(f"{name}: size of {rel} is {e.get('size')}, zip has {info.file_size}")
+        elif e.get("sha256") != hashlib.sha256(z.read(info)).hexdigest():
+            problems.append(f"{name}: sha256 of {rel} does not match the zip")
     return problems
 
 
@@ -135,7 +241,8 @@ def main(zip_path: str, notes_path: str = "") -> int:
     plug = json.load(io.open("plugin.json", encoding="utf-8"))
     version = pkg["version"]
 
-    problems = check_zip(zip_path, plug["name"], version)
+    problems = check_zip(zip_path, plug["name"], version,
+                         plugin_folder(pkg, plug))
     if problems:
         print(f"REFUSING to index {zip_path}: this zip will not install.")
         for p in problems:

@@ -1,4 +1,29 @@
-# Nexus Mods: Decky Loader Plugin (Unofficial)
+# Forge: Decky Loader Plugin (Unofficial)
+
+**Forge** is a fork of [decky-nexus](https://github.com/RedRanger14/decky-nexus)
+by RedRanger14 (Michael Finney), the Nexus Mods plugin for Decky Loader, with
+experimental support for any game, GameBanana as a second mod source, and
+Windows (Steam Big Picture) support. The rest of this README is upstream's,
+with this fork's additions in the "Fork" section at the end. The licence is
+upstream's (see [License](#license)).
+
+Decky lists it as **Forge**. It still installs into the plugin folder
+`Nexus Mods`, because Decky keeps a plugin's settings (including the Nexus API
+key), data and logs under its folder name, so updating from a build called
+"Nexus Mods" keeps everything. Its updates come from the `release` branch of
+[M2ljay/Eternal-Forge](https://github.com/M2ljay/Eternal-Forge) (`update.json`
+and `Nexus-Mods.zip`, built by `tools/make_release.sh`).
+
+Since anygame.67 each build also publishes `Nexus-Mods-<version>.zip` and
+`update-<version>.json` (kept on the branch), and its zip carries
+`forge-manifest.json`. On Windows, Decky can leave a half-copied plugin when a
+file is still in use, so before handing an update to Decky Forge waits for
+downloads and installs to finish and closes the helper tools it started from
+its own folders (after asking). At start it checks the installed files against
+the manifest, and if they don't match the panel says the last update didn't
+finish copying and offers to reinstall that build.
+
+## Upstream: Nexus Mods Decky Loader Plugin (Unofficial)
 
 Browse, download, install, and enable/disable [Nexus Mods](https://www.nexusmods.com) content for the currently selected game, entirely from Gaming Mode with a controller, on SteamOS and Bazzite. No Desktop Mode required.
 
@@ -377,3 +402,16 @@ Curated games are unaffected. The helpers are in
 `py_modules/experimental_games.py`. The fork also finds Steam on Windows
 (registry), extracts archives with Windows' built-in `tar.exe` or 7-Zip, and
 registers the `nxm://` handler in the Windows registry.
+
+### GameBanana as a second source
+
+Many games' mods live on GameBanana rather than Nexus. **Store → GameBanana**
+browses, searches and sorts the current game's GameBanana mods, opens a mod's
+page (description, pictures, files) and installs a file through the same
+pipeline as Nexus mods: same install modes, FOMOD and folder choices,
+Downloads, restore points, enable/disable and uninstall. They show in My Mods
+tagged GameBanana, and on Updates when a newer upload of the installed file
+appears. The Steam game is linked to its GameBanana game by name, or picked
+by hand once and remembered. No account or key is needed. Details, endpoints
+and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
+

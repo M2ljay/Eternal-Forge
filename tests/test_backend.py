@@ -9,6 +9,7 @@ anything that would hit the Nexus Mods API raises immediately.
 
 import ast
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -17661,6 +17662,11 @@ class TestReleaseZipGate(unittest.TestCase):
         self.check = makestore.check_zip
         with open(os.path.join(REPO_ROOT, "plugin.json"), encoding="utf-8") as f:
             self.plugin_name = json.load(f)["name"]
+        with open(os.path.join(REPO_ROOT, "package.json"), encoding="utf-8") as f:
+            pkg = json.load(f)
+        # The folder the zip unpacks into. Since the rename to "Forge" it is
+        # no longer plugin.json's name; see makestore.plugin_folder.
+        self.folder = makestore.plugin_folder(pkg, {"name": self.plugin_name})
         self.tmp = os.path.join(TEST_ROOT, "zipgate")
         shutil.rmtree(self.tmp, ignore_errors=True)
         os.makedirs(self.tmp)
@@ -17668,32 +17674,125 @@ class TestReleaseZipGate(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _zip(self, entries: dict, name="rel.zip") -> str:
+    def _zip(self, entries: dict, name="rel.zip", manifest=True) -> str:
+        """The entries, with a true install manifest stored first (as
+        make_release.sh builds it) when they all sit in the plugin folder."""
         path = os.path.join(self.tmp, name)
+        prefix = self.folder + "/"
         with zipfile.ZipFile(path, "w") as z:
+            if manifest and entries and all(k.startswith(prefix) for k in entries):
+                z.writestr(prefix + "forge-manifest.json", self._manifest(entries))
             for rel, body in entries.items():
                 z.writestr(rel, body)
         return path
 
-    def _good_entries(self, top=None, version="9.9.9"):
-        top = top if top is not None else self.plugin_name
+    def _manifest(self, entries: dict, version=None) -> str:
+        prefix = self.folder + "/"
+        if version is None:
+            try:
+                version = json.loads(entries.get(prefix + "package.json", "{}")).get("version")
+            except ValueError:
+                version = None
+        files = []
+        for rel, body in sorted(entries.items()):
+            data = body.encode() if isinstance(body, str) else body
+            files.append({"path": rel[len(prefix):], "size": len(data),
+                          "sha256": hashlib.sha256(data).hexdigest()})
+        return json.dumps({"format": 1, "version": version, "files": files})
+
+    def test_a_zip_without_the_install_manifest_is_refused(self):
+        """anygame.67: the backend checks the installed copy against it to
+        catch a Windows update that stopped part-way."""
+        problems = self.check(self._zip(self._good_entries(), manifest=False),
+                              self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("forge-manifest.json" in p for p in problems), problems)
+
+    def test_the_manifest_must_come_first(self):
+        """Decky extracts in zip order and stops at the first file Windows
+        refuses: a manifest stored last is the one most likely to be lost."""
+        entries = self._good_entries()
+        path = os.path.join(self.tmp, "last.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(entries))
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("first file" in p for p in problems), problems)
+
+    def test_a_manifest_that_disagrees_with_its_zip_is_refused(self):
+        """It would tell every user their fresh install is broken."""
+        entries = self._good_entries()
+        stale = dict(entries)
+        stale[f"{self.folder}/main.py"] = "y"  # same size, other bytes
+        del stale[f"{self.folder}/README.md"]
+        path = os.path.join(self.tmp, "stale.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(stale))
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("sha256 of main.py" in p for p in problems), problems)
+        self.assertTrue(any("does not list README.md" in p for p in problems), problems)
+
+    def test_a_manifest_for_another_version_is_refused(self):
+        entries = self._good_entries()
+        path = os.path.join(self.tmp, "oldmanifest.zip")
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(f"{self.folder}/forge-manifest.json", self._manifest(entries, version="1.0.0"))
+            for rel, body in entries.items():
+                z.writestr(rel, body)
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("is for '1.0.0'" in p for p in problems), problems)
+
+    def _good_entries(self, top=None, version="9.9.9", name=None):
+        top = top if top is not None else self.folder
         return {
-            f"{top}/plugin.json": json.dumps({"name": self.plugin_name}),
+            f"{top}/plugin.json": json.dumps({"name": name or self.plugin_name}),
             f"{top}/package.json": json.dumps({"version": version}),
             f"{top}/main.py": "x",
-            f"{top}/dist/index.js": "x",
+            f"{top}/dist/index.js": 'var plugin_default = { name: "%s" };\n'
+                                    "const manifest = { name: plugin_default.name };" % (name or self.plugin_name),
             f"{top}/LICENSE": "x",
             f"{top}/README.md": "x",
         }
 
+    def test_a_frontend_built_under_another_name_is_refused(self):
+        """anygame.64: plugin.json said Forge, the bundle still called the
+        backend as Nexus Mods, and every page sat on its spinner."""
+        entries = self._good_entries()
+        entries[f"{self.folder}/dist/index.js"] = 'const manifest = {"name":"Nexus Mods"};'
+        problems = self.check(self._zip(entries), "Forge", "9.9.9", self.folder)
+        self.assertTrue(any("rebuild the frontend" in p for p in problems), problems)
+
     def test_a_correct_zip_passes(self):
         z = self._zip(self._good_entries())
-        self.assertEqual(self.check(z, self.plugin_name, "9.9.9"), [])
+        self.assertEqual(self.check(z, self.plugin_name, "9.9.9", self.folder), [])
+
+    def test_the_rename_keeps_the_folder_that_holds_the_settings(self):
+        """Renamed to "Forge" in plugin.json, still unpacked into "Nexus Mods".
+
+        Decky v3.3.1 keys settings/data/logs by the plugin FOLDER
+        (plugin/sandboxed_plugin.py: DECKY_PLUGIN_SETTINGS_DIR is
+        settings/<plugin_directory>), and the API key lives there. A zip
+        whose folder followed the new name would unpack into "Forge" and
+        start with no API key, no mod records and no restore points."""
+        self.assertEqual(self.plugin_name, "Forge")
+        self.assertEqual(self.folder, "Nexus Mods")
+        renamed = self._zip(self._good_entries(top="Forge"), name="forge.zip")
+        problems = self.check(renamed, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("top-level folder" in p for p in problems), problems)
+
+    def test_a_zip_with_the_old_name_inside_is_refused(self):
+        """Decky's updater finds the installed copy by plugin.json's name, so
+        the name inside must be the one the plugin asks Decky to update."""
+        z = self._zip(self._good_entries(name="Nexus Mods"), name="oldname.zip")
+        problems = self.check(z, self.plugin_name, "9.9.9", self.folder)
+        self.assertTrue(any("plugin.json name" in p for p in problems), problems)
 
     def test_the_hyphenated_folder_that_shipped_is_refused(self):
         # The exact v1.4.0 mistake.
         z = self._zip(self._good_entries(top="Nexus-Mods"))
-        problems = self.check(z, self.plugin_name, "9.9.9")
+        problems = self.check(z, self.plugin_name, "9.9.9", self.folder)
         self.assertTrue(problems)
         self.assertIn("top-level folder", problems[0])
         self.assertIn("Nexus-Mods", problems[0])
@@ -17708,7 +17807,7 @@ class TestReleaseZipGate(unittest.TestCase):
         # the replacement is the same length, so every offset in the local
         # header and the central directory stays valid.
         path = os.path.join(self.tmp, "backslash.zip")
-        good = f"{self.plugin_name}/LICENSE"
+        good = f"{self.folder}/LICENSE"
         with zipfile.ZipFile(path, "w") as z:
             z.writestr(good, "x")
         with open(path, "rb") as f:
@@ -17723,7 +17822,7 @@ class TestReleaseZipGate(unittest.TestCase):
             zipfile.ZipFile(path).infolist()[0].orig_filename,
             "forging the entry failed",
         )
-        problems = self.check(path, self.plugin_name, "9.9.9")
+        problems = self.check(path, self.plugin_name, "9.9.9", self.folder)
         self.assertTrue(
             any("Windows separators" in p for p in problems), problems
         )
@@ -17731,23 +17830,23 @@ class TestReleaseZipGate(unittest.TestCase):
     def test_a_missing_runtime_file_is_refused(self):
         for drop in ("plugin.json", "main.py", "dist/index.js"):
             entries = self._good_entries()
-            del entries[f"{self.plugin_name}/{drop}"]
+            del entries[f"{self.folder}/{drop}"]
             z = self._zip(entries, name=f"drop-{drop.replace('/', '_')}.zip")
-            problems = self.check(z, self.plugin_name, "9.9.9")
+            problems = self.check(z, self.plugin_name, "9.9.9", self.folder)
             self.assertTrue(problems, f"dropping {drop} must be refused")
 
     def test_a_zip_of_the_wrong_version_is_refused(self):
         # Publishing last release's artifact under this release's tag: the
         # filename would say 9.9.9 and the running plugin would be 1.0.0.
         z = self._zip(self._good_entries(version="1.0.0"))
-        problems = self.check(z, self.plugin_name, "9.9.9")
+        problems = self.check(z, self.plugin_name, "9.9.9", self.folder)
         self.assertTrue(any("1.0.0" in p for p in problems))
 
     def test_two_top_level_folders_are_refused(self):
         entries = self._good_entries()
         entries["Other/thing.txt"] = "x"
         z = self._zip(entries)
-        problems = self.check(z, self.plugin_name, "9.9.9")
+        problems = self.check(z, self.plugin_name, "9.9.9", self.folder)
         self.assertTrue(any("ONE top-level folder" in p for p in problems))
 
     def test_an_empty_or_corrupt_zip_is_refused_not_crashed_on(self):
@@ -17761,15 +17860,14 @@ class TestReleaseZipGate(unittest.TestCase):
         self.assertTrue(self.check(junk, self.plugin_name, "9.9.9"))
 
     def test_install_sh_and_plugin_json_agree_on_the_folder_name(self):
-        """install.sh hardcodes PLUGIN and refuses anything else. If someone
-        renames the plugin in plugin.json, the installer must be renamed with
-        it or every install dies at the extraction check."""
+        """install.sh hardcodes PLUGIN (the folder) and refuses anything
+        else, so it must match the folder release zips unpack into."""
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
             script = f.read()
         self.assertIn(
-            f'PLUGIN="{self.plugin_name}"',
+            f'PLUGIN="{self.folder}"',
             script,
-            "install.sh's PLUGIN must match plugin.json's name exactly",
+            "install.sh's PLUGIN must match package.json's pluginFolder",
         )
 
     def test_deploy_ps1_uses_the_same_folder_users_get(self):
@@ -17791,16 +17889,16 @@ class TestReleaseZipGate(unittest.TestCase):
             stripping, [], "deploy.ps1 must not strip spaces from the folder"
         )
         self.assertIn(
-            "$pluginJson.name",
+            "$packageJson.pluginFolder",
             script,
-            "deploy.ps1 must take the folder from plugin.json, like the others",
+            "deploy.ps1 must take the folder from package.json, like the others",
         )
 
-    def test_release_ps1_takes_the_folder_name_from_plugin_json(self):
+    def test_release_ps1_takes_the_folder_name_from_package_json(self):
         """Not from a literal. The literal is what drifted."""
         with open(os.path.join(REPO_ROOT, "release.ps1"), encoding="utf-8") as f:
             script = f.read()
-        self.assertIn("$pluginJson.name", script)
+        self.assertIn("$pkg.pluginFolder", script)
         self.assertIn("checkzip.py", script, "release.ps1 must gate on the check")
         # Compress-Archive is what produced the broken zip. It is named in a
         # comment warning against it, so only CALLS count.
@@ -17825,7 +17923,7 @@ class TestReleaseZipGate(unittest.TestCase):
         with open(os.path.join(REPO_ROOT, "package.json"), encoding="utf-8") as f:
             version = json.load(f)["version"]
         for z in zips:
-            problems = self.check(z, self.plugin_name, version)
+            problems = self.check(z, self.plugin_name, version, self.folder)
             self.assertEqual(problems, [], f"{os.path.basename(z)}: {problems}")
 
 

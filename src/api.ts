@@ -2719,3 +2719,138 @@ export const restorePointSaves = callable<
   [game_domain: string, point_id: string],
   { ok: boolean; error?: string; files?: number }
 >("restore_point_saves");
+
+/** GameBanana, the second mod source. Its mods carry ids moved past 10^9
+ * (GB_ID_BASE) so they ride the same install pipeline as Nexus mods; see
+ * py_modules/gamebanana.py. */
+export const GB_ID_BASE = 1_000_000_000;
+export const isGameBananaId = (id?: number): boolean => (id ?? 0) >= GB_ID_BASE;
+export const gbFromLocal = (id: number): number => (id >= GB_ID_BASE ? id - GB_ID_BASE : id);
+
+export interface GbGame {
+  id: number;
+  name: string;
+  icon?: string;
+  auto?: boolean;
+}
+
+export interface GbModSummary {
+  gb_id: number;
+  /** The id the install pipeline and My Mods know it by. */
+  mod_id: number;
+  name: string;
+  author: string;
+  thumbnail: string;
+  likes: number;
+  views: number;
+  downloads: number;
+  added: number;
+  updated: number;
+  version: string;
+  category: string;
+  nsfw: boolean;
+  has_files: boolean;
+  url: string;
+  installed?: boolean;
+}
+
+export interface GbFile {
+  gb_file_id: number;
+  file_id: number;
+  name: string;
+  file_name: string;
+  description: string;
+  version: string;
+  size: number;
+  size_kb: number;
+  date: number;
+  downloads: number;
+  md5: string;
+  url: string;
+  has_exe: boolean;
+  scan: string;
+}
+
+export interface GbMod extends GbModSummary {
+  summary: string;
+  text: string;
+  images: string[];
+  game_id: number;
+  game_name: string;
+  files: GbFile[];
+  requirements: { name: string; url: string }[];
+  external_only: boolean;
+  withheld: boolean;
+}
+
+export const gbGetGame = callable<
+  [app_id: number, display_name: string],
+  { ok: boolean; error?: string; linked?: GbGame | null; candidates?: GbGame[] }
+>("gb_get_game");
+export const gbSearchGames = callable<[query: string], { ok: boolean; error?: string; games?: GbGame[] }>(
+  "gb_search_games"
+);
+export const gbLinkGame = callable<
+  [app_id: number, ref: string, name: string],
+  { ok: boolean; error?: string; linked?: GbGame }
+>("gb_link_game");
+export const gbUnlinkGame = callable<[app_id: number], { ok: boolean }>("gb_unlink_game");
+export const gbListMods = callable<
+  [game_domain: string, app_id: number, page: number, sort: string, search: string],
+  {
+    ok: boolean;
+    error?: string;
+    mods?: GbModSummary[];
+    page?: number;
+    total?: number;
+    has_more?: boolean;
+    sort_fallback?: boolean;
+    hidden?: number;
+  }
+>("gb_list_mods");
+export const gbGetMod = callable<
+  [game_domain: string, gb_mod_id: number],
+  { ok: boolean; error?: string; mod?: GbMod; installed?: { folder: string; file_id: number; enabled: boolean }[] }
+>("gb_get_mod");
+export const gbUpdateTarget = callable<
+  [game_domain: string, mod_id: number, folder: string],
+  { ok: boolean; error?: string; file?: { file_id: number; file_name: string; name: string; version: string } }
+>("gb_update_target");
+
+/** Before handing an update to Decky: refuses while a download or install
+ * runs, lists Forge's own helper tools still running and closes them when
+ * closeHelpers is true. See prepare_plugin_update in main.py. */
+export const preparePluginUpdate = callable<
+  [close_helpers?: boolean],
+  { ok: boolean; reason?: string; message?: string; helpers?: string[]; closed?: string[] }
+>("prepare_plugin_update");
+
+/** Is the installed copy the build its manifest says it is? */
+export const getInstallIntegrity = callable<
+  [],
+  {
+    ok: boolean;
+    status: string;
+    label?: string;
+    version?: string;
+    running_version?: string;
+    expected_version?: string;
+    problems?: string[];
+    problem_count?: number;
+    import_failures?: Record<string, string>;
+  }
+>("get_install_integrity");
+
+/** The current build from the release channel, to reinstall it. */
+export const getReinstallTarget = callable<
+  [],
+  {
+    ok: boolean;
+    same_version?: boolean;
+    version?: string;
+    artifact?: string;
+    hash?: string;
+    label?: string;
+    message?: string;
+  }
+>("get_reinstall_target");

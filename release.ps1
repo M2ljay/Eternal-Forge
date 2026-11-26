@@ -22,9 +22,13 @@ $version = $pkg.version
 # Mods". Every failure inside Decky's installer returns without telling the
 # UI, so the disagreement presented as "PARSING ZIP FILE" forever rather
 # than an error. Taken from plugin.json so the two cannot drift again.
-$pluginJson = Get-Content (Join-Path $root "plugin.json") -Raw | ConvertFrom-Json
-$pluginDir = $pluginJson.name
-Write-Host "Plugin folder in zip: '$pluginDir' (from plugin.json)" -ForegroundColor Cyan
+#
+# Since the rename to "Forge" the folder is package.json's "pluginFolder"
+# ("Nexus Mods"), not plugin.json's name: Decky keys settings by the folder.
+# tools/checkzip.py checks both below.
+$pluginDir = $pkg.pluginFolder
+if (-not $pluginDir) { throw "package.json has no pluginFolder" }
+Write-Host "Plugin folder in zip: '$pluginDir' (from package.json pluginFolder)" -ForegroundColor Cyan
 
 Write-Host "Building v$version ..." -ForegroundColor Cyan
 # pnpm writes progress to stderr even on success, and with
@@ -64,8 +68,9 @@ if (Test-Path $out) { Remove-Item -Force $out }
 # FILE" forever. Python's zipfile writes forward slashes, which is what the
 # format specifies. The bug is invisible on Windows, where the separators
 # are normalised away on read: it took listing the entries on the device.
-$pyFile = Join-Path $env:TEMP "decky-nexus-zip.py"
-Copy-Item (Join-Path $root "tools\makezip.py") $pyFile
+# Run in place: it imports tools\make_manifest.py, which writes the
+# install manifest into the zip (and that imports py_modules\forge_integrity.py).
+$pyFile = Join-Path $root "tools\makezip.py"
 # Same reason as the build above: anything python writes to stderr, warnings
 # included, would otherwise be fatal. The exit code is the verdict.
 $ErrorActionPreference = "Continue"

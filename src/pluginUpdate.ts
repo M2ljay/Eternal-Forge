@@ -88,18 +88,45 @@ export function isNewerVersion(current: string, latest: string): boolean {
   return false;
 }
 
-/** The artifact must come from this project's own releases.
+/** The name Decky knows this plugin by: plugin.json's "name", and what
+ * Decky shows in the Quick Access Menu. utilities/install_plugin finds the
+ * installed copy by this name (browser.py: find_plugin_folder), so it must
+ * equal plugin.json's name or Decky installs beside it instead of updating.
+ * The FOLDER the zip unpacks into is a different thing and stays "Nexus
+ * Mods" (package.json pluginFolder): Decky keys settings, data and logs by
+ * the folder, so the API key and mod state stay where they are. */
+export const PLUGIN_NAME = "Forge";
+
+/** Where this fork publishes its builds: the "release" branch of its own
+ * repository, holding update.json and the zip beside it. */
+export const FORK_RELEASE_RAW =
+  "https://raw.githubusercontent.com/M2ljay/Eternal-Forge/release/";
+
+/** The artifact must come from this fork's own release channel.
  *
  * The loader installs whatever URL it is handed, so this is the last
  * point where that is checked on our side. The backend checks it too;
  * both, because it is the one field that decides what code runs.
+ *
+ * One zip file directly on that branch, nothing else: a prefix check
+ * alone would accept ".../release/../../other/repo/...", which the
+ * loader's HTTP client resolves into somebody else's repository. The
+ * upstream store's releases are not trusted either: installing one would
+ * replace this fork with upstream.
  */
 export function trustedArtifact(url?: string): boolean {
-  return Boolean(
-    url?.startsWith(
-      "https://github.com/RedRanger14/decky-nexus/releases/download/"
-    )
-  );
+  if (typeof url !== "string" || !url.startsWith(FORK_RELEASE_RAW)) {
+    return false;
+  }
+  const file = url.slice(FORK_RELEASE_RAW.length);
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.zip$/.test(file);
+}
+
+/** A SHA-256 as Decky compares it: 64 lowercase hex digits. Decky skips
+ * its hash check entirely when the hash is empty, so anything else is
+ * refused before it gets there. */
+export function trustedHash(hash?: string): boolean {
+  return typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash);
 }
 
 export function pluginUpdateLabel(u?: PluginUpdate): string {
@@ -120,7 +147,7 @@ export function pluginUpdateBody(u?: PluginUpdate): string {
  * it can. */
 export function pluginUpdateBlocked(u?: PluginUpdate): string {
   if (!u?.update_available) return "";
-  if (!trustedArtifact(u.artifact) || !u.hash) {
+  if (!trustedArtifact(u.artifact) || !trustedHash(u.hash)) {
     return "The update could not be verified, so it was not offered.";
   }
   if (!canSelfUpdate()) {
@@ -132,6 +159,80 @@ export function pluginUpdateBlocked(u?: PluginUpdate): string {
   return "";
 }
 
+/** Decky's PluginInstallType.REINSTALL: same version, its prompt says so. */
+export const DECKY_INSTALL_TYPE_REINSTALL = 1;
+
+/** The backend's answer to prepare_plugin_update. */
+export interface PrepareResult {
+  ok: boolean;
+  reason?: "busy" | "blocked" | "helpers_running" | "helpers_stuck" | string;
+  message?: string;
+  helpers?: string[];
+  closed?: string[];
+}
+
+/** What a hand-off needs from the page: the backend's preparation, and a
+ * way to ask the user before Forge closes its own helper tools.
+ *
+ * Why a preparation at all: Decky v3.3.1 replaces the plugin by deleting
+ * its folder and extracting the zip over it (browser.py), and on Windows
+ * both stop at the first file another process holds. Its stop of this
+ * plugin is TerminateProcess, which leaves any tool the plugin started
+ * running. Half-copied plugins were the result. */
+export interface HandOffHooks {
+  prepare: (closeHelpers: boolean) => Promise<PrepareResult>;
+  confirmClose: (helpers: string[], message: string) => Promise<boolean>;
+}
+
+/** Get the plugin ready, then hand the install to Decky. "" once Decky has
+ * the request (it then shows its own prompt), else what stopped it. */
+export async function handOffToDecky(
+  target: { version?: string; artifact?: string; hash?: string },
+  installType: number,
+  hooks?: HandOffHooks
+): Promise<string> {
+  if (!trustedArtifact(target.artifact) || !trustedHash(target.hash)) {
+    return "The update could not be verified, so it was not offered.";
+  }
+  const router = deckyRouter();
+  if (!router) return "Decky's installer is not available on this build.";
+  if (!target.version) return "Nothing to install.";
+  if (hooks) {
+    let ready: PrepareResult | undefined;
+    try {
+      ready = await hooks.prepare(false);
+      if (!ready.ok && ready.reason === "helpers_running") {
+        const go = await hooks.confirmClose(ready.helpers ?? [], ready.message ?? "");
+        if (!go) return "Update cancelled.";
+        ready = await hooks.prepare(true);
+      }
+    } catch (e) {
+      // A backend that cannot answer is most likely the broken install this
+      // is about to repair, so it must not be able to block the repair.
+      console.warn("Forge: update preparation unavailable, continuing", e);
+      ready = undefined;
+    }
+    if (ready && !ready.ok) {
+      return ready.message || "Forge is busy. Try again in a moment.";
+    }
+  }
+  try {
+    await router.call(
+      "utilities/install_plugin",
+      target.artifact,
+      // Must match plugin.json's name, which is how Decky finds the
+      // installed copy, or it installs a second copy beside this one.
+      PLUGIN_NAME,
+      target.version,
+      target.hash,
+      installType
+    );
+    return "";
+  } catch (e) {
+    return `Decky refused the update: ${String(e)}`;
+  }
+}
+
 /** Ask Decky Loader to install the newer build.
  *
  * Returns "" once the request is with Decky, which then shows its own
@@ -139,27 +240,37 @@ export function pluginUpdateBlocked(u?: PluginUpdate): string {
  * happened: the user still has to confirm, and Decky restarts the
  * plugin afterwards.
  */
-export async function requestPluginUpdate(u: PluginUpdate): Promise<string> {
+export async function requestPluginUpdate(
+  u: PluginUpdate,
+  hooks?: HandOffHooks
+): Promise<string> {
   const blocked = pluginUpdateBlocked(u);
   if (blocked) return blocked;
-  const router = deckyRouter();
-  if (!router) return "Decky's installer is not available on this build.";
-  if (!u.version || !u.artifact || !u.hash) return "Nothing to install.";
-  try {
-    await router.call(
-      "utilities/install_plugin",
-      u.artifact,
-      // Must match the installed folder name, or Decky installs a second
-      // copy beside this one rather than replacing it.
-      "Nexus Mods",
-      u.version,
-      u.hash,
-      DECKY_INSTALL_TYPE_UPDATE
-    );
-    return "";
-  } catch (e) {
-    return `Decky refused the update: ${String(e)}`;
+  return handOffToDecky(u, DECKY_INSTALL_TYPE_UPDATE, hooks);
+}
+
+/** The backend's verdict on its own install (get_install_integrity). */
+export interface InstallIntegrity {
+  ok: boolean;
+  status: "checking" | "ok" | "broken" | "no_manifest" | "unknown" | string;
+  label?: string;
+  problems?: string[];
+  problem_count?: number;
+  import_failures?: Record<string, string>;
+}
+
+/** The notice for a copy that did not finish, or "" when there is none.
+ * Plain words: it is read on a TV from a couch. */
+export function integrityNotice(r?: InstallIntegrity): string {
+  if (!r) return "";
+  if (r.status === "broken") {
+    return `Forge's last update didn't finish copying. Reinstall ${r.label || "it"}.`;
   }
+  const failed = Object.keys(r.import_failures ?? {});
+  if (failed.length) {
+    return `Part of Forge didn't load (${failed.slice(0, 3).join(", ")}). Reinstall ${r.label || "it"}.`;
+  }
+  return "";
 }
 
 /** How long to leave the button saying "waiting" before letting it be

@@ -59,6 +59,7 @@ import { AdultBadge, PageBackdrop, SectionHeading, StackedThumb } from "./chrome
 import { NEXUS_ORANGE, PAGE_SCROLLER } from "./theme";
 import { storeHeaderPlan, STORE_HEADER_EDGE } from "./panelRules";
 import { TabBar, exitTabsToQam, handleTabButtons, pushOurPage } from "./Tabs";
+import { GB_YELLOW, openGameBanana } from "./gamebanana";
 
 const SORT_OPTIONS = [
   { data: "featured", label: "Featured" },
@@ -1503,6 +1504,27 @@ export function BrowsePage() {
                 </Focusable>
               </>
             )}
+            {/* The second source. A strip rather than a rail: its mods are
+                not Nexus mods and do not mix into Nexus's lists. */}
+            <Focusable
+              onActivate={() => openGameBanana(game)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                margin: "10px 0 4px",
+                padding: "10px 14px",
+                borderRadius: "6px",
+                background: "rgba(245, 197, 66, 0.08)",
+                border: `1px solid ${GB_YELLOW}55`,
+                fontSize: "13.5px",
+              }}
+            >
+              <span>
+                <b style={{ color: GB_YELLOW }}>GameBanana</b> · more mods for {game.displayName}
+              </span>
+              <span style={{ fontWeight: 600 }}>Browse →</span>
+            </Focusable>
             {trending.length === 0 && recommended.length === 0 && (
               <div style={{ padding: "20px 0", opacity: 0.8 }}>
                 Loading mods…

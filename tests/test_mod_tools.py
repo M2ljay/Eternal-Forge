@@ -143,12 +143,47 @@ class ToolsTests(unittest.TestCase):
                 mock.patch.object(main, "APP_VERSION", "1.21.32-anygame.40"):
             r = run(self.plugin.get_plugin_update(True))
         self.assertTrue(r["update_available"], r)
-        bad = dict(good, artifact="https://evil.example/x.zip")
+        for artifact, sha in [
+                ("https://evil.example/x.zip", "a" * 64),
+                # The repository before it was renamed: no longer ours to trust.
+                ("https://raw.githubusercontent.com/M2ljay/vibe-nexus/release/Nexus-Mods.zip", "a" * 64),
+                # A prefix match alone would let these walk out of the branch.
+                (main.FORK_RAW + "../../someone/else/main/x.zip", "a" * 64),
+                (main.FORK_RAW + "sub/x.zip", "a" * 64),
+                (main.FORK_RAW + "Nexus-Mods.zip?x=1", "a" * 64),
+                (main.FORK_RAW + "Nexus-Mods.zip#x", "a" * 64),
+                (main.FORK_RAW + "update.json", "a" * 64),
+                # The hash Decky checks must be a real SHA-256.
+                (main.FORK_RAW + "Nexus-Mods.zip", ""),
+                (main.FORK_RAW + "Nexus-Mods.zip", "A" * 64),
+                (main.FORK_RAW + "Nexus-Mods.zip", "a" * 63)]:
+            bad = dict(good, artifact=artifact, hash=sha)
+            main._ForkUpdateCache.data = None
+            with mock.patch.object(main, "_fetch_bytes", mock.AsyncMock(return_value=json.dumps(bad).encode())), \
+                    mock.patch.object(main, "APP_VERSION", "1.21.32-anygame.40"):
+                r = run(self.plugin.get_plugin_update(True))
+            self.assertFalse(r.get("update_available"), artifact)
         main._ForkUpdateCache.data = None
-        with mock.patch.object(main, "_fetch_bytes", mock.AsyncMock(return_value=json.dumps(bad).encode())), \
-                mock.patch.object(main, "APP_VERSION", "1.21.32-anygame.40"):
-            r = run(self.plugin.get_plugin_update(True))
-        self.assertFalse(r.get("update_available"))
+
+    def test_fork_release_channel_is_eternal_forge(self):
+        self.assertEqual(main.FORK_RAW, "https://raw.githubusercontent.com/M2ljay/Eternal-Forge/release/")
+        self.assertEqual(main.FORK_UPDATE_URL, main.FORK_RAW + "update.json")
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "tools", "make_release.sh"), encoding="utf-8") as f:
+            script = f.read()
+        # What the packager writes into update.json must pass the plugin's own check.
+        self.assertIn(f'ARTIFACT="{main.FORK_RAW}Nexus-Mods.zip"', script)
+        self.assertTrue(main._fork_artifact_trusted(main.FORK_RAW + "Nexus-Mods.zip"))
+        with open(os.path.join(root, "src", "pluginUpdate.ts"), encoding="utf-8") as f:
+            ts = f.read()
+        self.assertIn(f'"{main.FORK_RAW}"', ts)
+        # The name the frontend asks Decky to update is plugin.json's name.
+        with open(os.path.join(root, "plugin.json"), encoding="utf-8") as f:
+            name = json.load(f)["name"]
+        self.assertIn(f'export const PLUGIN_NAME = "{name}";', ts)
+        for path in ("main.py", os.path.join("tools", "make_release.sh"), os.path.join("src", "pluginUpdate.ts")):
+            with open(os.path.join(root, path), encoding="utf-8") as f:
+                self.assertNotIn("vibe-nexus", f.read(), path)
 
     def test_reapply_reason(self):
         g = dict(self.game, toolApply="doommodloader")

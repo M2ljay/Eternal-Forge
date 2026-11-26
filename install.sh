@@ -27,6 +27,8 @@ set -eu
 API_KEY="${1:-}"
 
 REPO="RedRanger14/decky-nexus"
+# The plugin FOLDER (package.json "pluginFolder"), which is also the settings
+# folder. Not the displayed name, which is "Forge" since the rename.
 PLUGIN="Nexus Mods"
 PLUGIN_DIR="$HOME/homebrew/plugins"
 TMP="$(mktemp -d)"

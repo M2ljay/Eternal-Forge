@@ -1,45 +1,70 @@
-import asyncio
-import datetime
-import functools
-import io
-import glob
-import hashlib
-import itertools
-import inspect
-import json
-import lzma
+# First, before any import that a half-copied install could break: start the
+# check of this install against the manifest its release zip carried
+# (py_modules/forge_integrity.py, standard library only). The py_modules
+# below are imported through it, so one that is missing or truncated becomes
+# a recorded failure and a stand-in instead of a backend that never starts.
+# That is what lets the panel say "the last update didn't finish copying"
+# and offer the reinstall, rather than every page spinning forever.
 import os
-import re
-import shutil
-import struct
-import socket
-import ssl
-import threading
-import time
-import urllib.parse
-import zipfile
-
 import sys
 
-import aiohttp
+_PLUGIN_ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_PLUGIN_ROOT, "py_modules"))
+try:
+    import forge_integrity  # noqa: E402
 
-import decky
+    _INTEGRITY = forge_integrity.begin(_PLUGIN_ROOT)
+except Exception:  # noqa: BLE001 - the plugin must still start without it
+    forge_integrity = None
+    _INTEGRITY = None
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
-import experimental_games  # noqa: E402 - needs the py_modules path above
-import reloaded_ii  # noqa: E402
-import xenoverse2  # noqa: E402
-import reshade_setup  # noqa: E402
-import kingdom_hearts  # noqa: E402
-import archive_peek  # noqa: E402
-import gta_img  # noqa: E402
-import memoria  # noqa: E402
-import re_engine  # noqa: E402
-import installers  # noqa: E402
-import generic_loaders  # noqa: E402
-import vr_setup  # noqa: E402
-import vr_feed  # noqa: E402
+import asyncio  # noqa: E402
+import datetime  # noqa: E402
+import functools  # noqa: E402
+import importlib  # noqa: E402
+import io  # noqa: E402
+import glob  # noqa: E402
+import hashlib  # noqa: E402
+import itertools  # noqa: E402
+import inspect  # noqa: E402
+import json  # noqa: E402
+import lzma  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import struct  # noqa: E402
+import socket  # noqa: E402
+import ssl  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
+import zipfile  # noqa: E402
 
+import aiohttp  # noqa: E402
+
+import decky  # noqa: E402
+
+
+def _guarded_import(name: str):
+    if forge_integrity is not None:
+        return forge_integrity.guarded_import(name)
+    return importlib.import_module(name)
+
+
+experimental_games = _guarded_import("experimental_games")
+reloaded_ii = _guarded_import("reloaded_ii")
+xenoverse2 = _guarded_import("xenoverse2")
+reshade_setup = _guarded_import("reshade_setup")
+kingdom_hearts = _guarded_import("kingdom_hearts")
+archive_peek = _guarded_import("archive_peek")
+gta_img = _guarded_import("gta_img")
+memoria = _guarded_import("memoria")
+re_engine = _guarded_import("re_engine")
+installers = _guarded_import("installers")
+generic_loaders = _guarded_import("generic_loaders")
+vr_setup = _guarded_import("vr_setup")
+vr_feed = _guarded_import("vr_feed")
+gamebanana = _guarded_import("gamebanana")
+forge_helpers = _guarded_import("forge_helpers")
 
 def _steam_root() -> str:
     """Steam's install folder. On Windows the registry says where it is;
@@ -3037,6 +3062,9 @@ async def _legacy_mods_in_batches(
     Every bulk id lookup goes through here so that cannot be got wrong in one
     place and right in another.
     """
+    # A GameBanana mod (its id moved past 10^9, see gamebanana.py) is never
+    # a Nexus mod: asking about it would cost a request for nothing.
+    mod_ids = [i for i in mod_ids if not gamebanana.is_gb_id(i)]
     nodes = []
     for start in range(0, len(mod_ids), LEGACY_MODS_PAGE):
         chunk = mod_ids[start : start + LEGACY_MODS_PAGE]
@@ -17762,6 +17790,9 @@ async def _download_archive(
     (error, archive_path); error is '' on success."""
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
     archive_path = _archive_cache_path(mod_id, file_id, file_name)
+    # A GameBanana file: same cache, progress, pause and resume, but the
+    # link is GameBanana's own and no Nexus key is involved.
+    gb = gamebanana.is_gb_id(mod_id)
     try:
         if os.path.getsize(archive_path) > 0:
             # Prefetched (or a retry after install-stage failure). .part
@@ -17787,6 +17818,9 @@ async def _download_archive(
         """(err, uri). A function rather than straight-line code because
         CDN links expire: a download resumed after a long pause needs a
         fresh link, not the one minted an hour ago."""
+        if gb:
+            info = await _gb_client().file_download(gamebanana.from_local(file_id))
+            return "", [("GameBanana", info["url"])]
         # Parallel prefetching bursts this endpoint - back off and retry
         # on rate limits / transient 5xx instead of failing the mod's row.
         links = None
@@ -17892,9 +17926,13 @@ async def _download_archive(
                     sock_read=DOWNLOAD_STALL_SECONDS,
                 )
                 session = await _http_session()
+                if gb:
+                    req_headers = {**req_headers, **_gb_headers()}
                 async with session.get(
                     _safe_uri(uri), headers=req_headers, timeout=timeout
                 ) as resp:
+                    if resp.status == 403 and gb:
+                        return "GameBanana refused the download (HTTP 403)", ""
                     if resp.status == 403:
                         # The CDN link outlived its welcome (long pause,
                         # slow retry) - mint a fresh one and go again.
@@ -18034,6 +18072,11 @@ async def _download_archive(
                     await asyncio.sleep(2)
                     continue
                 os.replace(part_path, archive_path)
+                if gb:
+                    problem = await _gb_check_download(file_id, archive_path)
+                    if problem:
+                        await _emit_progress(mod_id, "error", 0, problem)
+                        return problem, ""
                 return "", archive_path
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 transport_failures += 1
@@ -22466,6 +22509,9 @@ query Link($slug: String!, $domainName: String!) {
             # updating it alone would install whichever file the page's
             # default logic picks - a different file entirely.
             and rec.get("source") != "companion"
+            # GameBanana mods are checked against GameBanana (the wrapper
+            # below), never against Nexus.
+            and not gamebanana.is_gb_id(rec.get("mod_id"))
         }
         if not tracked:
             return {"ok": True, "updates": {}}
@@ -23511,7 +23557,7 @@ query Link($slug: String!, $domainName: String!) {
     ) -> dict:
         settings = _load_settings()
         api_key = settings.get("api_key")
-        if not api_key:
+        if not api_key and not gamebanana.is_gb_id(mod_id):
             await _emit_progress(mod_id, "error", 0, "not signed in")
             return {"ok": False, "error": "Not signed in"}
 
@@ -35204,7 +35250,7 @@ query CollectionInstructions($slug: String!) {
     # ---- Lifecycle ---------------------------------------------------------
 
     async def _main(self):
-        decky.logger.info("Nexus Mods plugin loaded")
+        decky.logger.info("Forge plugin loaded")
         self._tool_watcher = asyncio.get_running_loop().create_task(_watch_tool_games())
         self._reapply_watcher = asyncio.get_running_loop().create_task(_watch_reapply())
         self._focus_watcher = asyncio.get_running_loop().create_task(_watch_focus())
@@ -35221,13 +35267,13 @@ query CollectionInstructions($slug: String!) {
         # start needs a terminal the user does not have.
         _DL_CANCEL.update(_DL_ACTIVE)
         await _close_http_session()
-        decky.logger.info("Nexus Mods plugin unloading")
+        decky.logger.info("Forge plugin unloading")
         watchdog = threading.Timer(UNLOAD_EXIT_SECONDS, os._exit, args=(0,))
         watchdog.daemon = True
         watchdog.start()
 
     async def _uninstall(self):
-        decky.logger.info("Nexus Mods plugin uninstalled")
+        decky.logger.info("Forge plugin uninstalled")
 
 
 # Experimental tool-managed games (Overstrike): every change to what is
@@ -36040,7 +36086,7 @@ def _recent_logs(limit: int = 600 << 10) -> str:
 async def _save_problem_report(self, game_domain: str = "", app_id: int = 0, what: str = "") -> dict:
     settings = _load_settings()
     secrets = [str(settings.get(k) or "") for k in ("api_key", "apikey", "nexus_api_key")]
-    lines = [f"Nexus Mods plugin {APP_VERSION} problem report - {time.strftime('%Y-%m-%d %H:%M')}",
+    lines = [f"Forge plugin {APP_VERSION} problem report - {time.strftime('%Y-%m-%d %H:%M')}",
              f"What happened: {what or '(not given)'}", ""]
     if game_domain and re.fullmatch(r"[a-z0-9_-]+", game_domain):
         try:
@@ -36057,7 +36103,7 @@ async def _save_problem_report(self, game_domain: str = "", app_id: int = 0, wha
                   json.dumps(settings.get("installed", {}).get(game_domain), indent=1, default=str)[:60000], ""]
     lines += ["--- plugin logs ---", await asyncio.to_thread(_recent_logs)]
     text = _scrub("\n".join(lines), secrets)
-    path = os.path.join(_report_dir(), f"Nexus Mods report - {time.strftime('%Y-%m-%d %H%M%S')}.txt")
+    path = os.path.join(_report_dir(), f"Forge report - {time.strftime('%Y-%m-%d %H%M%S')}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     decky.logger.info(f"problem report saved: {path}")
@@ -36068,12 +36114,20 @@ Plugin.save_problem_report = _save_problem_report
 
 
 # ---- Updates come from the fork -------------------------------------------------
-# This build is a fork: the store's newer upstream build would replace it
-# (and every any-game feature with it). So updates come from the fork's
+# This build is a fork (Forge): the store's newer upstream build would replace
+# it (and every any-game feature with it). So updates come from the fork's
 # "release" branch, which holds the zip and an update.json beside it.
-FORK_REPO = "M2ljay/vibe-nexus"
+FORK_REPO = "M2ljay/Eternal-Forge"
 FORK_RAW = f"https://raw.githubusercontent.com/{FORK_REPO}/release/"
 FORK_UPDATE_URL = FORK_RAW + "update.json"
+# The artifact must be a single zip file at the top of that branch. A bare
+# prefix check would also accept ".../release/../../<other repo>/...", which an
+# HTTP client normalises into someone else's repository before fetching it.
+_FORK_ARTIFACT = re.compile(re.escape(FORK_RAW) + r"[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.zip")
+
+
+def _fork_artifact_trusted(url: str) -> bool:
+    return bool(_FORK_ARTIFACT.fullmatch(url or ""))
 
 
 async def _fetch_fork_update(force: bool = False) -> dict:
@@ -36087,7 +36141,7 @@ async def _fetch_fork_update(force: bool = False) -> dict:
                "artifact": str(data["artifact"]), "notes": str(data.get("notes") or "")}
     except Exception:  # noqa: BLE001 - no answer is simply no update
         return {}
-    if not out["artifact"].startswith(FORK_RAW) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
+    if not _fork_artifact_trusted(out["artifact"]) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
         return {}
     _ForkUpdateCache.at, _ForkUpdateCache.data = now, out
     return out
@@ -37451,3 +37505,538 @@ def _wrap_restore_points() -> None:
 
 
 _wrap_restore_points()
+
+
+# ---- GameBanana: a second mod source ----------------------------------------
+# Browse a game's GameBanana mods, open a mod's page, and install its files
+# through the same pipeline as Nexus mods. Everything GameBanana-specific
+# (endpoints, parsing, update rules) is in py_modules/gamebanana.py; this
+# section is the transport, the settings it keeps (which GameBanana game a
+# Steam game is), the callables, and the hooks that let the Nexus-shaped
+# calls the rest of the plugin makes (files, thumbnails, update checks)
+# answer for a GameBanana mod. A GameBanana mod's ids are moved past 10^9
+# before they reach the pipeline (gamebanana.to_local), so archives,
+# progress, records and restore points need no second key.
+_GB_CLIENT = None
+
+
+def _gb_headers() -> dict:
+    return {"User-Agent": APP_HEADERS.get("User-Agent", "decky-nexus")}
+
+
+async def _gb_transport(url: str) -> tuple:
+    session = await _http_session()
+    async with session.get(url, headers={**_gb_headers(), "Accept": "application/json"},
+                           timeout=aiohttp.ClientTimeout(total=20)) as resp:
+        return resp.status, await resp.text()
+
+
+def _gb_client():
+    global _GB_CLIENT
+    if _GB_CLIENT is None:
+        _GB_CLIENT = gamebanana.Client(_gb_transport)
+    return _GB_CLIENT
+
+
+def _gb_state(settings: dict) -> dict:
+    st = settings.setdefault("gamebanana", {})
+    st.setdefault("games", {})
+    return st
+
+
+def _gb_installed(game_domain: str, settings: dict = None) -> dict:
+    """{local mod id: [(folder, record)]} for the game's GameBanana mods."""
+    records = ((settings or _load_settings()).get("installed") or {}).get(game_domain) or {}
+    out: dict = {}
+    for folder, rec in records.items():
+        if isinstance(rec, dict) and gamebanana.is_gb_id(rec.get("mod_id")):
+            out.setdefault(int(rec["mod_id"]), []).append((folder, rec))
+    return out
+
+
+def _gb_fail(e) -> dict:
+    return {"ok": False, "error": str(e) or "GameBanana did not answer"}
+
+
+def _gb_verify(path: str, md5: str) -> str:
+    """'' when a fresh download is the file, else what is wrong with it."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError as e:
+        return f"Download could not be read: {e}"
+    if gamebanana.looks_like_html(head):
+        return "GameBanana sent a web page instead of the file - try again later"
+    if md5:
+        h = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != md5:
+            return "The download does not match GameBanana's checksum - try again"
+    return ""
+
+
+async def _gb_check_download(file_id: int, path: str) -> str:
+    """A freshly downloaded GameBanana file, checked before anything
+    extracts it: a web page served in its place, or bytes that do not match
+    GameBanana's checksum, are thrown away and reported. '' when fine."""
+    info = await _gb_client().file_download(gamebanana.from_local(file_id))
+    problem = await asyncio.to_thread(_gb_verify, path, info.get("md5") or "")
+    if problem:
+        decky.logger.warning(f"gamebanana file {gamebanana.from_local(file_id)}: {problem}")
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return problem
+
+
+async def _gb_get_game(self, app_id: int, display_name: str = "") -> dict:
+    """The GameBanana game this Steam game is linked to; linked by itself
+    when exactly one GameBanana game has its name, else the candidates."""
+    settings = _load_settings()
+    link = _gb_state(settings)["games"].get(str(int(app_id or 0)))
+    if link:
+        return {"ok": True, "linked": link, "candidates": []}
+    if not display_name:
+        return {"ok": True, "linked": None, "candidates": []}
+    try:
+        cands = await _gb_client().match_games(display_name)
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    best = gamebanana.best_game_match(display_name, cands)
+    if best:
+        settings = _load_settings()
+        link = {"id": best["id"], "name": best["name"], "auto": True}
+        _gb_state(settings)["games"][str(int(app_id))] = link
+        _save_settings(settings)
+        decky.logger.info(f"gamebanana: {display_name!r} linked to game {best['id']} by name")
+        return {"ok": True, "linked": link, "candidates": []}
+    return {"ok": True, "linked": None, "candidates": cands[:12]}
+
+
+async def _gb_search_games(self, query: str) -> dict:
+    try:
+        return {"ok": True, "games": (await _gb_client().match_games(query))[:15]}
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+
+
+async def _gb_link_game(self, app_id: int, ref: str, name: str = "") -> dict:
+    """Link a Steam game to a GameBanana game, by id, link, or a pick from
+    the candidates (which comes with its name)."""
+    gid = gamebanana.parse_game_ref(str(ref))
+    if not gid or not app_id:
+        return {"ok": False, "error": "That isn't a GameBanana game id or gamebanana.com/games/... link."}
+    if not name:
+        try:
+            name = await _gb_client().game_name(gid)
+        except gamebanana.GBError as e:
+            return _gb_fail(e)
+        if not name:
+            return {"ok": False, "error": f"GameBanana has no game {gid}."}
+    settings = _load_settings()
+    link = {"id": gid, "name": name, "auto": False}
+    _gb_state(settings)["games"][str(int(app_id))] = link
+    _save_settings(settings)
+    return {"ok": True, "linked": link}
+
+
+async def _gb_unlink_game(self, app_id: int) -> dict:
+    settings = _load_settings()
+    _gb_state(settings)["games"].pop(str(int(app_id or 0)), None)
+    _save_settings(settings)
+    return {"ok": True}
+
+
+async def _gb_list_mods(self, game_domain: str, app_id: int, page: int = 1, sort: str = "default",
+                        search: str = "") -> dict:
+    link = _gb_state(_load_settings())["games"].get(str(int(app_id or 0)))
+    if not link:
+        return {"ok": False, "error": "This game isn't linked to GameBanana yet."}
+    try:
+        got = await _gb_client().list_mods(int(link["id"]), int(page or 1), sort or "default", search or "")
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    installed = _gb_installed(game_domain)
+    show_adult = _show_adult()
+    mods = [dict(m, installed=m["mod_id"] in installed) for m in got["mods"]
+            if show_adult or not m.get("nsfw")]
+    return {"ok": True, "mods": mods, "page": got["page"], "total": got["total"],
+            "has_more": got["has_more"], "sort_fallback": got["sort_fallback"],
+            "hidden": len(got["mods"]) - len(mods)}
+
+
+async def _gb_get_mod(self, game_domain: str, gb_mod_id: int) -> dict:
+    try:
+        mod = await _gb_client().mod(int(gb_mod_id))
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    recs = _gb_installed(game_domain).get(mod["mod_id"]) or []
+    return {"ok": True, "mod": mod,
+            "installed": [{"folder": f, "file_id": int(r.get("file_id") or 0), "enabled": _record_is_on(r)}
+                          for f, r in recs]}
+
+
+async def _gb_update_target(self, game_domain: str, mod_id: int, folder: str = "") -> dict:
+    """The file an update of an installed GameBanana mod should install:
+    the newer upload of the same file, else the newest file."""
+    if not gamebanana.is_gb_id(mod_id):
+        return {"ok": False, "error": "Not a GameBanana mod"}
+    gid = gamebanana.from_local(mod_id)
+    recs = _gb_installed(game_domain).get(int(mod_id)) or []
+    rec = next((r for f, r in recs if f == folder), recs[0][1] if recs else {})
+    try:
+        files = (await _gb_client().files_for([gid])).get(gid) or []
+    except gamebanana.GBError as e:
+        return _gb_fail(e)
+    if not files:
+        return {"ok": False, "error": "No downloadable file found"}
+    pick = gamebanana.update_for(rec, files)["file"] or files[0]
+    return {"ok": True, "file": {k: pick[k] for k in ("file_id", "file_name", "name", "version")}}
+
+
+Plugin.gb_get_game = _gb_get_game
+Plugin.gb_search_games = _gb_search_games
+Plugin.gb_link_game = _gb_link_game
+Plugin.gb_unlink_game = _gb_unlink_game
+Plugin.gb_list_mods = _gb_list_mods
+Plugin.gb_get_mod = _gb_get_mod
+Plugin.gb_update_target = _gb_update_target
+
+
+def _gb_nexus_file(f: dict, primary: bool) -> dict:
+    return {"file_id": f["file_id"], "name": f["name"], "file_name": f["file_name"], "version": f["version"],
+            "size_kb": f["size_kb"], "category_name": "MAIN", "is_primary": primary,
+            "description": f["description"], "uploaded_timestamp": f["date"], "content_preview_link": ""}
+
+
+def _wrap_gamebanana_hooks() -> None:
+    """The Nexus-shaped calls, answering for GameBanana mods: their files
+    (an update installs through the same code as a Nexus update), their
+    thumbnails in My Mods, and their updates on the Updates page. A Nexus
+    mod passes straight through to the original."""
+    get_files = Plugin.get_mod_files
+
+    @functools.wraps(get_files)
+    async def get_mod_files(self, game_domain, mod_id, *args, **kwargs):
+        if not gamebanana.is_gb_id(mod_id):
+            return await get_files(self, game_domain, mod_id, *args, **kwargs)
+        try:
+            mod = await _gb_client().mod(gamebanana.from_local(mod_id))
+        except gamebanana.GBError as e:
+            return _gb_fail(e)
+        return {"ok": True, "files": [_gb_nexus_file(f, i == 0) for i, f in enumerate(mod["files"])]}
+
+    Plugin.get_mod_files = get_mod_files
+
+    by_ids = Plugin.get_mods_by_ids
+
+    @functools.wraps(by_ids)
+    async def get_mods_by_ids(self, game_domain, mod_ids, *args, **kwargs):
+        try:
+            ids = [int(i) for i in (mod_ids or [])]
+        except (TypeError, ValueError):
+            return await by_ids(self, game_domain, mod_ids, *args, **kwargs)
+        gb_ids = [i for i in ids if gamebanana.is_gb_id(i)]
+        if not gb_ids:
+            return await by_ids(self, game_domain, mod_ids, *args, **kwargs)
+        nexus_ids = [i for i in ids if not gamebanana.is_gb_id(i)]
+        result = (await by_ids(self, game_domain, nexus_ids, *args, **kwargs)) if nexus_ids else {"ok": True, "mods": []}
+        nodes = list(result.get("mods") or []) if result.get("ok") else []
+
+        async def one(local):
+            try:
+                m = await _gb_client().mod(gamebanana.from_local(local))
+            except gamebanana.GBError:
+                return None
+            return {"modId": local, "name": m["name"], "author": m["author"], "version": m["version"],
+                    "endorsements": m["likes"], "downloads": m["downloads"], "thumbnailUrl": m["thumbnail"],
+                    "pictureUrl": m["thumbnail"], "adultContent": m["nsfw"], "updatedAt": "",
+                    "source": "gamebanana"}
+        got = await asyncio.gather(*(one(i) for i in gb_ids[:60]))
+        nodes.extend(n for n in got if n)
+        order = {mid: i for i, mid in enumerate(ids)}
+        nodes.sort(key=lambda n: order.get(n.get("modId"), len(ids)))
+        return {"ok": True, "mods": nodes}
+
+    Plugin.get_mods_by_ids = get_mods_by_ids
+
+    details = Plugin.get_mod_details
+
+    @functools.wraps(details)
+    async def get_mod_details(self, game_domain, mod_id, *args, **kwargs):
+        if gamebanana.is_gb_id(mod_id):
+            return {"ok": False, "gamebanana": True, "error": "This mod is from GameBanana."}
+        return await details(self, game_domain, mod_id, *args, **kwargs)
+
+    Plugin.get_mod_details = get_mod_details
+
+    match = Plugin.match_file_to_game
+
+    @functools.wraps(match)
+    async def match_file_to_game(self, game_domain, mod_id, *args, **kwargs):
+        if gamebanana.is_gb_id(mod_id):
+            return {"ok": True, "file_id": 0}
+        return await match(self, game_domain, mod_id, *args, **kwargs)
+
+    Plugin.match_file_to_game = match_file_to_game
+
+    check = Plugin.check_updates
+
+    @functools.wraps(check)
+    async def check_updates(self, game_domain, *args, **kwargs):
+        result = await check(self, game_domain, *args, **kwargs)
+        if not isinstance(game_domain, str) or not re.fullmatch(r"[a-z0-9_-]+", game_domain or ""):
+            return result
+        recs = {folder: rec for recs in _gb_installed(game_domain).values() for folder, rec in recs
+                if rec.get("source") != "companion"}
+        if not recs:
+            return result
+        try:
+            files = await _gb_client().files_for([gamebanana.from_local(r["mod_id"]) for r in recs.values()])
+        except Exception as e:  # noqa: BLE001 - one source failing must not hide the other
+            decky.logger.warning(f"gamebanana update check {game_domain}: {e}")
+            return result
+        ups = {}
+        for folder, rec in recs.items():
+            fl = files.get(gamebanana.from_local(rec["mod_id"]))
+            if not fl:
+                continue
+            u = gamebanana.update_for(rec, fl)
+            if rec.get("ignore_update") and rec["ignore_update"] == u["current"]:
+                continue
+            ups[folder] = {"installed": rec.get("version"), "current": u["current"],
+                           "update_available": u["update_available"], "blamed": False, "source": "gamebanana"}
+        n = sum(1 for u in ups.values() if u["update_available"])
+        if n:
+            decky.logger.info(f"check_updates({game_domain!r}): {n} GameBanana mods have updates")
+        if isinstance(result, dict) and result.get("ok"):
+            result.setdefault("updates", {}).update(ups)
+            return result
+        return {"ok": True, "updates": ups,
+                "nexus_error": (result or {}).get("error") if isinstance(result, dict) else ""}
+
+    Plugin.check_updates = check_updates
+
+    install = Plugin.install_mod
+
+    @functools.wraps(install)
+    async def install_mod(self, game_domain, mod_id, file_id, *args, **kwargs):
+        result = await install(self, game_domain, mod_id, file_id, *args, **kwargs)
+        if not gamebanana.is_gb_id(mod_id) or not isinstance(result, dict) or not result.get("ok"):
+            return result
+        # What the update check needs later, kept on the record: which
+        # GameBanana file this is and when it was uploaded, so a newer
+        # upload is recognised even after the author deletes this one.
+        info = await _gb_client().file_download(gamebanana.from_local(file_id))
+        settings = _load_settings()
+        for folder, rec in (settings.get("installed", {}).get(game_domain) or {}).items():
+            if (isinstance(rec, dict) and int(rec.get("mod_id") or 0) == int(mod_id)
+                    and int(rec.get("file_id") or 0) == int(file_id)):
+                rec["gb_mod_id"] = gamebanana.from_local(mod_id)
+                rec["gb_file_id"] = gamebanana.from_local(file_id)
+                if info.get("date"):
+                    rec["gb_file_date"] = int(info["date"])
+                rec["source"] = "gamebanana"
+        _save_settings(settings)
+        return result
+
+    Plugin.install_mod = install_mod
+
+
+_wrap_gamebanana_hooks()
+
+
+# ---- Updating safely, and knowing when an update did not finish ------------------
+# Decky v3.3.1's installer (backend/decky_loader/browser.py: _install,
+# uninstall_plugin) stops this backend, rmtree-s the plugin folder and
+# extracts the new zip over what is left. On Windows the stop is
+# TerminateProcess: _unload never runs and children survive. Any file still
+# held stops rmtree part-way (logged by Decky, then ignored) or extraction
+# part-way (uncaught: no reload, no message). Either leaves a half-copied
+# plugin. So before the frontend hands the update to Decky it asks here
+# first: nothing running that writes, no helper of ours still holding files.
+
+# Callables that change files or run tools. While one runs, an update would
+# pull the plugin out from under it. Matched by name so a callable added
+# later is covered without anyone remembering this list.
+_JOB_CALLABLE = re.compile(
+    r"(install|uninstall|apply|prepare_mod_file|prefetch_mod_file|repair|run|reset|setup|remove"
+    r"|crash_bisect_apply|restore_point_saves|create_restore_point|copy_saves|fix|resolve_file_conflicts"
+    r"|park|disable_failing|set_all_mods_enabled|set_mod_enabled|bg3_disable)(_|$)")
+_JOBS_RUNNING: dict = {}
+
+
+def _wrap_jobs() -> None:
+    for name in dir(Plugin):
+        if name.startswith("_") or not _JOB_CALLABLE.match(name):
+            continue
+        original = getattr(Plugin, name)
+        if not inspect.iscoroutinefunction(original):
+            continue
+
+        def make(name, original):
+            @functools.wraps(original)
+            async def job(self, *args, **kwargs):
+                _JOBS_RUNNING[name] = _JOBS_RUNNING.get(name, 0) + 1
+                try:
+                    return await original(self, *args, **kwargs)
+                finally:
+                    _JOBS_RUNNING[name] -= 1
+                    if _JOBS_RUNNING[name] <= 0:
+                        _JOBS_RUNNING.pop(name, None)
+            return job
+
+        setattr(Plugin, name, make(name, original))
+
+
+def _update_busy(plugin) -> str:
+    """What is still running that an update would interrupt, or ""."""
+    if _DL_ACTIVE:
+        return "a download"
+    if _PROGRAM_RUNS:
+        return "a mod installer"
+    if any(not t.done() for t in _TOOL_APPLY_TASKS.values()):
+        return "a mod tool"
+    task = getattr(plugin, "_library_task", None)
+    if task is not None and not task.done():
+        return "the library check"
+    if _JOBS_RUNNING:
+        name = sorted(_JOBS_RUNNING)[0]
+        return "an install" if "install" in name else name.replace("_", " ")
+    return ""
+
+
+def _release_plugin_folder() -> None:
+    """Let go of anything this process holds under the plugin folder."""
+    if _INTEGRITY is not None:
+        _INTEGRITY.stop()  # its hash thread has a file open
+    try:
+        if forge_helpers.under(os.getcwd(), _PLUGIN_ROOT):
+            os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
+            os.chdir(decky.DECKY_PLUGIN_RUNTIME_DIR)
+    except (OSError, ImportError):
+        pass
+    import logging
+    for logger in (logging.getLogger(), decky.logger):
+        for h in list(getattr(logger, "handlers", [])):
+            path = getattr(h, "baseFilename", "")
+            if path and _norm_under(path, _PLUGIN_ROOT):
+                logger.removeHandler(h)
+                h.close()
+
+
+def _norm_under(path: str, root: str) -> bool:
+    try:
+        return forge_helpers.under(path, root)
+    except ImportError:
+        p, r = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(root))
+        return p == r or p.startswith(r.rstrip(os.sep) + os.sep)
+
+
+async def _prepare_plugin_update(self, close_helpers: bool = False) -> dict:
+    """Get ready for Decky to replace the plugin folder.
+
+    Refuses while something is running that an update would interrupt.
+    Helper processes this backend started from its own folders are listed
+    first and closed only when close_helpers is true, after the user has
+    seen the list. Never touches any other process.
+    """
+    busy = _update_busy(self)
+    if busy:
+        return {"ok": False, "reason": "busy",
+                "message": f"Wait for {busy} to finish (or cancel it), then update."}
+    try:
+        found = await asyncio.to_thread(
+            forge_helpers.find, _PLUGIN_ROOT, decky.DECKY_PLUGIN_RUNTIME_DIR)
+    except Exception:  # noqa: BLE001 - a broken install must still be reinstallable
+        decky.logger.exception("update: could not list helper processes")
+        found = {"close": [], "blockers": []}
+    if found["blockers"]:
+        names = sorted({p["name"] for p in found["blockers"]})
+        return {"ok": False, "reason": "blocked", "helpers": names,
+                "message": f"Close {', '.join(names)} first: it is running from Forge's folder."}
+    if found["close"]:
+        names = sorted({p["name"] for p in found["close"]})
+        if not close_helpers:
+            return {"ok": False, "reason": "helpers_running", "helpers": names,
+                    "message": f"Forge will close {', '.join(names)} before updating."}
+        left = await asyncio.to_thread(
+            forge_helpers.stop, found["close"], _PLUGIN_ROOT, decky.DECKY_PLUGIN_RUNTIME_DIR)
+        decky.logger.info(f"update: closed {names}, still running {left}")
+        if left:
+            return {"ok": False, "reason": "helpers_stuck", "helpers": left,
+                    "message": f"{', '.join(left)} would not close. Close it, then update."}
+    _release_plugin_folder()
+    return {"ok": True, "closed": sorted({p["name"] for p in found["close"]})}
+
+
+def _short_version(version: str) -> str:
+    """'1.21.32-anygame.67' -> 'anygame.67', which is what the user sees."""
+    return version.rsplit("-", 1)[-1] if "-" in version else version
+
+
+class _IntegrityLog:
+    done = False
+
+
+async def _get_install_integrity(self) -> dict:
+    snap = _INTEGRITY.snapshot() if _INTEGRITY is not None else {
+        "status": "unknown", "version": "", "problems": [], "problem_count": 0, "import_failures": {}}
+    if _INTEGRITY is None and forge_integrity is None:
+        snap["import_failures"] = {"forge_integrity": "did not load"}
+    if snap["status"] == "broken" and not _IntegrityLog.done:
+        _IntegrityLog.done = True
+        decky.logger.error(f"install integrity: {snap['problem_count']} problems, e.g. {snap['problems']}")
+    expected = snap.get("version") or APP_VERSION
+    return {"ok": True, **snap, "running_version": APP_VERSION,
+            "expected_version": expected, "label": _short_version(expected)}
+
+
+async def _get_reinstall_target(self) -> dict:
+    """The current build from the release channel, to put a broken copy right.
+
+    make_release.sh publishes update-<version>.json beside update.json for
+    every build, naming a zip that stays put, so a build that is no longer the
+    newest can still be reinstalled. If neither names this version, the
+    newest is offered instead, saying so.
+    """
+    snap = _INTEGRITY.snapshot() if _INTEGRITY is not None else {}
+    version = snap.get("version") or APP_VERSION
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]{0,40}", version or ""):
+        return {"ok": False, "message": "This build does not know its own version."}
+
+    async def read(url: str) -> dict:
+        try:
+            data = json.loads(await _fetch_bytes(url + f"?t={int(time.time())}", 30))
+            out = {"version": str(data["version"]), "hash": str(data["hash"]),
+                   "artifact": str(data["artifact"])}
+        except Exception:  # noqa: BLE001 - not there is an answer too
+            return {}
+        if not _fork_artifact_trusted(out["artifact"]) or not re.fullmatch(r"[0-9a-f]{64}", out["hash"]):
+            return {}
+        return out
+
+    pinned = await read(f"{FORK_RAW}update-{version}.json")
+    if pinned.get("version") == version:
+        return {"ok": True, "same_version": True, **pinned, "label": _short_version(version)}
+    newest = await read(FORK_UPDATE_URL)
+    if newest.get("version") == version:
+        return {"ok": True, "same_version": True, **newest, "label": _short_version(version)}
+    if newest:
+        return {"ok": True, "same_version": False, **newest, "label": _short_version(newest["version"]),
+                "message": f"{_short_version(version)} is no longer on the release channel; "
+                           f"this installs {_short_version(newest['version'])}."}
+    return {"ok": False, "message": "The release channel could not be reached. Check the connection and try again."}
+
+
+Plugin.prepare_plugin_update = _prepare_plugin_update
+Plugin.get_install_integrity = _get_install_integrity
+Plugin.get_reinstall_target = _get_reinstall_target
+
+if _INTEGRITY is not None and _INTEGRITY.import_failures:
+    decky.logger.error(f"install integrity: modules failed to import: {_INTEGRITY.import_failures}")
+
+_wrap_jobs()

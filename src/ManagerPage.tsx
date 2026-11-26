@@ -24,7 +24,10 @@ import {
   getModsByIds,
   uninstallCollection,
   getShowAdult,
+  gbFromLocal,
+  isGameBananaId,
 } from "./api";
+import { GB_YELLOW, openGameBananaMod } from "./gamebanana";
 import { SupportedGame, getActiveGame, managedGames, modeParams } from "./games";
 import { removeMod, toggleMod } from "./install";
 import {
@@ -129,6 +132,10 @@ function Thumb({
 /** Eye button: jump to the mod's full detail page. */
 async function openModDetail(game: SupportedGame, mod: InstalledMod) {
   if (!mod.mod_id) return;
+  if (isGameBananaId(mod.mod_id)) {
+    openGameBananaMod(game, gbFromLocal(mod.mod_id));
+    return;
+  }
   const result = await getModDetails(game.nexusDomain, mod.mod_id);
   if (result.ok && result.mod) {
     setSelectedMod({ game, mod: result.mod });
@@ -195,6 +202,9 @@ function ModRow({
           {mod.name ?? mod.folder}
         </div>
         <div style={{ fontSize: "11.5px", opacity: 0.6 }}>
+          {isGameBananaId(mod.mod_id) && (
+            <span style={{ color: GB_YELLOW, fontWeight: 700 }}>GameBanana · </span>
+          )}
           {mod.version ? `v${mod.version}` : "untracked"}
           {mod.enabled ? "" : " · disabled"}
           {mod.togglable === false ? " · always active" : ""}
