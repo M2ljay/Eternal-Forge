@@ -1,0 +1,3082 @@
+{
+"source": "https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet (games.json)",
+"license": "MIT, Copyright (c) 2021 Starz0r, Curve",
+"source_sha256": "0efecbb16b75f1c447039292d13099d07616b2e14ac3c9a3a987cffd2dbdf70f",
+"generated": "2026-11-26",
+"kept": [
+"AhnLab HackShield",
+"Anti-Cheat Expert",
+"BattlEye",
+"Denuvo Anti-Cheat",
+"EA anticheat",
+"EQU8",
+"Easy Anti-Cheat",
+"FACEIT",
+"Hyperion",
+"MY.GAMES Anti-Cheat",
+"Mail.ru Anti-Cheat",
+"NEAC Protect",
+"NetEase Anti-Cheat Expert",
+"NetEase Game Security",
+"NetEase Yidun",
+"Nexon Game Security",
+"Proxima Game Anti Cheat",
+"R6 ShieldGuard",
+"RICOCHET",
+"Ricochet",
+"Seasun Protect",
+"TenProtect",
+"Vanguard",
+"WFSDrv",
+"X-Trap",
+"XIGNCODE3",
+"Zakynthos",
+"miHoYo Protect",
+"nProtect GameGuard"
+],
+"games": {
+"11610": {
+"name": "Dragon Nest",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"33900": {
+"name": "ArmA 2",
+"anticheats": [
+"BattlEye"
+]
+},
+"102700": {
+"name": "A.V.A. Alliance of Valiant Arms",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"107410": {
+"name": "ArmA 3",
+"anticheats": [
+"BattlEye"
+]
+},
+"209870": {
+"name": "Blacklight: Retribution",
+"anticheats": [
+"BattlEye"
+]
+},
+"212160": {
+"name": "Vindictus",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"212200": {
+"name": "Mabinogi",
+"anticheats": [
+"AhnLab HackShield",
+"Nexon Game Security"
+]
+},
+"212390": {
+"name": "Continent of the Ninth Seal",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"212740": {
+"name": "TERA",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"215100": {
+"name": "Ragnarok Online",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"215120": {
+"name": "ROSE Online",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"215830": {
+"name": "Closers",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"216150": {
+"name": "MapleStory",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"218230": {
+"name": "PlanetSide 2",
+"anticheats": [
+"BattlEye"
+]
+},
+"221100": {
+"name": "DayZ",
+"anticheats": [
+"BattlEye"
+]
+},
+"222880": {
+"name": "Insurgency",
+"anticheats": [
+"BattlEye"
+]
+},
+"227940": {
+"name": "Heroes & Generals",
+"anticheats": [
+"BattlEye"
+]
+},
+"231060": {
+"name": "Ragnarok Online 2",
+"anticheats": [
+"AhnLab HackShield"
+]
+},
+"236390": {
+"name": "War Thunder",
+"anticheats": [
+"BattlEye"
+]
+},
+"239660": {
+"name": "Soldier Front 2",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"242720": {
+"name": "GunZ 2: The Second Duel",
+"anticheats": [
+"X-Trap"
+]
+},
+"251570": {
+"name": "7 Days to Die",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"252490": {
+"name": "Rust",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"252950": {
+"name": "Rocket League®",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"253490": {
+"name": "Cabal Online",
+"anticheats": [
+"X-Trap",
+"nProtect GameGuard",
+"XIGNCODE3"
+]
+},
+"261550": {
+"name": "Mount & Blade II: Bannerlord",
+"anticheats": [
+"BattlEye"
+]
+},
+"266410": {
+"name": "iRacing",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"269210": {
+"name": "Hero Siege",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"271590": {
+"name": "Grand Theft Auto V",
+"anticheats": [
+"BattlEye"
+]
+},
+"273110": {
+"name": "Counter-Strike Nexon",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"291480": {
+"name": "Warface",
+"anticheats": [
+"Mail.ru Anti-Cheat"
+]
+},
+"291550": {
+"name": "Brawlhalla",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"292000": {
+"name": "No More Room In Hell 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"299360": {
+"name": "Block N Load",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"299740": {
+"name": "Miscreated",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"301520": {
+"name": "Robocraft",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"304030": {
+"name": "ArcheAge",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"304390": {
+"name": "For Honor",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"304930": {
+"name": "Unturned",
+"anticheats": [
+"BattlEye"
+]
+},
+"307950": {
+"name": "Caliber",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"314430": {
+"name": "M.A.R.S.",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"315210": {
+"name": "Suicide Squad: Kill the Justice League",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"319730": {
+"name": "Granado Espada",
+"anticheats": [
+"X-Trap"
+]
+},
+"322780": {
+"name": "Worlds Adrift",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"328060": {
+"name": "Tales Runner",
+"anticheats": [
+"X-Trap",
+"AhnLab HackShield",
+"nProtect GameGuard",
+"Easy Anti-Cheat"
+]
+},
+"331810": {
+"name": "Lost Region",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"333930": {
+"name": "Dirty Bomb",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"337410": {
+"name": "Karos",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"338540": {
+"name": "Navy Field 2 : Conqueror of the Ocean",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"339610": {
+"name": "Freestyle 2: Street Basketball",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"342570": {
+"name": "HIS (Heroes In the Sky)",
+"anticheats": [
+"X-Trap"
+]
+},
+"344760": {
+"name": "Reign of Kings",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"346110": {
+"name": "ARK: Survival Evolved",
+"anticheats": [
+"BattlEye"
+]
+},
+"349720": {
+"name": "Audition Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"350280": {
+"name": "LawBreakers",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"350700": {
+"name": "Red Stone Online",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"355840": {
+"name": "Survarium",
+"anticheats": [
+"BattlEye"
+]
+},
+"356330": {
+"name": "Dragomon Hunter",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"357500": {
+"name": "Rumble Fighter: Unleashed",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"359550": {
+"name": "Tom Clancy's Rainbow Six® Siege",
+"anticheats": [
+"BattlEye",
+"R6 ShieldGuard"
+]
+},
+"360760": {
+"name": "Run and Fire",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"361800": {
+"name": "Tree of Life",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"369200": {
+"name": "Ghost in the Shell: Stand Alone Complex - First Assault Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"372000": {
+"name": "Tree of Savior",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"375230": {
+"name": "Warhammer 40,000: Eternal Crusade",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"376210": {
+"name": "The Isle",
+"anticheats": [
+"BattlEye"
+]
+},
+"377140": {
+"name": "Hide & Hold Out - H2o",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"378860": {
+"name": "Project CARS 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"381210": {
+"name": "Dead By Daylight",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"381990": {
+"name": "Dragon Saga",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"383120": {
+"name": "Empyrion - Galactic Survival",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"384030": {
+"name": "Florensia",
+"anticheats": [
+"AhnLab HackShield"
+]
+},
+"386180": {
+"name": "Crossout",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"386360": {
+"name": "SMITE",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"389430": {
+"name": "Knight Online",
+"anticheats": [
+"X-Trap",
+"XIGNCODE3"
+]
+},
+"390090": {
+"name": "Shot Online",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"390100": {
+"name": "9Dragons",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"393380": {
+"name": "Squad",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"393420": {
+"name": "Hurtworld",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"407530": {
+"name": "ARK: Survival of the Fittest",
+"anticheats": [
+"BattlEye"
+]
+},
+"418460": {
+"name": "Rising Storm 2: Vietnam",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"419520": {
+"name": "Lifeless",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"436520": {
+"name": "Line of Sight",
+"anticheats": [
+"BattlEye"
+]
+},
+"437220": {
+"name": "The Culling",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"438100": {
+"name": "VRChat",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"438740": {
+"name": "Friday The 13th: The Game",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"439370": {
+"name": "Midair",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"440900": {
+"name": "Conan Exiles",
+"anticheats": [
+"BattlEye"
+]
+},
+"442080": {
+"name": "Riders of Icarus",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"444090": {
+"name": "Paladins",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"447040": {
+"name": "Watch_Dogs® 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"447820": {
+"name": "Day of Infamy",
+"anticheats": [
+"BattlEye"
+]
+},
+"454350": {
+"name": "Days of War",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"454650": {
+"name": "DRAGON BALL XENOVERSE 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"454910": {
+"name": "Twin Saga",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"459160": {
+"name": "Allods Online",
+"anticheats": [
+"Mail.ru Anti-Cheat"
+]
+},
+"466240": {
+"name": "Deceit",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"471710": {
+"name": "Rec Room",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"473690": {
+"name": "Absolver",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"475100": {
+"name": "KAL Online",
+"anticheats": [
+"X-Trap"
+]
+},
+"489940": {
+"name": "BATTALION: Legacy",
+"anticheats": [
+"Easy Anti-Cheat",
+"FACEIT"
+]
+},
+"495910": {
+"name": "Dungeon Fighter Online",
+"anticheats": [
+"AhnLab HackShield",
+"XIGNCODE3",
+"Nexon Game Security"
+]
+},
+"496240": {
+"name": "Onward",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"499470": {
+"name": "Decksplash",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"513710": {
+"name": "SCUM",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"518150": {
+"name": "Intruder",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"518660": {
+"name": "Zone4",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"519190": {
+"name": "Next Day: Survival",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"520530": {
+"name": "Intershelter",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"528010": {
+"name": "Eternal Return",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"536950": {
+"name": "Legend of Ares",
+"anticheats": [
+"X-Trap",
+"nProtect GameGuard"
+]
+},
+"537180": {
+"name": "Digimon Masters Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"542590": {
+"name": "SoulSaverOnline",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"544920": {
+"name": "Darwin Project",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"547860": {
+"name": "Rend",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"548290": {
+"name": "Dark Eden",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"550470": {
+"name": "NosTale",
+"anticheats": [
+"X-Trap",
+"nProtect GameGuard"
+]
+},
+"550650": {
+"name": "Black Squad",
+"anticheats": [
+"BattlEye",
+"nProtect GameGuard"
+]
+},
+"550900": {
+"name": "Metin2",
+"anticheats": [
+"X-Trap",
+"nProtect GameGuard"
+]
+},
+"552500": {
+"name": "Warhammer: Vermintide 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"552520": {
+"name": "Far Cry 5",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"553850": {
+"name": "Helldivers 2",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"555160": {
+"name": "Pavlov VR",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"555440": {
+"name": "Deathgarden: Bloodharvest",
+"anticheats": [
+"BattlEye"
+]
+},
+"556440": {
+"name": "Vicious Circle",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"560380": {
+"name": "MapleStory 2",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"569530": {
+"name": "Sky Noon",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"573100": {
+"name": "Battlefleet Gothic: Armada 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"578080": {
+"name": "PUBG: Battlegrounds",
+"anticheats": [
+"Zakynthos",
+"BattlEye"
+]
+},
+"581320": {
+"name": "Insurgency: Sandstorm",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"582660": {
+"name": "Black Desert Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"591530": {
+"name": "Hyper Universe",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"593600": {
+"name": "PixARK",
+"anticheats": [
+"BattlEye"
+]
+},
+"594650": {
+"name": "Hunt: Showdown 1896",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"594770": {
+"name": "Legends of Aria",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"610940": {
+"name": "iStorm",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"611360": {
+"name": "Video Horror Society",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"619080": {
+"name": "SOS",
+"anticheats": [
+"BattlEye"
+]
+},
+"622170": {
+"name": "Offensive Combat: Redux!",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"624910": {
+"name": "3on3 FreeStyle",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"625340": {
+"name": "XERA: Survival",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"626690": {
+"name": "Sword Art Online: Fatal Bullet",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"630700": {
+"name": "Rocket Arena",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"633230": {
+"name": "NARUTO TO BORUTO: SHINOBI STRIKER",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"644290": {
+"name": "Memories of Mars",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"646910": {
+"name": "The Crew™ 2",
+"anticheats": [
+"BattlEye"
+]
+},
+"647590": {
+"name": "Space Junkies",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"653120": {
+"name": "RockShot",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"656240": {
+"name": "Heat",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"658510": {
+"name": "Dark Eden Origin",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"660330": {
+"name": "Ragnarok RE:START",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"662320": {
+"name": "Metro Conflict: The Origin",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"671860": {
+"name": "BattleBit Remastered",
+"anticheats": [
+"Easy Anti-Cheat",
+"FACEIT"
+]
+},
+"672890": {
+"name": "Sparkball",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"674020": {
+"name": "World War 3",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"677620": {
+"name": "Splitgate",
+"anticheats": [
+"EQU8"
+]
+},
+"678950": {
+"name": "DRAGON BALL FighterZ",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"681660": {
+"name": "Bless Online",
+"anticheats": [
+"BattlEye",
+"XIGNCODE3"
+]
+},
+"686810": {
+"name": "Hell Let Loose",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"689570": {
+"name": "BattleCore Arena",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"700030": {
+"name": "Life is Feudal: MMO",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"707010": {
+"name": "Will To Live Online",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"714010": {
+"name": "Aimlabs",
+"anticheats": [
+"EQU8"
+]
+},
+"714080": {
+"name": "Black Clover: Quartet Knights",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"715400": {
+"name": "Frozen Flame",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"719890": {
+"name": "Beasts of Bermuda",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"728540": {
+"name": "Islands of Nyne: Battle Royale",
+"anticheats": [
+"BattlEye"
+]
+},
+"731620": {
+"name": "Hide or Die",
+"anticheats": [
+"EQU8"
+]
+},
+"736220": {
+"name": "Post Scriptum",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"738530": {
+"name": "New Gundam Breaker",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"747610": {
+"name": "Zula Global",
+"anticheats": [
+"BattlEye"
+]
+},
+"747920": {
+"name": "Hero Plus",
+"anticheats": [
+"X-Trap",
+"XIGNCODE3"
+]
+},
+"747970": {
+"name": "Scions of Fate",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"751240": {
+"name": "Fractured Lands",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"753650": {
+"name": "Due Process",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"755790": {
+"name": "Ring of Elysium",
+"anticheats": [
+"TenProtect"
+]
+},
+"760160": {
+"name": "Vampire: The Masquerade - Bloodhunt",
+"anticheats": [
+"Easy Anti-Cheat",
+"Anti-Cheat Expert"
+]
+},
+"761890": {
+"name": "Albion Online",
+"anticheats": [
+"Easy Anti-Cheat",
+"BattlEye"
+]
+},
+"763420": {
+"name": "Panzer Arena: Coop",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"764920": {
+"name": "Fear the Night",
+"anticheats": [
+"BattlEye"
+]
+},
+"767560": {
+"name": "War Robots",
+"anticheats": [
+"Mail.ru Anti-Cheat"
+]
+},
+"790650": {
+"name": "MARVEL End Time Arena",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"798510": {
+"name": "Super Dragon Ball Heroes World Mission",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"804810": {
+"name": "Robocraft Royale",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"805110": {
+"name": "P.A.S.",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"813820": {
+"name": "Realm Royale",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"815940": {
+"name": "AVA: Dog Tag",
+"anticheats": [
+"BattlEye"
+]
+},
+"816020": {
+"name": "JUMP FORCE",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"819500": {
+"name": "Fear the Wolves",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"820520": {
+"name": "Deceive Inc.",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"823130": {
+"name": "Totally Accurate Battlegrounds",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"834910": {
+"name": "Atlas",
+"anticheats": [
+"BattlEye"
+]
+},
+"835570": {
+"name": "Conqueror's Blade",
+"anticheats": [
+"Mail.ru Anti-Cheat",
+"MY.GAMES Anti-Cheat"
+]
+},
+"835860": {
+"name": "Dreadnought",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"838330": {
+"name": "Warlords Awakening",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"840800": {
+"name": "Outlaws of the Old West",
+"anticheats": [
+"BattlEye"
+]
+},
+"844870": {
+"name": "KurtzPel",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"867400": {
+"name": "Out of Reach: Treasure Royale",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"871120": {
+"name": "MilkChoco",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"872200": {
+"name": "Rogue Company",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"874240": {
+"name": "MU Legend",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"876460": {
+"name": "CityBattle | Virtual_Earth",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"880850": {
+"name": "War Rock",
+"anticheats": [
+"AhnLab HackShield",
+"Easy Anti-Cheat"
+]
+},
+"883120": {
+"name": "Stormdivers",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"884660": {
+"name": "CRSED: F.O.A.D.",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"886250": {
+"name": "Vegas Infinite by PokerStars",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"889750": {
+"name": "Babylon's Fall",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"890400": {
+"name": "Uncharted Waters Online",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"895400": {
+"name": "Deadside",
+"anticheats": [
+"Easy Anti-Cheat",
+"BattlEye"
+]
+},
+"903950": {
+"name": "Last Oasis",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"907630": {
+"name": "Concord",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"915810": {
+"name": "Midnight Ghost Hunt",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"918570": {
+"name": "Century: Age of Ashes",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"921940": {
+"name": "Icarus Online",
+"anticheats": [
+"XIGNCODE3",
+"nProtect GameGuard"
+]
+},
+"922620": {
+"name": "Kingshunt",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"924970": {
+"name": "Back 4 Blood",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"927130": {
+"name": "Romance of the Three Kingdoms: The Legend of CaoCao",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"927350": {
+"name": "Hood: Outlaws & Legends",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"939510": {
+"name": "Pandemic Express - Zombie Escape",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"949690": {
+"name": "Record of Lodoss War Online",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"950180": {
+"name": "Lemnis Gate",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"952070": {
+"name": "Resident Evil Resistance",
+"anticheats": [
+"Denuvo Anti-Cheat"
+]
+},
+"960170": {
+"name": "DJMAX RESPECT V",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"961200": {
+"name": "Predecessor",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"971700": {
+"name": "ALARA Prime",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"973580": {
+"name": "Sniper Ghost Warrior Contracts",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"976730": {
+"name": "Halo: The Master Chief Collection",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"985810": {
+"name": "GrandChase",
+"anticheats": [
+"X-Trap",
+"nProtect GameGuard"
+]
+},
+"991560": {
+"name": "One Punch Man: A Hero Nobody Knows",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"993870": {
+"name": "CODE2040",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"994560": {
+"name": "Metal Revolution",
+"anticheats": [
+"TenProtect"
+]
+},
+"1008580": {
+"name": "Overstep",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1009290": {
+"name": "SWORD ART ONLINE Alicization Lycoris",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1011810": {
+"name": "Elsword",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1024890": {
+"name": "Sector's Edge",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1025560": {
+"name": "Flea Madness",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1029690": {
+"name": "Sniper Elite 5",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1054690": {
+"name": "Dreadlands",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1056640": {
+"name": "Phantasy Star Online 2 (NA)",
+"anticheats": [
+"nProtect GameGuard",
+"XIGNCODE3"
+]
+},
+"1057240": {
+"name": "Crucible",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1058650": {
+"name": "Beyond the Wire",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1085660": {
+"name": "Destiny 2",
+"anticheats": [
+"BattlEye"
+]
+},
+"1088090": {
+"name": "Day of Dragons",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1093170": {
+"name": "Monstrum 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1094710": {
+"name": "Royal Crown",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1097150": {
+"name": "Fall Guys: Ultimate Knockout",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1097840": {
+"name": "Gears 5",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1106750": {
+"name": "Fault: Elder Orb",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1121710": {
+"name": "Total Lockdown",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1123160": {
+"name": "Voids Adrift",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1130700": {
+"name": "Avabel Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1133060": {
+"name": "Anarchy: Wolf's Law",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1133430": {
+"name": "Ashes of Creation Apocalypse",
+"anticheats": [
+"Easy Anti-Cheat",
+"MY.GAMES Anti-Cheat"
+]
+},
+"1147660": {
+"name": "Archeage: Unchained",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1153700": {
+"name": "Eternal Magic",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1158940": {
+"name": "Blazing Sails",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1163550": {
+"name": "Captain Tsubasa: Rise of New Champions",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1171690": {
+"name": "Wayfinder",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1172470": {
+"name": "Apex Legends",
+"anticheats": [
+"Easy Anti-Cheat",
+"Hyperion"
+]
+},
+"1172620": {
+"name": "Sea of Thieves",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1172710": {
+"name": "Dune: Awakening",
+"anticheats": [
+"BattlEye"
+]
+},
+"1175210": {
+"name": "Eternal Kingdom Battle Peak",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1180380": {
+"name": "Stay Out",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1183940": {
+"name": "Scavengers",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1184140": {
+"name": "KartRider: Drift",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"1184780": {
+"name": "Bots",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1185560": {
+"name": "Astellia",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1189800": {
+"name": "Bleeding Edge",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1190340": {
+"name": "SUPER PEOPLE",
+"anticheats": [
+"BattlEye"
+]
+},
+"1194810": {
+"name": "Meet Your Maker",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1195460": {
+"name": "Last Year",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1203220": {
+"name": "NARAKA: BLADEPOINT",
+"anticheats": [
+"NEAC Protect"
+]
+},
+"1204040": {
+"name": "Shoot on Sight",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1206370": {
+"name": "Wild Card Football",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1218740": {
+"name": "Rakion Chaos Force",
+"anticheats": [
+"nProtect GameGuard",
+"XIGNCODE3"
+]
+},
+"1219160": {
+"name": "Granado Espada Japan",
+"anticheats": [
+"X-Trap"
+]
+},
+"1222730": {
+"name": "STAR WARS™: Squadrons",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1226470": {
+"name": "Shadow Arena",
+"anticheats": [
+"nProtect GameGuard",
+"XIGNCODE3",
+"Easy Anti-Cheat"
+]
+},
+"1227800": {
+"name": "Quantum League",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1238810": {
+"name": "Battlefield V",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1238840": {
+"name": "Battlefield 1",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1240440": {
+"name": "Halo Infinite",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1241100": {
+"name": "POLYGON",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1245480": {
+"name": "SYNDUALITY Echo of Ada",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1245620": {
+"name": "Elden Ring",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1252600": {
+"name": "ANOTHER EDEN",
+"anticheats": [
+"WFSDrv"
+]
+},
+"1254120": {
+"name": "Bless Unleashed",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1262240": {
+"name": "Plants vs. Zombies: Battle for Neighborville",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1263550": {
+"name": "Combat Arms: the Classic",
+"anticheats": [
+"BattlEye",
+"nProtect GameGuard"
+]
+},
+"1268750": {
+"name": "Starship Troopers: Extermination",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1282270": {
+"name": "Strinova",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1286320": {
+"name": "Exoprimal",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1293660": {
+"name": "Gemini: Binary Conflict",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1301210": {
+"name": "Knockout City",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1313230": {
+"name": "Beautiful Light",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1342630": {
+"name": "Rappelz",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1352080": {
+"name": "SMASH LEGENDS",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1354980": {
+"name": "Decimated",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1359090": {
+"name": "Zero Hour",
+"anticheats": [
+"Denuvo Anti-Cheat"
+]
+},
+"1361210": {
+"name": "Warhammer 40,000: Darktide",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1364020": {
+"name": "Boundary",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1367080": {
+"name": "Mobile Suit Gundam Battle Operation 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1371580": {
+"name": "Myth of Empires",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1372110": {
+"name": "JoJo's Bizarre Adventure: All-Star Battle R",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1377380": {
+"name": "Night of the Dead",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1377580": {
+"name": "SoulWorker",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1379750": {
+"name": "Ragnarok: The Lost Memories",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1383550": {
+"name": "Soul Dossier",
+"anticheats": [
+"BattlEye"
+]
+},
+"1399780": {
+"name": "Spellbreak",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1401240": {
+"name": "Project Xandata",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1419640": {
+"name": "Project F",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1426440": {
+"name": "MicroVolts: Recharged",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1433140": {
+"name": "The Texas Chain Saw Massacre",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1442910": {
+"name": "Reign Of Dwarf",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1464970": {
+"name": "Dread Hunger",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1469060": {
+"name": "Midair 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1477590": {
+"name": "EZ2ON REBOOT : R",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1477730": {
+"name": "Extreme Soccer",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1491000": {
+"name": "War Robots: Frontiers",
+"anticheats": [
+"MY.GAMES Anti-Cheat"
+]
+},
+"1504620": {
+"name": "Nine to Five",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1517290": {
+"name": "Battlefield™ 2042",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1524370": {
+"name": "Astellia Royal",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1549250": {
+"name": "Undecember",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1551810": {
+"name": "Block N Load 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1556100": {
+"name": "Killer Klowns from Outer Space: The Game",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1562450": {
+"name": "Dysterra",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1563940": {
+"name": "Atlantica Europe",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1566880": {
+"name": "Sword Art Online Last Recollection",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1568590": {
+"name": "Goose Goose Duck",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1574360": {
+"name": "Uncharted Waters Origin",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1575680": {
+"name": "BlasterBeat",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1587100": {
+"name": "Anarchy Legends Online",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1599340": {
+"name": "Lost Ark",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1600360": {
+"name": "The Cycle: Frontier",
+"anticheats": [
+"BattlEye"
+]
+},
+"1607250": {
+"name": "MY HERO ULTRA RUMBLE",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1608220": {
+"name": "Sentry：Obelisk Of Dawn",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1618710": {
+"name": "Project Sparrow",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1635450": {
+"name": "Longvinter",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1648190": {
+"name": "Qanga",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1657090": {
+"name": "Mini Royale",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1658740": {
+"name": "Zyconix",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1671200": {
+"name": "Honkai Impact 3rd",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1687760": {
+"name": "Exos Heroes",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1688720": {
+"name": "HypeSquad",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1691340": {
+"name": "Steel Hunters",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1692070": {
+"name": "Crowz",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1692200": {
+"name": "DRAGON BALL: THE BREAKERS",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1695900": {
+"name": "Elyon",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1722080": {
+"name": "SYNCED",
+"anticheats": [
+"Proxima Game Anti Cheat",
+"Anti-Cheat Expert"
+]
+},
+"1724660": {
+"name": "New World: Aeternum",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1725420": {
+"name": "Mortal Online 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1743770": {
+"name": "Propnight",
+"anticheats": [
+"BattlEye"
+]
+},
+"1759220": {
+"name": "Return Alive",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1760250": {
+"name": "EA SPORTS™ Madden NFL 23",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1765520": {
+"name": "Flippin Misfits",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1769930": {
+"name": "Warcos",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1785150": {
+"name": "Friends vs Friends",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1789480": {
+"name": "Marauders",
+"anticheats": [
+"Easy Anti-Cheat",
+"Denuvo Anti-Cheat"
+]
+},
+"1790600": {
+"name": "DRAGON BALL: Sparking! ZERO",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1797880": {
+"name": "Lost Light",
+"anticheats": [
+"NetEase Anti-Cheat Expert"
+]
+},
+"1799530": {
+"name": "Smelogs Playground",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1803110": {
+"name": "Ascendant.com",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1808500": {
+"name": "ARC Raiders",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1811260": {
+"name": "EA SPORTS™ FIFA 23",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1815230": {
+"name": "Summum Aeterna",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1816670": {
+"name": "Gundam Evolution",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1818750": {
+"name": "Multiversus",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1826980": {
+"name": "FreestyleFootball R",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1827180": {
+"name": "Toram Online",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"1849250": {
+"name": "EA SPORTS™ WRC 24",
+"anticheats": [
+"EA anticheat"
+]
+},
+"1858630": {
+"name": "SWORD ART ONLINE Fractured Daydream",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1863390": {
+"name": "N-Age",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"1867420": {
+"name": "LEAP",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1872760": {
+"name": "Spirit Detective",
+"anticheats": [
+"BattlEye"
+]
+},
+"1874880": {
+"name": "ArmA Reforger",
+"anticheats": [
+"BattlEye"
+]
+},
+"1877600": {
+"name": "Midnight Guns",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1881700": {
+"name": "Undawn",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1888160": {
+"name": "Armored Core VI: Fires of Rubicon",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1903270": {
+"name": "Sunset World Online",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1908530": {
+"name": "Raise Your Tribe",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1913730": {
+"name": "Chimeraland",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1922010": {
+"name": "Breachers",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1924490": {
+"name": "Gigantic: Rampage Edition",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1928420": {
+"name": "Farlight 84",
+"anticheats": [
+"NetEase Yidun"
+]
+},
+"1938090": {
+"name": "Call of Duty: Modern Warfare II (2022)",
+"anticheats": [
+"Ricochet"
+]
+},
+"1940990": {
+"name": "Ironsight",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1955960": {
+"name": "HAWKED",
+"anticheats": [
+"MY.GAMES Anti-Cheat"
+]
+},
+"1961460": {
+"name": "PROJECT: PLAYTIME",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1962663": {
+"name": "Call of Duty: Warzone",
+"anticheats": [
+"Ricochet"
+]
+},
+"1969870": {
+"name": "Battle Teams 2",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"1973710": {
+"name": "ヘブンバーンズレッド (Heaven Burns Red)",
+"anticheats": [
+"Anti-Cheat Expert",
+"WFSDrv"
+]
+},
+"1979310": {
+"name": "Veiled Experts",
+"anticheats": [
+"BattlEye",
+"Nexon Game Security"
+]
+},
+"1985820": {
+"name": "Call of Duty: Vanguard",
+"anticheats": [
+"Ricochet"
+]
+},
+"1991140": {
+"name": "Robocraft 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"1995520": {
+"name": "Pax Dei",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2000270": {
+"name": "Dual Universe",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2012510": {
+"name": "Stormgate",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2022330": {
+"name": "The Riflemen",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2051120": {
+"name": "Hot Wheels UNLEASHED 2 - Turbocharged",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2051620": {
+"name": "Enlisted: Reinforced",
+"anticheats": [
+"Easy Anti-Cheat",
+"BattlEye"
+]
+},
+"2064870": {
+"name": "Deceit 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2073620": {
+"name": "Arena Breakout: Infinite",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"2073850": {
+"name": "THE FINALS",
+"anticheats": [
+"Easy Anti-Cheat",
+"Denuvo Anti-Cheat"
+]
+},
+"2073930": {
+"name": "Radikal Fighters",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2074920": {
+"name": "The First Descendant",
+"anticheats": [
+"Nexon Game Security",
+"Easy Anti-Cheat"
+]
+},
+"2077110": {
+"name": "Rise of Agon",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2078450": {
+"name": "Warhammer 40,000: Speed Freeks",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2083800": {
+"name": "Trimurti Online",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2087030": {
+"name": "Shatterline",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2088180": {
+"name": "Kritika Global",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2091110": {
+"name": "Hell is Others",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2107670": {
+"name": "Warhaven",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"2119490": {
+"name": "TRAHA Global",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2131860": {
+"name": "Ashfall",
+"anticheats": [
+"NEAC Protect",
+"NetEase Anti-Cheat Expert"
+]
+},
+"2139090": {
+"name": "Project ETHOS",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2139460": {
+"name": "Once Human (ROW/INTL)",
+"anticheats": [
+"NEAC Protect"
+]
+},
+"2140330": {
+"name": "EA SPORTS™ Madden NFL 24",
+"anticheats": [
+"EA anticheat"
+]
+},
+"2152790": {
+"name": "United 1944",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2167580": {
+"name": "Summoners War: Chronicles",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"2170050": {
+"name": "WolfTeam: Reboot",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2170420": {
+"name": "Starsiege: Deadzone",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2175780": {
+"name": "Dominance",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2203070": {
+"name": "Dragonheir: Silent Gods",
+"anticheats": [
+"Proxima Game Anti Cheat"
+]
+},
+"2208530": {
+"name": "Alchemia Story",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2221490": {
+"name": "Tom Clancy's The Division 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2231380": {
+"name": "Tom Clancy's Ghost Recon Breakpoint",
+"anticheats": [
+"BattlEye"
+]
+},
+"2247220": {
+"name": "Revenblade",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2257910": {
+"name": "Project Zero",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2258870": {
+"name": "Kingdom: The Blood",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2279730": {
+"name": "King Arthur: Legends Rise",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2285150": {
+"name": "The Front",
+"anticheats": [
+"Anti-Cheat Expert",
+"Easy Anti-Cheat"
+]
+},
+"2287920": {
+"name": "Battle Crush",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2290180": {
+"name": "Riders Republic",
+"anticheats": [
+"BattlEye"
+]
+},
+"2294660": {
+"name": "The Quinfall",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2302770": {
+"name": "Space Gears",
+"anticheats": [
+"BattlEye"
+]
+},
+"2304660": {
+"name": "A Twisted Path to Renown",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2340400": {
+"name": "R2BEAT (アールツービート)",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"2344320": {
+"name": "Legacy: Steel & Sorcery",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2350280": {
+"name": "Monster Jam™ Showdown",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2353050": {
+"name": "WTF: Waifu Tactical Force",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2356310": {
+"name": "Continent of the Ninth Golden",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2359600": {
+"name": "Perfect New World",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"2371630": {
+"name": "Sword Art Online: Integral Factor",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2373990": {
+"name": "Solo Leveling: Arise OVERDRIVE",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"2379390": {
+"name": "Tom Clancy’s Rainbow Six® Extraction",
+"anticheats": [
+"Denuvo Anti-Cheat"
+]
+},
+"2393590": {
+"name": "Blockade",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2394590": {
+"name": "Just Survive",
+"anticheats": [
+"BattlEye"
+]
+},
+"2399830": {
+"name": "ARK: Survival Ascended",
+"anticheats": [
+"BattlEye"
+]
+},
+"2411280": {
+"name": "The Bornless",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2429640": {
+"name": "Throne and Liberty",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2437170": {
+"name": "Smite 2",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2445510": {
+"name": "Contenders: Arena",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2448970": {
+"name": "Dungeonborne",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"2450450": {
+"name": "MEGATON MUSASHI W: WIRED",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2452280": {
+"name": "Mecha BREAK",
+"anticheats": [
+"Anti-Cheat Expert",
+"Seasun Protect"
+]
+},
+"2468730": {
+"name": "Dungeon Stalkers",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"2479810": {
+"name": "Gray Zone Warfare",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2484250": {
+"name": "ASTRA: Knights of Veda",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"2488620": {
+"name": "F1® 24",
+"anticheats": [
+"EA anticheat"
+]
+},
+"2552340": {
+"name": "TEMPEST: Tower of Probatio",
+"anticheats": [
+"nProtect GameGuard"
+]
+},
+"2562000": {
+"name": "Argo",
+"anticheats": [
+"BattlEye"
+]
+},
+"2581700": {
+"name": "MotoGP™24",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2582960": {
+"name": "NAKWON: LAST PARADISE",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"2590150": {
+"name": "Faaast Penguin",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2622380": {
+"name": "Elden Ring: Nightreign",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2641470": {
+"name": "Spectre Divide",
+"anticheats": [
+"BattlEye"
+]
+},
+"2668080": {
+"name": "Snowbreak: Containment Zone (ROW/INTL)",
+"anticheats": [
+"Seasun Protect"
+]
+},
+"2669320": {
+"name": "EA SPORTS FC™ 25",
+"anticheats": [
+"EA anticheat"
+]
+},
+"2682580": {
+"name": "DUCKSIDE",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2698940": {
+"name": "The Crew™ Motorfest",
+"anticheats": [
+"BattlEye"
+]
+},
+"2705130": {
+"name": "Exoborne",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2730410": {
+"name": "Sweet Time",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2767030": {
+"name": "Marvel Rivals",
+"anticheats": [
+"NetEase Game Security"
+]
+},
+"2790930": {
+"name": "Velev",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2799860": {
+"name": "INAZUMA ELEVEN: Victory Road",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2803360": {
+"name": "Project L33T",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2805060": {
+"name": "Diabotical Rogue",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2807960": {
+"name": "Battlefield 6",
+"anticheats": [
+"EA anticheat"
+]
+},
+"2818260": {
+"name": "Vigor",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2827230": {
+"name": "Wild Assault",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2853730": {
+"name": "Skull and Bones",
+"anticheats": [
+"BattlEye"
+]
+},
+"2854480": {
+"name": "Blindfire",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2878600": {
+"name": "Harry Potter: Quidditch Champions",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2878980": {
+"name": "NBA 2K25",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2933620": {
+"name": "Call of Duty: Black Ops 6",
+"anticheats": [
+"Ricochet"
+]
+},
+"2939830": {
+"name": "Dungeon Done",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"2943650": {
+"name": "FragPunk",
+"anticheats": [
+"NEAC Protect"
+]
+},
+"2963870": {
+"name": "Metal Slug: Awakening",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"3004100": {
+"name": "Freedom Wars Remastered",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"3065800": {
+"name": "Marathon",
+"anticheats": [
+"BattlEye"
+]
+},
+"3077390": {
+"name": "MotoGP™25",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"3092660": {
+"name": "Reverse: 1999",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"3126180": {
+"name": "Tarisland",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"3126860": {
+"name": "Legends of Kailrate",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+},
+"3218230": {
+"name": "ArcheAge Chronicles",
+"anticheats": [
+"XIGNCODE3"
+]
+},
+"3230400": {
+"name": "EA SPORTS™ Madden NFL 26",
+"anticheats": [
+"EA anticheat"
+]
+},
+"3513350": {
+"name": "Wuthering Waves",
+"anticheats": [
+"Anti-Cheat Expert"
+]
+},
+"3557620": {
+"name": "Blue Archive",
+"anticheats": [
+"Nexon Game Security"
+]
+},
+"3606480": {
+"name": "Call of Duty: Black Ops 7",
+"anticheats": [
+"Ricochet"
+]
+},
+"3659280": {
+"name": "Off The Grid",
+"anticheats": [
+"Easy Anti-Cheat"
+]
+}
+}
+}
