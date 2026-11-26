@@ -1,9 +1,11 @@
-// Forge's two switches, kept in the Steam UI's localStorage: they only
-// change what the frontend draws, so the backend never needs them.
+// Forge's switches, kept in the Steam UI's localStorage: they only change
+// what the frontend does in Steam, so the backend never needs them. All on
+// by default.
 
 const KEYS = {
   gamePage: "forge.gamePageSection",
   tileDots: "forge.tileDots",
+  moddedCollection: "forge.moddedCollection",
 } as const;
 
 export type ForgeSetting = keyof typeof KEYS;

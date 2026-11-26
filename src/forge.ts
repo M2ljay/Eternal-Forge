@@ -1,6 +1,7 @@
 // Forge's background half: tells the backend which games it manages, keeps
-// the tile-dot stylesheet in Steam's main window, and feeds game starts and
-// exits to the crash guard.
+// the tile-dot stylesheet in Steam's main window and the Steam collection
+// "Modded" (moddedSync.ts), and feeds game starts and exits to the crash
+// guard.
 import { Navigation, findSP } from "@decky/ui";
 import { toaster } from "@decky/api";
 
@@ -8,6 +9,7 @@ import { forgeGuardExit, forgeGuardLaunch, forgeRegisterGames, forgeUpdateDots, 
 import { DOT_STYLE_ID, appsWithUpdates, dotCss, modSet, offerToast } from "./forgeRules";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { getSupportedGame, managedGames, modeParams } from "./games";
+import { startModdedCollection } from "./moddedSync";
 import { subscribeGameState } from "./state";
 
 /** Domain, app id and folder of every managed game, for the backend's
@@ -74,7 +76,9 @@ export function startForgeBackground(): () => void {
   const unsubSettings = subscribeForgeSettings(() =>
     writeStyle(getForgeSetting("tileDots") ? lastCss : "")
   );
+  const stopModded = startModdedCollection();
   return () => {
+    stopModded();
     clearTimeout(first);
     clearInterval(every);
     unsubState();

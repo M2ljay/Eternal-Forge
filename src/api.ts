@@ -2783,3 +2783,31 @@ export const forgeUpdateDots = callable<
     refreshed: string[];
   }
 >("forge_update_dots");
+
+/** [appId, domain, mods on] per game, counted from get_installed_mods (-1:
+ * could not read, keep what was known). complete: the entries are every
+ * managed game, so any other game stops counting as modded. */
+export const forgeNoteModded = callable<
+  [entries: [number, string, number][], complete: boolean],
+  { ok: boolean; modded: number[] }
+>("forge_note_modded");
+
+export interface ForgeModdedCollectionRecord {
+  id?: string;
+  name?: string;
+  added?: number[];
+  clash?: string;
+}
+
+/** Local only: the games with a mod on, the domains with install records,
+ * and the record of the collection Forge created ({} when none). */
+export const forgeModdedState = callable<
+  [],
+  { ok: boolean; modded: number[]; domains: string[]; collection: ForgeModdedCollectionRecord }
+>("forge_modded_state");
+
+/** Record (or with {} forget) the collection Forge created. */
+export const forgeSetModdedCollection = callable<
+  [record: ForgeModdedCollectionRecord],
+  { ok: boolean; collection: ForgeModdedCollectionRecord }
+>("forge_set_modded_collection");

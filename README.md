@@ -405,5 +405,13 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   updates, from a six-hour cache of Nexus versions (three games per check at
   most, also filled by the Updates page). Pure CSS that matches nothing if
   Steam changes its markup.
+- **Modded collection.** A Steam collection "Modded" with every game that
+  has at least one mod on, updated when mods are switched, installed or
+  removed (crash restore and anti-cheat lock included) and at load. Offline,
+  no Nexus calls. Forge only ever touches the collection it created: a
+  "Modded" of your own is left alone (Forge's is then "Modded (Forge)"), and
+  games you added by hand are never taken out.
 
-Both game page features can be turned off in Settings, under **Game page**.
+These can be turned off in Settings, under **Game page**. Turning off the
+Modded collection leaves it as it is; **Remove Modded collection** deletes
+only Forge's own.

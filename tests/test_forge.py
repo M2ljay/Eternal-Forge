@@ -436,5 +436,115 @@ class UpdateDotTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class ModdedRuleTests(unittest.TestCase):
+    """Which games belong in the Steam collection "Modded"."""
+
+    def test_a_game_with_a_mod_on_is_in_and_with_none_on_is_out(self):
+        m = fg.note_modded({}, [[413150, "stardewvalley", 2], [892970, "valheim", 0]], 100)
+        self.assertEqual(fg.modded_apps(m), [413150])
+        m = fg.note_modded(m, [[413150, "stardewvalley", 0]], 200)
+        self.assertEqual(fg.modded_apps(m), [])
+
+    def test_a_partial_note_leaves_the_other_games_alone(self):
+        m = fg.note_modded({}, [[1, "a", 1], [2, "b", 3]], 100)
+        m = fg.note_modded(m, [[2, "b", 0]], 200)
+        self.assertEqual(fg.modded_apps(m), [1])
+
+    def test_a_complete_note_drops_games_it_does_not_name(self):
+        m = fg.note_modded({}, [[1, "a", 1], [2, "b", 1]], 100)
+        m = fg.note_modded(m, [[1, "a", 1]], 200, complete=True)
+        self.assertEqual(fg.modded_apps(m), [1])
+
+    def test_an_unreadable_count_keeps_what_was_known(self):
+        m = fg.note_modded({}, [[1, "a", 1]], 100)
+        m = fg.note_modded(m, [[1, "a", fg.MODDED_UNKNOWN], [2, "b", fg.MODDED_UNKNOWN]], 200, complete=True)
+        self.assertEqual(fg.modded_apps(m), [1])
+        self.assertEqual(m["1"]["at"], 100)
+
+    def test_junk_entries_are_ignored(self):
+        m = fg.note_modded({}, [None, [0, "a", 1], ["x", "a", 1], [5, "a"], [-3, "a", 1], [7, "g", "2"]], 1)
+        self.assertEqual(fg.modded_apps(m), [7])
+
+    def test_collection_record_keeps_only_what_forge_needs(self):
+        self.assertEqual(fg.clean_collection_record(None), {})
+        self.assertEqual(fg.clean_collection_record({"name": "Modded"}), {})
+        self.assertEqual(fg.clean_collection_record({"id": "x" * 200}), {})
+        rec = fg.clean_collection_record({"id": "uc-abc", "name": "Modded (Forge)", "added": [3, "2", 3, -1, "z"],
+                                          "clash": "Modded", "other": 1})
+        self.assertEqual(rec, {"id": "uc-abc", "name": "Modded (Forge)", "added": [2, 3], "clash": "Modded"})
+
+
+class ModdedBackendTests(unittest.TestCase):
+    def setUp(self):
+        reset_forge()
+        main._save_settings({"api_key": "test-key",
+                             "installed": {"stardewvalley": {"SMAPI": {"mod_id": 1}}, "valheim": {}}})
+        self.plugin = main.Plugin()
+        run(self.plugin.forge_register_games([["eldenring", 1245620, "ELDEN RING"],
+                                              ["stardewvalley", 413150, "Stardew Valley"]]))
+        self.events = []
+
+        async def emit(event, *args):
+            self.events.append((event, *args))
+
+        self.emit = mock.patch.object(main.decky, "emit", emit)
+        self.emit.start()
+
+    def tearDown(self):
+        self.emit.stop()
+        reset_forge()
+
+    def test_state_survives_and_needs_no_network(self):
+        with mock.patch.object(main, "_resolve_game_id", side_effect=AssertionError("network")):
+            r = run(self.plugin.forge_note_modded([[413150, "stardewvalley", 2]], False))
+            self.assertEqual(r["modded"], [413150])
+            st = run(self.plugin.forge_modded_state())
+        self.assertEqual(st["modded"], [413150])
+        self.assertEqual(st["domains"], ["stardewvalley"])  # valheim has no records
+        self.assertEqual(st["collection"], {})
+        self.assertEqual(main._forge_read(main.FORGE_STATE)["modded"]["413150"]["domain"], "stardewvalley")
+
+    def test_the_load_scan_replaces_the_whole_set(self):
+        run(self.plugin.forge_note_modded([[1, "a", 1], [413150, "stardewvalley", 1]], False))
+        r = run(self.plugin.forge_note_modded([[413150, "stardewvalley", 1]], True))
+        self.assertEqual(r["modded"], [413150])
+
+    def test_collection_record_round_trip_and_forget(self):
+        run(self.plugin.forge_set_modded_collection({"id": "uc-1", "name": "Modded", "added": [413150]}))
+        self.assertEqual(run(self.plugin.forge_modded_state())["collection"],
+                         {"id": "uc-1", "name": "Modded", "added": [413150]})
+        run(self.plugin.forge_set_modded_collection({}))
+        self.assertEqual(run(self.plugin.forge_modded_state())["collection"], {})
+
+    def test_switching_mods_tells_the_frontend_which_game(self):
+        run(self.plugin.set_mod_enabled("Stardew Valley", "Mods", "Nope", False, "folder",
+                                        "stardewvalley", 413150))
+        self.assertIn(("forge_mods_changed", "stardewvalley", 413150), self.events)
+
+    def test_switching_all_off_for_a_locked_game_is_announced(self):
+        # The anti-cheat lock's "switch mods off" is set_all_mods_enabled(False).
+        run(self.plugin.set_all_mods_enabled("ELDEN RING", "mods", False, "folder", "eldenring", 1245620))
+        self.assertIn(("forge_mods_changed", "eldenring", 1245620), self.events)
+
+    def test_a_refused_call_changed_nothing_and_says_nothing(self):
+        r = run(self.plugin.install_mod(*install_args()))
+        self.assertTrue(r["anticheat_locked"])
+        self.assertEqual([e for e in self.events if e[0] == "forge_mods_changed"], [])
+
+    def test_a_call_without_a_domain_asks_for_a_full_recount(self):
+        run(self.plugin.install_fomod("no-such-token", [], False))
+        self.assertIn(("forge_mods_changed", "", 0), self.events)
+
+    def test_every_announcing_method_exists_and_keeps_its_signature(self):
+        import inspect
+        for name in main._FORGE_MOD_CHANGES:
+            self.assertTrue(hasattr(main.Plugin, name), name)
+        self.assertIn("set_all_mods_enabled", main._FORGE_MOD_CHANGES)
+        self.assertIn("uninstall_mod", main._FORGE_MOD_CHANGES)
+        self.assertNotIn("run_mod_program", main._FORGE_MOD_CHANGES)
+        params = list(inspect.signature(main.Plugin.uninstall_mod).parameters)
+        self.assertEqual(params[:3], ["self", "game_domain", "install_dir"])
+
+
 if __name__ == "__main__":
     unittest.main()

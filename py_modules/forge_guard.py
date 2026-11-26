@@ -1,5 +1,6 @@
-"""Forge: the anti-cheat lock, the way back after a crash, and the mod
-update counts behind the game page's Mods section and the tile dots.
+"""Forge: the anti-cheat lock, the way back after a crash, the mod
+update counts behind the game page's Mods section and the tile dots, and
+which games belong in the Steam collection "Modded".
 
 Pure logic only - no Decky, no network, no settings file. main.py owns the
 state file, the Plugin methods and the wrappers that refuse installs.
@@ -401,3 +402,84 @@ def updates_from_versions(records: dict, versions: dict, norm, is_newer) -> list
         if is_newer(cur, norm(rec.get("page_version") or rec.get("version"))):
             out.append(folder)
     return sorted(out)
+
+
+# ---- Modded collection ------------------------------------------------------------
+# Which games have at least one mod on through Forge, and the Steam collection
+# Forge made for them. The frontend counts the mods (from get_installed_mods,
+# disk being the truth) and does the collection work through Steam's
+# collectionStore; this keeps what both need to survive a restart.
+
+# A count the frontend could not read this time: keep what was known.
+MODDED_UNKNOWN = -1
+COLLECTION_ID_MAX = 64
+COLLECTION_NAME_MAX = 64
+COLLECTION_APPS_MAX = 5000
+
+
+def note_modded(modded: dict, entries, now: float, complete: bool = False) -> dict:
+    """New {app_id: {domain, on, at}} map from [app_id, domain, on] entries.
+
+    A game with at least one mod on stays or goes in; one with none goes
+    out. With complete, the entries are every managed game: an app left
+    out of them is dropped, and an entry whose count is MODDED_UNKNOWN
+    keeps its previous state instead of being read as "none on"."""
+    old = modded if isinstance(modded, dict) else {}
+    out = {} if complete else dict(old)
+    for e in entries or []:
+        if not isinstance(e, (list, tuple)) or len(e) < 3:
+            continue
+        try:
+            app_id, on = int(e[0]), int(e[2])
+        except (TypeError, ValueError):
+            continue
+        if app_id <= 0:
+            continue
+        key = str(app_id)
+        if on < 0:
+            if key in old:
+                out[key] = old[key]
+            continue
+        if on > 0:
+            out[key] = {"domain": str(e[1] or ""), "on": on, "at": int(now)}
+        else:
+            out.pop(key, None)
+    return out
+
+
+def modded_apps(modded: dict) -> list:
+    """App ids with at least one mod on, ascending."""
+    out = []
+    for key, entry in (modded or {}).items():
+        try:
+            app_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        if app_id > 0 and isinstance(entry, dict) and int(entry.get("on") or 0) > 0:
+            out.append(app_id)
+    return sorted(out)
+
+
+def clean_collection_record(rec) -> dict:
+    """The record of the collection Forge created: its Steam id, the name it
+    was given, the games Forge itself put in it, and the name that was
+    already taken when Forge had to pick another. {} when there is none."""
+    if not isinstance(rec, dict):
+        return {}
+    cid = rec.get("id")
+    if not isinstance(cid, str) or not cid or len(cid) > COLLECTION_ID_MAX:
+        return {}
+    name = rec.get("name") if isinstance(rec.get("name"), str) else ""
+    added = []
+    for a in rec.get("added") or []:
+        try:
+            a = int(a)
+        except (TypeError, ValueError):
+            continue
+        if a > 0 and a not in added:
+            added.append(a)
+    out = {"id": cid, "name": name[:COLLECTION_NAME_MAX], "added": sorted(added)[:COLLECTION_APPS_MAX]}
+    clash = rec.get("clash")
+    if isinstance(clash, str) and clash:
+        out["clash"] = clash[:COLLECTION_NAME_MAX]
+    return out

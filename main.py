@@ -37495,7 +37495,7 @@ def _forge_write(path: str, data: dict) -> None:
 
 def _forge_state() -> dict:
     st = _forge_read(FORGE_STATE)
-    for key in ("games", "overrides", "guard"):
+    for key in ("games", "overrides", "guard", "modded", "collection"):
         if not isinstance(st.get(key), dict):
             st[key] = {}
     return st
@@ -37775,7 +37775,43 @@ async def _forge_update_dots(self, domains: list, refresh: bool = False) -> dict
     return {"ok": True, "games": out, "refreshed": refreshed}
 
 
+async def _forge_note_modded(self, entries: list, complete: bool = False) -> dict:
+    """[app_id, domain, mods on] per game, counted by the frontend from
+    get_installed_mods. complete: these are all the managed games (the
+    load-time scan), so any other game is no longer modded."""
+    now = time.time()
+    with _FORGE_LOCK:
+        st = _forge_state()
+        st["modded"] = forge_guard.note_modded(st["modded"], (entries or [])[:2000], now, bool(complete))
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, "modded": forge_guard.modded_apps(st["modded"])}
+
+
+async def _forge_modded_state(self) -> dict:
+    """What the Modded collection reconcile needs, all local: the games
+    with a mod on, the domains that have install records at all (the only
+    ones worth scanning at load) and Forge's own collection record."""
+    st = _forge_state()
+    return {"ok": True, "modded": forge_guard.modded_apps(st["modded"]),
+            "domains": _modded_domains(_load_settings()),
+            "collection": forge_guard.clean_collection_record(st["collection"])}
+
+
+async def _forge_set_modded_collection(self, record: dict) -> dict:
+    """Remember the collection Forge created ({} forgets it). Only a
+    collection recorded here is ever changed or deleted by Forge."""
+    rec = forge_guard.clean_collection_record(record)
+    with _FORGE_LOCK:
+        st = _forge_state()
+        st["collection"] = rec
+        _forge_write(FORGE_STATE, st)
+    return {"ok": True, "collection": rec}
+
+
 Plugin.forge_register_games = _forge_register_games
+Plugin.forge_note_modded = _forge_note_modded
+Plugin.forge_modded_state = _forge_modded_state
+Plugin.forge_set_modded_collection = _forge_set_modded_collection
 Plugin.forge_game_status = _forge_game_status
 Plugin.forge_set_anticheat_override = _forge_set_anticheat_override
 Plugin.forge_guard_launch = _forge_guard_launch
@@ -37859,3 +37895,68 @@ def _wrap_anticheat_lock() -> None:
 
 
 _wrap_anticheat_lock()
+
+
+# ---- Forge: tell the frontend when a game's mods may have changed ------------
+# The Modded collection follows which games have a mod on. Every call that can
+# put a mod in, switch one, or take one out ends with a "forge_mods_changed"
+# event naming the game (domain, app id; "" / 0 when the call does not say),
+# and the frontend recounts that game from disk, debounced. The crash guard's
+# restore and the anti-cheat lock's "switch mods off" go through these same
+# calls, so they are covered without knowing about them. Wrapped last, so a
+# call the anti-cheat gate refused (nothing changed) sends nothing.
+# run_mod_program is left out: it returns before the program has run (the
+# result comes later as "mod_program_done") and never changes which mods are on.
+_FORGE_MOD_CHANGES = tuple(n for n in _FORGE_GATED if n != "run_mod_program") + (
+    "install_fomod",
+    "install_fomod_auto",
+    "uninstall_mod",
+    "uninstall_all_mods",
+    "uninstall_collection",
+    "reset_game_modding",
+    "uninstall_frosty_mod",
+    "reset_frosty",
+    "park_failing_mods",
+    "disable_failing_mods",
+    "disable_plugins",
+    "disable_blocked_plugins",
+)
+
+
+def _wrap_mod_change_events() -> None:
+    for name in _FORGE_MOD_CHANGES:
+        original = getattr(Plugin, name, None)
+        if original is None:
+            continue
+        try:
+            sig = inspect.signature(original)
+        except (TypeError, ValueError):
+            continue
+
+        def make(original, sig):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                result = await original(self, *args, **kwargs)
+                if isinstance(result, dict) and result.get("anticheat_locked"):
+                    return result
+                try:
+                    bound = sig.bind_partial(self, *args, **kwargs).arguments
+                except TypeError:
+                    bound = {}
+                domain = bound.get("game_domain")
+                domain = domain if isinstance(domain, str) and re.fullmatch(r"[a-z0-9_-]+", domain) else ""
+                try:
+                    app_id = int(bound.get("app_id") or 0)
+                except (TypeError, ValueError):
+                    app_id = 0
+                try:
+                    await decky.emit("forge_mods_changed", domain, app_id)
+                except Exception as e:  # noqa: BLE001 - the change itself already happened
+                    decky.logger.info(f"forge: mods-changed event not sent: {e}")
+                return result
+            return wrapper
+
+        setattr(Plugin, name, make(original, sig))
+
+
+_wrap_mod_change_events()
