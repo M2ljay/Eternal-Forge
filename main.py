@@ -38977,6 +38977,123 @@ async def _forge_rom_cheat_stage(self, app_id: int, source: str, path: str, coll
     return {"ok": True, "entry": entry, "kind": "cheat"}
 
 
+# ---- PS2 cheats from GameHacking.org (anygame.74) -------------------------------
+# For the user's personal, non-commercial use while he asks the site for
+# permission. Rules, politeness and the one-line kill switch
+# (GAMEHACKING_ENABLED) are in py_modules/gamehacking.py; the user's switch
+# is settings.json "gamehacking_enabled" (default on). Only on a user's
+# press, robots.txt first, a few spaced requests, cached a week, no cookies.
+
+gamehacking = _guarded_import("gamehacking")
+_GH_CLIENT = None
+_GH_SESSION = None
+
+
+async def _gh_transport(method: str, url: str, headers: dict, body: str):
+    global _GH_SESSION
+    if _GH_SESSION is None or _GH_SESSION.closed:
+        # Its own session with no cookie jar: nothing from the site is kept.
+        _GH_SESSION = aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
+    async with _GH_SESSION.request(method, url, headers=headers, data=body or None, ssl=SSL_CONTEXT,
+                                   timeout=aiohttp.ClientTimeout(total=30), allow_redirects=False) as resp:
+        data = await resp.content.read(gamehacking.MAX_PNACH_BYTES + 1)
+        return resp.status, dict(resp.headers), data
+
+
+def _gh_client():
+    global _GH_CLIENT
+    if _GH_CLIENT is None:
+        _GH_CLIENT = gamehacking.Client(_gh_transport, APP_VERSION,
+                                        os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "gamehacking"),
+                                        sleep=asyncio.sleep)
+    return _GH_CLIENT
+
+
+def _gh_user_on() -> bool:
+    return _load_settings().get("gamehacking_enabled") is not False
+
+
+def _gh_refusal(reason: str, message: str) -> dict:
+    return {"ok": False, "reason": reason, "message": message, "link": gamehacking.LINK_OUT}
+
+
+def _gh_gate():
+    if not gamehacking.GAMEHACKING_ENABLED:
+        return _gh_refusal("removed", "GameHacking.org isn't used by this build of Forge.")
+    if not _gh_user_on():
+        return _gh_refusal("off", "GameHacking.org cheats are switched off in Forge's Settings.")
+    return None
+
+
+async def _forge_gh_status(self) -> dict:
+    c = _GH_CLIENT
+    return {"ok": True, "available": bool(gamehacking.GAMEHACKING_ENABLED), "enabled": _gh_user_on(),
+            "stopped": bool(c and c.failures >= gamehacking.MAX_FAILURES), "link": gamehacking.LINK_OUT}
+
+
+async def _forge_gh_set_enabled(self, enabled: bool) -> dict:
+    settings = _load_settings()
+    settings["gamehacking_enabled"] = bool(enabled)
+    _save_settings(settings)
+    return await _forge_gh_status(self)
+
+
+async def _forge_gh_find(self, serial: str, title: str) -> dict:
+    """GameHacking.org games for one PS2 ROM (the user pressed the button)."""
+    refused = _gh_gate()
+    if refused:
+        return refused
+    try:
+        games = await _gh_client().find(serial or "", title or "")
+    except gamehacking.Unavailable as e:
+        decky.logger.info(f"gamehacking: find refused ({e.reason})")
+        return _gh_refusal(e.reason, e.message)
+    return {"ok": True, "candidates": games, "link": gamehacking.LINK_OUT}
+
+
+async def _forge_gh_stage(self, app_id: int, game_href: str, serial: str, collector_folder: str) -> dict:
+    """The game's pnach export, saved at the top of The Collector's Downloads
+    under its own name (The Collector renames it to <SERIAL>_<CRC>.pnach)."""
+    refused = _gh_gate()
+    if refused:
+        return refused
+    downloads = _rom_downloads(collector_folder)
+    if not downloads:
+        return {"ok": False, "reason": "downloads_mismatch",
+                "message": "The Collector reads a Downloads folder Forge can't confirm as yours, so nothing was put there."}
+    name_hint = rom_mods.safe_entry_base(gamehacking.norm_serial(serial) or "gamehacking")
+    try:
+        got = await _gh_client().pnach(game_href or "", name_hint)
+    except gamehacking.Unavailable as e:
+        decky.logger.info(f"gamehacking: export refused ({e.reason})")
+        return _gh_refusal(e.reason, e.message)
+    base = rom_mods.safe_entry_base(os.path.basename(got["name"].replace("\\", "/")))
+    if not base.lower().endswith(".pnach"):
+        base += ".pnach"
+    try:
+        entry = rom_mods.stage_entry_name(base, base, os.listdir(downloads))
+    except OSError as e:
+        return {"ok": False, "reason": "io_error", "message": f"Could not read Downloads: {e}"}
+    target = os.path.join(downloads, entry)
+
+    def write():
+        tmp = target + ".forge-part"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(got["data"])
+        os.replace(tmp, target)
+    try:
+        await asyncio.to_thread(write)
+    except OSError as e:
+        return {"ok": False, "reason": "io_error", "message": f"Could not write into Downloads: {e}"}
+    _rom_store().note_staged(entry)
+    decky.logger.info(f"gamehacking: staged a pnach for app {int(app_id)} as {entry!r}")
+    return {"ok": True, "entry": entry, "kind": "cheat"}
+
+
+Plugin.forge_gh_status = _forge_gh_status
+Plugin.forge_gh_set_enabled = _forge_gh_set_enabled
+Plugin.forge_gh_find = _forge_gh_find
+Plugin.forge_gh_stage = _forge_gh_stage
 Plugin.forge_rom_cheat_sources = _forge_rom_cheat_sources
 Plugin.forge_rom_cheat_stage = _forge_rom_cheat_stage
 Plugin.forge_rom_link = _forge_rom_link

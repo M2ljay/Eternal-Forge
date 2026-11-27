@@ -21,7 +21,11 @@ import {
   RomLinks,
   RomModRecord,
   RomUpdate,
+  GhGame,
   RomCheatCandidate,
+  forgeGhFind,
+  forgeGhStage,
+  forgeGhStatus,
   forgeRomCheatSources,
   forgeRomCheatStage,
   forgeRomForget,
@@ -212,7 +216,9 @@ function sourceName(s: RomSource): string {
     ? "GameBanana"
     : s === "nexus"
       ? "Nexus Mods"
-      : s === "ctrpf"
+      : s === "gamehacking"
+        ? "GameHacking.org"
+        : s === "ctrpf"
         ? "CTRPF cheat codes"
         : s === "libretro"
           ? "libretro cheats"
@@ -372,7 +378,13 @@ async function installFor(ctx: RomPageContext, args: Omit<RomInstallArgs, "appId
     {
       bridge: b,
       stage: (file: RomModFile, source: RomSource, folder: string) =>
-        source === "ctrpf" || source === "libretro"
+        source === "gamehacking"
+          ? forgeGhStage(ctx.appId, file.path ?? "", file.domain ?? "", folder).then((r) => ({
+              ok: r.ok,
+              entry: r.entry,
+              error: r.ok ? undefined : ghWhy(r),
+            }))
+          : source === "ctrpf" || source === "libretro"
           ? forgeRomCheatStage(ctx.appId, source, file.path ?? "", folder)
           : forgeRomStage(ctx.appId, source, file.mod_id, file.file_id, file.file_name, file.name, folder, file.domain ?? ""),
       unstage: (entry: string, folder: string) => forgeRomUnstage(entry, folder),
@@ -814,6 +826,56 @@ function Links({ links }: { links?: LinkOut[] }) {
   );
 }
 
+// ---- GameHacking.org (PS2 .pnach, personal use) ---------------------------------------
+// Only on the user's press, for this one game; the backend reads robots.txt
+// first, spaces its few requests and caches a week (py_modules/gamehacking.py).
+// Any refusal shows why and links out to the site.
+
+function ghWhy(r: { message?: string; error?: string }): string {
+  return r.message ?? r.error ?? "GameHacking.org can't be used right now.";
+}
+
+function ghRefusal(r: { message?: string; error?: string; link?: string }): void {
+  const link = r.link ?? "https://gamehacking.org/system/ps2";
+  showModal(
+    <ConfirmModal
+      strTitle="GameHacking.org"
+      strDescription={`${ghWhy(r)} You can open the site in the browser instead, export the .pnach, save it in Downloads and use Cheat file from Downloads.`}
+      strOKButtonText="Open GameHacking.org"
+      strCancelButtonText="Close"
+      onOK={() => openLink({ label: "GameHacking.org", url: link, note: "" })}
+    />
+  );
+}
+
+async function fromGameHacking(ctx: RomPageContext, serial: string, target: ModTarget): Promise<void> {
+  const r = await forgeGhFind(serial, ctx.name);
+  if (!r.ok) {
+    ghRefusal(r);
+    return;
+  }
+  const games: GhGame[] = r.candidates ?? [];
+  if (!games.length) {
+    ghRefusal({ message: `GameHacking.org lists no PS2 game with serial ${serial || "(unknown)"} or this title.`, link: r.link });
+    return;
+  }
+  const pick =
+    games.length === 1 && games[0].score >= 100
+      ? games[0]
+      : await choose(
+          "Which game on GameHacking.org?",
+          games.map((g) => ({ label: g.title, description: [g.serial, g.score >= 100 ? "serial matches" : ""].filter(Boolean).join(" · "), value: g })),
+          "Cheats from GameHacking.org. Matched by serial first, then title."
+        );
+  if (!pick) return;
+  await installFor(
+    ctx,
+    { source: "gamehacking", file: { path: pick.href, mod_id: 0, file_id: 0, file_name: `${serial || pick.title}.pnach`, name: `${pick.title} (GameHacking.org)`, domain: serial } },
+    "cheats.pnach",
+    target
+  );
+}
+
 // ---- Cheat files ---------------------------------------------------------------------
 
 /** Cheat files Forge can fetch for this ROM (Azahar: CTRPF by Title ID;
@@ -888,7 +950,11 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
   const b = bridge();
   const [busy, setBusy] = useState(false);
   const [saves, setSaves] = useState<boolean | undefined>();
+  const [gh, setGh] = useState<{ available: boolean; enabled: boolean } | undefined>();
   const busyRef = useRef(false);
+  useEffect(() => {
+    forgeGhStatus().then(setGh).catch(() => undefined);
+  }, []);
   useEffect(() => {
     let live = true;
     Promise.resolve(b?.getRomInfo?.(ctx.appId))
@@ -1222,10 +1288,16 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
                 {emulator === "azahar" ? "Find cheats (CTRPF)" : "Find cheats (libretro)"}
               </DialogButton>
             )}
+            {emulator === "pcsx2" && gh?.available && gh.enabled && (
+              <DialogButton disabled={!can || busy} onClick={() => void run(() => fromGameHacking(ctx, gameId, t))} style={{ flex: "1 1 0" }}>
+                Find cheats (GameHacking.org)
+              </DialogButton>
+            )}
             <DialogButton disabled={!can || busy} onClick={() => void run(() => cheatFromDownloads(ctx, t))} style={{ flex: "1 1 0" }}>
               Cheat file from Downloads
             </DialogButton>
           </Focusable>
+          {emulator === "pcsx2" && gh?.available && gh.enabled && line("Cheats from GameHacking.org (fetched only when you press Find).", STEEL_MUTED)}
           <SettingLine targetId={t.target_id} setting={t.setting} cheats />
         </Focusable>
       ))}

@@ -141,3 +141,9 @@ name, The Collector previews it and writes it as the emulator's cheat file,
 keeping the one it replaces in `romm-mod-backups`. Switching a built-in
 code or patch on or off is The Collector's `setBuiltin`, which backs up the
 settings file it edits; Forge asks before a cheat is switched on.
+
+Since anygame.74 a PCSX2 cheat file can also come from GameHacking.org's
+own pnach export (personal use pending the site's permission; switch:
+Settings > GameHacking.org cheats, or `GAMEHACKING_ENABLED` in
+`py_modules/gamehacking.py`). It takes the same path: saved in Downloads
+under its own name, previewed and written by The Collector.

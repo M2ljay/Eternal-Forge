@@ -582,8 +582,10 @@ test("the cheat warning claims a backup only when The Collector says so", () => 
   assert.match(cheatWarning(undefined), /^Cheats can break saves\. Back up/);
   assert.match(cheatWarning(false), /Back up/);
   assert.equal(savesBackedUp({ emulator: "dolphin", gameId: "GALE01" }), undefined, "v1 reports nothing");
-  assert.equal(savesBackedUp({ saveSync: { enabled: true } }), true);
-  assert.equal(savesBackedUp({ save_backup: false }), false);
+  // win.30: only saveBackup means a restorable copy; saveSync alone does not.
+  assert.equal(savesBackedUp({ saveSync: true, saveBackup: true }), true);
+  assert.equal(savesBackedUp({ saveSync: true, saveBackup: false }), false);
+  assert.equal(savesBackedUp({ saveSync: true }), undefined);
 });
 
 function toggleBridge(answer) {

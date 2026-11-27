@@ -3271,7 +3271,7 @@ export interface RomLinks {
 
 export interface RomModRecord {
   id: string;
-  source: "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro";
+  source: "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro" | "gamehacking";
   /** The target's kind when installed ("cheatFile" for a cheat file). */
   kind?: string;
   mod_id: number;
@@ -3334,3 +3334,33 @@ export const forgeRomCheatStage = callable<
   [app_id: number, source: string, path: string, collector_folder: string],
   { ok: boolean; error?: string; reason?: string; entry?: string; kind?: string }
 >("forge_rom_cheat_stage");
+
+// ---- PS2 cheats from GameHacking.org (anygame.74, personal use) ---------------
+// See py_modules/gamehacking.py. Every refusal carries the link-out.
+export interface GhRefusal {
+  ok: false;
+  reason: string;
+  message: string;
+  link?: string;
+}
+export interface GhGame {
+  title: string;
+  href: string;
+  serial: string;
+  score: number;
+}
+export const forgeGhStatus = callable<
+  [],
+  { ok: boolean; available: boolean; enabled: boolean; stopped: boolean; link: string }
+>("forge_gh_status");
+export const forgeGhSetEnabled = callable<
+  [enabled: boolean],
+  { ok: boolean; available: boolean; enabled: boolean; stopped: boolean; link: string }
+>("forge_gh_set_enabled");
+export const forgeGhFind = callable<[serial: string, title: string], ({ ok: true; candidates: GhGame[]; link: string }) | GhRefusal>(
+  "forge_gh_find"
+);
+export const forgeGhStage = callable<
+  [app_id: number, game_href: string, serial: string, collector_folder: string],
+  { ok: boolean; entry?: string; kind?: string; reason?: string; message?: string; error?: string; link?: string }
+>("forge_gh_stage");

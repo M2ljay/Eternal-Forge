@@ -13,7 +13,7 @@ import {
 import { toaster } from "@decky/api";
 import { useEffect, useState } from "react";
 
-import { UserPrefs, getUserPrefs, setUserPrefs } from "./api";
+import { UserPrefs, forgeGhSetEnabled, forgeGhStatus, getUserPrefs, setUserPrefs } from "./api";
 import { PAGE_SCROLLER } from "./theme";
 import { TabBar, exitTabsToQam, handleTabButtons } from "./Tabs";
 import { ExperimentalToggle } from "./ExperimentalSetup";
@@ -37,6 +37,31 @@ function ForgeToggle({ name, label, description }: { name: ForgeSetting; label: 
       onChange={(v: boolean) => {
         setForgeSetting(name, v);
         setOn(v);
+      }}
+    />
+  );
+}
+
+/** The GameHacking.org source (PS2 cheats, personal use pending the site's
+ * permission). Hidden when the build removed it (GAMEHACKING_ENABLED). */
+function GameHackingToggle() {
+  const [st, setSt] = useState<{ available: boolean; enabled: boolean; stopped: boolean } | undefined>();
+  useEffect(() => {
+    forgeGhStatus().then(setSt).catch(() => undefined);
+  }, []);
+  if (!st?.available) return null;
+  return (
+    <ToggleField
+      label="GameHacking.org cheats"
+      description={
+        "Cheats from GameHacking.org: PS2 .pnach cheats fetched for one game when you ask, for personal use. " +
+        "Forge follows the site's robots.txt, sends a few spaced requests and caches for a week." +
+        (st.stopped ? " Stopped for this session after repeated failures." : "")
+      }
+      checked={st.enabled}
+      onChange={async (v: boolean) => {
+        const r = await forgeGhSetEnabled(v);
+        setSt(r);
       }}
     />
   );
@@ -363,6 +388,7 @@ export function SettingsPage() {
               />
               <ModdedCollectionControls />
               <SaveBackupSettings />
+              <GameHackingToggle />
             </Section>
 
             <Section title="Experimental" blurb="for games without built-in support">

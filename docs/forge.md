@@ -216,11 +216,11 @@ is off, turning an entry on says so and offers **Turn on**.
 
 **Cheat warning.** Turning a **cheat** on (an entry, a cheat file's Enable
 Cheats) asks first: *"Cheats can break saves; your saves are backed up by
-The Collector"* only when The Collector reports a save backup for that ROM.
-The v1 bridge reports none (no field in `getRomInfo`), so today the warning
-says *"Cheats can break saves. Back up this game's saves before turning
-cheats on"*. `savesBackedUp` reads `saveBackup` / `saveSync` (a boolean or
-`{enabled}`) if a later Collector adds one. Patches and switching off do
+The Collector"* only when The Collector's `getRomInfo` answers
+`saveBackup: true` (win.30: save sync on and a save file synced to RomM, so
+a copy exists to restore). `saveSync` alone does not count. Otherwise, and
+with a Collector before win.30, it says *"Cheats can break saves. Back up
+this game's saves before turning cheats on"* (`savesBackedUp`). Patches and switching off do
 not ask.
 
 **Card.** *3 mods · 2 patches · 1 cheat*: Forge-installed mods (a cheat
@@ -239,7 +239,7 @@ reason.
 |---|---|---|---|
 | Azahar (3DS) | GitHub [JourneyOver/CTRPF-AR-CHEAT-CODES](https://github.com/JourneyOver/CTRPF-AR-CHEAT-CODES), `Cheats/<Game> (<REGION>)/<TitleID>.txt` | By the Title ID The Collector read from the game file (`game_id`), case-insensitive. A Title ID is per region, so the match is the right region; when several files share it the user picks | No Title ID (`.3dsx`) -> says so. The repository states no licence; Forge only fetches one file on the user's PC at their request and never redistributes it |
 | RetroArch | libretro's [libretro-database](https://github.com/libretro/libretro-database) `cht/<System>/<No-Intro name>.cht` (CC BY-SA 4.0) | System from the RomM platform slug (`LIBRETRO_SYSTEMS`); then up to eight likely names (`libretro_guesses`): the ROM file's own stem first (The Collector names the cheat target `<stem>.cht` after the ROM file, and No-Intro dumps carry the database's exact names), then the clean title with USA, World, USA/Europe, Europe, Japan. The ones that exist are offered; the user picks | 267 MB in all, so never listed. Nothing found -> use RetroArch's Online Updater or a `.cht` in Downloads. PS2, GameCube, 3DS have no folder there |
-| PCSX2 | GameHacking.org | None: it publishes no API, no bulk or raw download and no terms permitting automated access, so Forge only links to it | The user exports the `.pnach`, saves it in Downloads, and uses **Cheat file from Downloads**; The Collector renames it to `<SERIAL>_<CRC>.pnach` |
+| PCSX2 | GameHacking.org (anygame.74, **personal use pending the site's permission**, see below) | By the serial The Collector read from the disc (`SLUS-20946`, compared without punctuation), then the title; the user picks when several match | The site's own pnach export for that game; else the link-out and the user's own `.pnach`. The Collector renames it to `<SERIAL>_<CRC>.pnach` |
 | Dolphin | built in | `gecko_codes` / `action_replay_codes` lists | No file to fetch |
 
 Nothing goes through api.github.com: it allows 60 unauthenticated calls an
@@ -256,6 +256,67 @@ installed through the usual preview into the `cheats` target, which writes
 it as the target's `file_name`. A cheat-file target holds one file, so a new cheat file's
 record replaces the old one. PCSX2 and Azahar cheats in a new file start
 off: switch them in the Cheats list.
+
+### GameHacking.org (PS2 cheats) - personal use, pending permission
+
+**Status.** Forge fetches PS2 `.pnach` cheats from
+[GameHacking.org](https://gamehacking.org) for the user's private,
+non-commercial use. The site publishes no API and no terms granting
+automated access; the user is asking the site for permission himself and
+will have this removed if they refuse. Until then it is built to be a
+polite personal-use client, and to come out in one change.
+
+**Turning it off.**
+- For yourself: Settings > Game page > **GameHacking.org cheats** (on by
+  default). Off, every GameHacking.org call is refused before any request
+  and the tab shows only the link-out.
+- For the build (if permission is refused): set
+  `GAMEHACKING_ENABLED = False` in `py_modules/gamehacking.py`. The
+  callables refuse, the setting disappears, the button is not shown, and no
+  request is ever made; the link-out and the user's own `.pnach` stay.
+
+**What it does, and only this** (`py_modules/gamehacking.py`, callables
+`forge_gh_status`, `forge_gh_set_enabled`, `forge_gh_find`,
+`forge_gh_stage`):
+- Only when the user presses **Find cheats (GameHacking.org)** on one PS2
+  game's Cheats section. Nothing in the background, no bulk, no prefetch.
+- `robots.txt` first (cached a day; a 404 means everything is allowed), and
+  obeyed (RFC 9309: the group naming `Forge`, else `*`; longest rule wins,
+  Allow on a tie; `*` and `$`). A disallowed path is never requested: the
+  tab says *GameHacking.org's robots.txt asks programs not to fetch ...*
+  and offers the link-out.
+- At most four requests per press (robots.txt counts), at least 1 second
+  apart, with the User-Agent `Forge/<version> (personal use)`, its own HTTP
+  session with no cookie jar, no redirects followed.
+- Find: the PS2 list page `/system/ps2/all`, and when the serial is not on
+  it, the one list page for the title's first letter. Export: the game's
+  page `/game/<id>` (its export form: `sysID`, `gamID`, and the `format`
+  option that names pnach), then that form's own export,
+  `POST /inc/sub.exportCodes.php` with the page as Referer. These are the
+  site's pages as a browser gets them, read from a public open-source client
+  of the site; **not verified from the PC**. Anything shaped differently
+  counts as "not available" and links out.
+- The lookup and the `.pnach` are cached per game for a week
+  (`runtime/gamehacking/`); a second press makes no request.
+- HTTP 429 and 5xx back off (Retry-After honoured, at least 2 minutes, at
+  most an hour); after three failures in a session Forge stops asking until
+  the plugin reloads (Settings says so).
+- No login, no CAPTCHA solving, no bypassing: a 403/503, a browser check
+  (`captcha`, `cf-chl`, *Just a moment*) or a web page where a file was
+  expected falls back to the link-out, and counts as a failure.
+- The file must look like a pnach (text with a `patch=` line, at most
+  2 MB). It is saved at the top of Downloads under its own name (the
+  export's file name, else `<SERIAL>.pnach`) and installed through The
+  Collector's preview into the `cheats` target, which renames it to
+  `<SERIAL>_<CRC>.pnach`. The usual cheat warning applies when a cheat is
+  switched on.
+- The UI credits the site: *Cheats from GameHacking.org*.
+
+Tests: `tests/test_gamehacking.py` against a fake site (robots rules and
+fallback, the per-press budget, spacing, User-Agent, caching across
+sessions and its expiry, serial and title matching, the export form, 429
+back-off, the session stop, bot checks, HTML instead of a pnach, the user
+switch and the kill switch).
 
 ### Link-outs
 
@@ -278,7 +339,7 @@ code thread (Azahar). No QR code: Forge bundles no QR encoder.
 | ROM mods (Dolphin, PPSSPP, PCSX2, Azahar/Citra, RetroArch soft patches, Cemu graphic packs) | GameBanana (name + platform), Nexus Mods where a page exists, own files in Downloads, link-outs (Dolphin forums, PCSX2 HD Textures Project, Henriko Magnifico) | The Collector's Mods targets: texture packs, LayeredFS, graphics mods, Riivolution, soft patches | Works with The Collector 0.33.0-win.28+ (kinds: win.29); older Collector: page left alone |
 | ROM cheats: Azahar | CTRPF-AR-CHEAT-CODES by Title ID, own file | `cheats/<TitleID>.txt` (The Collector names it); entries switched in the Cheats list | Works (win.29) |
 | ROM cheats: RetroArch | libretro cheat database by system + name, own file | `cheats/<core>/<stem>.cht` | Works (win.29) |
-| ROM cheats: PCSX2 | Own `.pnach` from Downloads; GameHacking.org link-out (no API) | `cheats/<SERIAL>_<CRC>.pnach`; Enable Cheats + entries in the Cheats list | Works (win.29) |
+| ROM cheats: PCSX2 | GameHacking.org pnach export on the user's press (personal use pending permission; switchable), own `.pnach` from Downloads, link-out | `cheats/<SERIAL>_<CRC>.pnach`; Enable Cheats + entries in the Cheats list | Works (win.29); GameHacking.org fetch unverified from the PC |
 | ROM cheats and built-in patches: Dolphin (Gecko / AR), PCSX2 (patches, cheat codes), Azahar (cheat codes) | Built into the emulator | Switched On/Off with The Collector (`setBuiltin`); Enable Cheats offered | Works (win.29); read-only entries show why |
 | ROM on RPCS3, Xenia Canary, shadPS4, xemu (and emulators The Collector does not know) | - | none | The Collector's reasons shown under *Not offered*; no installs |
 | VR games | Same as their kind above (the VR file guard applies to every install) | Same | Works |

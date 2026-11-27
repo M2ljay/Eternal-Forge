@@ -164,7 +164,8 @@ GameBanana files for a ROM go only to The Collector's **Mods** targets
 (`.txt`, `.pnach`, `.cht`) only to the `cheats` target. Toggle lists take no
 file. Cheats come from their own sources (see
 [forge.md](forge.md#cheat-sources-py_modulesrom_cheatspy-forge_rom_cheat_)),
-not from GameBanana.
+not from GameBanana (PS2 `.pnach` from GameHacking.org since anygame.74,
+personal use pending permission).
 
 ## Not done / to check on the PC
 

@@ -235,9 +235,9 @@ def same_folder(a: str, b: str) -> bool:
 # ---- Records ------------------------------------------------------------------
 # One list per ROM app id: what Forge installed through The Collector.
 
-SOURCES = ("gamebanana", "nexus", "local", "ctrpf", "libretro")
+SOURCES = ("gamebanana", "nexus", "local", "ctrpf", "libretro", "gamehacking")
 # Sources whose files have no numeric mod id: a record is named by its file.
-FILE_SOURCES = ("local", "ctrpf", "libretro")
+FILE_SOURCES = ("local", "ctrpf", "libretro", "gamehacking")
 
 
 def make_record(raw: dict, now: float) -> dict:

@@ -457,6 +457,11 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   (RetroArch), your own `.pnach` for PCSX2, built-in codes and patches with
   On/Off, a warning before cheats go on, link-outs to the curated texture
   sites, and a card that says *3 mods · 2 patches*.
+  Since anygame.74 PS2 cheats can come from **GameHacking.org** (*Cheats
+  from GameHacking.org*): fetched for one game when you press Find, robots.txt
+  obeyed, a few spaced requests, cached a week. Used for personal use while
+  permission is asked; switch it off in Settings, or remove it with
+  `GAMEHACKING_ENABLED` (see [docs/forge.md](docs/forge.md)).
 - **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
   BattlEye, Vanguard, Ricochet, FACEIT, EA Javelin, GameGuard...) are locked:
   installs and switching mods on are refused by the backend, not just hidden.

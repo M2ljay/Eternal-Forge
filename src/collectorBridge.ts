@@ -406,14 +406,14 @@ export function cheatWarning(savesBackedUp: boolean | undefined): string {
     : "Cheats can break saves. Back up this game's saves before turning cheats on: The Collector doesn't report a save backup for it.";
 }
 
-/** Whether The Collector says this ROM's saves are synced or backed up. Not
- * in the v1 contract: read only from an explicit field if a later Collector
- * adds one; anything else is "unknown" (undefined). */
+/** Whether The Collector holds a copy of this ROM's saves it could restore.
+ * win.30's getRomInfo answers `saveBackup` (save sync on and at least one
+ * save file synced to RomM) and `saveSync` (sync on, checked, no
+ * conflicts); only `saveBackup` means a backup exists, so only it is read.
+ * A Collector before win.30 answers neither: unknown (undefined). */
 export function savesBackedUp(romInfo: any): boolean | undefined {
-  const v = romInfo?.saveBackup ?? romInfo?.save_backup ?? romInfo?.saveSync ?? romInfo?.save_sync;
-  if (typeof v === "boolean") return v;
-  if (v && typeof v === "object" && typeof v.enabled === "boolean") return v.enabled;
-  return undefined;
+  const v = romInfo?.saveBackup ?? romInfo?.save_backup;
+  return typeof v === "boolean" ? v : undefined;
 }
 
 /** "3 mods · 2 patches · 1 cheat" (zero groups left out; "No mods" when all are zero). */
@@ -441,7 +441,7 @@ export function isEntryName(name: string): boolean {
 
 // ---- The install flow ------------------------------------------------------------
 
-export type RomSource = "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro";
+export type RomSource = "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro" | "gamehacking";
 
 /** How often a "changed" install answer leads to a fresh preview. */
 export const MAX_REPREVIEWS = 2;

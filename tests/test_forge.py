@@ -420,6 +420,8 @@ ALLOWED_UNGATED = {
         # Cheat files: listed from two GitHub repositories and saved into
         # Downloads; The Collector writes them after its preview.
         "forge_rom_cheat_sources", "forge_rom_cheat_stage",
+        # PS2 .pnach from GameHacking.org on the user's press (personal use).
+        "forge_gh_status", "forge_gh_set_enabled", "forge_gh_find", "forge_gh_stage",
     },
     # Where a game lives (a non-Steam shortcut's folder) and folder names for
     # the controller folder picker; no mod files move.
