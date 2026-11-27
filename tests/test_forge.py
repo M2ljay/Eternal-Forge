@@ -410,6 +410,17 @@ ALLOWED_UNGATED = {
     # Downloads into Forge's own cache: nothing reaches the game until a
     # gated install.
     "download only": {"prefetch_mod_file", "prepare_mod_file"},
+    # ROM games (The Collector): Forge reads its links, downloads a mod into
+    # the user's Downloads folder and keeps its own records. The emulator's
+    # files are written by The Collector, after its own preview; emulated
+    # games have no PC anti-cheat to lock.
+    "rom games via The Collector": {
+        "forge_rom_link", "forge_rom_set_nexus", "forge_rom_stage", "forge_rom_unstage",
+        "forge_rom_record", "forge_rom_forget", "forge_rom_mods", "forge_rom_updates",
+    },
+    # Where a game lives (a non-Steam shortcut's folder) and folder names for
+    # the controller folder picker; no mod files move.
+    "game folder": {"set_game_folder", "forge_list_folders", "search_nexus_games"},
     # Unmaps a mod loader's console window under gamescope (a no-op on
     # Windows); no files, no mods.
     "window only": {"hide_loader_console"},

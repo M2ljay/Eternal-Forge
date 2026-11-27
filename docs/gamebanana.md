@@ -83,6 +83,80 @@ download is only checked against it when present.
 - **Dismiss** works as for Nexus mods (`ignore_update` matched against the
   offered "current").
 
+## ROM games from The Collector
+
+Added in 1.21.40-anygame.72. GameBanana lists games per title, and many
+emulated games' mods (texture packs, Riivolution, `romfs` mods, soft patches)
+live there. A ROM page from The Collector gets the GameBanana mods of its
+game (see [forge.md](forge.md#rom-games-the-collector) for the install path).
+
+### Matching a ROM to its GameBanana game (`py_modules/rom_mods.py`)
+
+- The ROM's name loses its region and revision tags (`Super Mario Sunshine
+  (USA) (Rev 1)` -> `Super Mario Sunshine`), then GameBanana's name search
+  (`NameMatch`, unverified like the rest) is asked for the title and, for a
+  mapped platform, the title with the platform's name (`Metroid Prime
+  GameCube`).
+- Candidates are ranked (`rank_candidates`): the same title with a platform
+  tag naming this system (`(GC)`, `... Wii`) scores 100, the same title with
+  no tag 90, the same title tagged for **another** system 40 (kept, ranked
+  low: the user decides), a title sharing words 20-40. GameBanana's search
+  does not filter by platform, so the platform ranks and breaks ties, and
+  never drops a candidate.
+- A link is made by itself only when exactly one candidate scores 90 or
+  more (`auto_pick`). Otherwise the page offers the ranked candidates (those
+  matching the platform say so), a search, and a `gamebanana.com/games/<id>`
+  link or id: the same manual flow as for Steam games. The link is kept per
+  app id in `settings.json` (`gamebanana.games`), like a Steam game's.
+
+### Platform slugs mapped
+
+RomM's slugs as The Collector passes them (`platformSlug`):
+
+| Slug(s) | Name | Tags recognised in a GameBanana game name |
+|---|---|---|
+| `ngc`, `gc`, `gamecube` | GameCube | GameCube, GC, GCN, NGC |
+| `wii` | Wii | Wii |
+| `wiiu` | Wii U | Wii U, WiiU |
+| `switch` | Switch | Switch, Nintendo Switch, NX |
+| `3ds`, `n3ds` | 3DS | 3DS, New 3DS, Nintendo 3DS |
+| `nds` | DS | NDS, DS, Nintendo DS |
+| `n64` | Nintendo 64 | N64, Nintendo 64 |
+| `snes`, `sfam` | SNES | SNES, Super Nintendo, SFC, Super Famicom |
+| `nes`, `famicom` | NES | NES, Famicom |
+| `gba` | Game Boy Advance | GBA, Game Boy Advance |
+| `gbc` | Game Boy Color | GBC, Game Boy Color |
+| `gb` | Game Boy | GB, Game Boy |
+| `psx`, `ps1` | PlayStation | PS1, PSX, PlayStation |
+| `ps2` | PlayStation 2 | PS2, PlayStation 2 |
+| `ps3` | PlayStation 3 | PS3, PlayStation 3 |
+| `psp` | PSP | PSP, PlayStation Portable |
+| `psvita` | PS Vita | Vita, PS Vita |
+| `genesis-slash-megadrive`, `megadrive`, `genesis` | Genesis | Genesis, Mega Drive, MD |
+| `dc`, `dreamcast` | Dreamcast | Dreamcast, DC |
+| `saturn` | Saturn | Saturn |
+| `xbox` | Xbox | Xbox |
+| `xbox360` | Xbox 360 | Xbox 360, X360 |
+
+**Unmapped** (matched by name only, the picker says so): arcade boards
+(`arcade`, `neogeoaes`, ...), `atari2600` and other Atari systems, `pce`
+(PC Engine), `msx`, `wonderswan`, `ngp`, `3do`, `jaguar`, `lynx`, and any
+slug not in the table. GameBanana has little or nothing for these; add a row
+to `PLATFORMS` when one turns out to have a section.
+
+Which of these The Collector can actually install for depends on the
+emulator the ROM launches with (Dolphin, PPSSPP, PCSX2, Azahar/Citra,
+RetroArch soft patches today); the card says when there is no mod folder.
+
+### Downloading for a ROM
+
+The file is downloaded like any GameBanana file (same cache, progress,
+pause, MD5 check, HTML-page check), then saved at the top of
+`%USERPROFILE%\Downloads` under its own name for The Collector to preview
+and install (`forge_rom_stage`). `.7z` and `.rar` are unpacked into a folder
+first, because The Collector reads only `.zip`. Updates use `update_for`
+against the record Forge keeps for the ROM (`runtime/forge-rom-mods.json`).
+
 ## Not done / to check on the PC
 
 - The unverified endpoints above, against the live site (sorts, search,
@@ -92,3 +166,5 @@ download is only checked against it when present.
   GameBanana mods. The pre-install "VR files in this archive" warning is
   Nexus-only (the VR guard itself applies to every install).
 - GameBanana's 1-click (`mmdl`) links are not registered.
+- The ROM matching above against real GameBanana game names (how often a
+  platform tag appears, whether NameMatch finds `<title> <platform>`).

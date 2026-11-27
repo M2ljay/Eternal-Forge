@@ -146,6 +146,13 @@ approved design and stay crimson even though "update available" is amber
 elsewhere. Focus is a crimson edge on a lighter surface. See
 [forge.md](forge.md).
 
+The game page's **Mods card** (anygame.72, Steam pages and The Collector's
+ROM pages alike): gunmetal `#1A1D21` on black, 10 px radius, the raised
+`#2A2F36` surface and a **square** crimson edge on focus (no glow), the
+updates chip amber `#C98B4A` with black text, one status line coloured by
+tone (green OK, amber waiting, crimson problems, steel-muted hints), and a
+controller prompt (**X Mods**) - never a keyboard or mouse hint.
+
 ## Gamepad first
 
 - Anything interactive is a `Focusable` or `DialogButton`; focus order

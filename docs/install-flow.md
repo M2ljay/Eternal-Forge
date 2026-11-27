@@ -109,3 +109,27 @@ its log is a bug in its own right, separately from the naming.
 - Should it pin a version? Right now it always takes the newest. A
   `--version` flag would help someone rolling back after a bad release, and
   there is no way to do that today except downloading the zip by hand.
+
+## Mods for ROM games go through The Collector
+
+Added in 1.21.40-anygame.72 (Windows fork). This is about installing a
+*mod*, not the plugin, but it is the one install path where Forge does not
+write the files itself, so it is recorded here next to the rule above.
+
+For a ROM from The Collector, Forge only fetches: it downloads the mod file
+into its own cache, then saves a copy at the top of `%USERPROFILE%\Downloads`
+under the archive's own name (a `.7z` / `.rar` unpacked into a folder named
+after it). The Collector then:
+
+1. shows its **preview** - every file it will write, the destination, which
+   existing files would be replaced and the backup folder they move to;
+2. installs only after the user presses **Install**, with the preview's
+   fingerprint, and refuses if anything changed in between (Forge previews
+   again and asks again);
+3. moves every replaced file to `romm-mod-backups` before writing.
+
+So the same ordering holds: nothing existing is touched until the new files
+are on disk and checked, and nothing replaced is lost. Forge hands The
+Collector only the Downloads entry's name and a target id, never a path, and
+afterwards removes only the Downloads copy it created itself. Details:
+[forge.md](forge.md#installing-runrominstall).

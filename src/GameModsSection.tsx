@@ -1,6 +1,13 @@
-// Forge's Mods section on Steam's own game page (/library/app/:appid).
+// Forge's Mods on Steam's own game page (/library/app/:appid).
 //
-// Collapsed it is one row under the Play bar: "Mods", a status chip or two,
+// anygame.72: mods are a Mods TAB (in Steam's own tab container when the
+// patch finds one; otherwise a Mods section under Play that behaves like a
+// tab) plus an Overview CARD under Play: the active-mod count, an amber
+// "N updates" chip, one status line, and X to open the Mods tab. The tab's
+// content is the old expanded view below. The old row survives only as the
+// fallback above the overview panel (neither anchor found).
+//
+// The row (fallback): collapsed it is one row: "Mods", a status chip or two,
 // the last save backup as a hint, and at most two buttons. A on the row
 // opens the details under it (the anti-cheat lock, the offer to go back
 // after a crash, the mods with their switches, saves, Upscaling and Load
@@ -18,8 +25,6 @@ import {
   DialogButton,
   Focusable,
   ModalRoot,
-  Navigation,
-  QuickAccessTab,
   showModal,
 } from "@decky/ui";
 import { toaster } from "@decky/api";
@@ -36,6 +41,7 @@ import {
   forgeGameStatus,
   forgeLoSort,
   forgeLoStatus,
+  ForgeLoadOrderState as _LoState,
   forgeOptiScalerDismiss,
   forgeOptiScalerInstall,
   forgeOptiScalerRemove,
@@ -59,6 +65,12 @@ import {
   CardChip,
   CardInput,
   CardPlacement,
+  MODS_TAB_ID,
+  MODS_TAB_TITLE,
+  StatusTone,
+  activeLabel,
+  cardSummary,
+  updatesChip,
   FORGE_CRIMSON,
   FORGE_GUNMETAL,
   FORGE_STEEL,
@@ -87,7 +99,7 @@ import {
   undoOutcome,
   warningSummary,
 } from "./forgeRules";
-import { ABOVE_GRACE_MS, aboveFallbackShown, placementLog, placements } from "./gamePageAnchor";
+import { ABOVE_GRACE_MS, aboveFallbackShown, placementLog, placements, steamTabs } from "./gamePageAnchor";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
 import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } from "./games";
@@ -95,7 +107,8 @@ import { toggleMod } from "./install";
 import { notifyGameStateChanged, setBrowseGame, setDetailOrigin, setSelectedMod, subscribeGameState } from "./state";
 import { pushFromGamePage } from "./Tabs";
 import { backupBeforeChange, openRestoreSaves, subscribeSaveBackups } from "./SaveBackup";
-import { AMBER, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
+import { AMBER, BLACK, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
+import { setUpGame } from "./ExperimentalSetup";
 import { noteOptiScaler, subscribeOptiScaler } from "./optiscaler";
 import { openForgeLoadOrder, openProfiles } from "./ForgeLoadOrder";
 import { ForgeLoScope } from "./forgeLoScope";
@@ -111,6 +124,65 @@ const MAIN = "forge-row-main";
 const BTN = "forge-btn";
 const ROW = "forge-row";
 const TEXT = "forge-text";
+const OV = "forge-ov";
+const OV_MAIN = "forge-ov-main";
+const TABHEAD = "forge-tabhead";
+const TABPANE = "forge-tabpane";
+
+const STATUS_COLOR: Record<StatusTone, string> = {
+  ok: GREEN,
+  warn: AMBER,
+  error: CRIMSON_TEXT,
+  hint: STEEL_MUTED,
+};
+
+/** A controller prompt: the button's letter in a small square (no
+ * keyboard or mouse hints anywhere on the card). */
+export function Prompt({ button, label }: { button: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: STEEL_MUTED, fontSize: `${CARD_TEXT.hint}px`, flex: "0 0 auto" }}>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "22px",
+          height: "22px",
+          borderRadius: "50%",
+          background: GUNMETAL_RAISED,
+          color: WHITE,
+          fontWeight: 700,
+          fontSize: "13px",
+        }}
+      >
+        {button}
+      </span>
+      {label}
+    </span>
+  );
+}
+
+/** The amber "N updates" chip: black text on amber. */
+export function UpdatesChip({ n }: { n: number }) {
+  const text = updatesChip(n);
+  if (!text) return null;
+  return (
+    <span
+      style={{
+        fontSize: `${CARD_TEXT.hint}px`,
+        fontWeight: 700,
+        padding: "3px 10px",
+        borderRadius: "12px",
+        background: AMBER,
+        color: BLACK,
+        flex: "0 0 auto",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {text}
+    </span>
+  );
+}
 // Focus is a crimson edge and a lighter surface, never a glow. Text never
 // wraps: one line, cut with an ellipsis.
 const CSS = `
@@ -149,6 +221,28 @@ const CSS = `
 }
 .${BTN}.forge-primary { background: ${FORGE_CRIMSON} !important; color: ${WHITE} !important; }
 .${BTN}.forge-primary.gpfocus, .${BTN}.forge-primary:hover { border-color: ${WHITE} !important; }
+.${OV} { margin: 8px 2.8vw 4px; color: ${FORGE_STEEL}; font-size: ${CARD_TEXT.body}px; line-height: 1.3; }
+.${OV_MAIN} {
+  position: relative;
+  background: ${FORGE_GUNMETAL} !important;
+  border: none !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  color: ${FORGE_STEEL} !important;
+  min-width: 0 !important;
+}
+.${OV_MAIN}.gpfocus, .${OV_MAIN}:hover { background: ${GUNMETAL_RAISED} !important; }
+.${OV_MAIN}.gpfocus::after, .${OV_MAIN}:hover::after {
+  content: ""; position: absolute; inset: -3px; border: 2px solid ${FORGE_CRIMSON}; border-radius: 0; pointer-events: none;
+}
+.${TABHEAD} {
+  background: transparent !important; border: none !important; border-radius: 0 !important; box-shadow: none !important;
+  color: ${FORGE_STEEL} !important; padding: 6px 4px !important; min-width: 0 !important; width: auto !important;
+  font-size: ${CARD_TEXT.title}px !important; font-weight: 700; border-bottom: 3px solid transparent !important;
+}
+.${TABHEAD}.forge-tab-on { color: ${WHITE} !important; border-bottom-color: ${FORGE_CRIMSON} !important; }
+.${TABHEAD}.gpfocus, .${TABHEAD}:hover { color: ${WHITE} !important; background: ${GUNMETAL_RAISED} !important; }
+.${TABPANE} { background: ${FORGE_GUNMETAL}; border-radius: 10px; margin-top: 6px; padding: 8px 14px 12px 16px; }
 `;
 
 interface Status {
@@ -320,7 +414,11 @@ async function applyChanges(
   return failed;
 }
 
-export function GameModsSection({ appId, placement }: { appId: number; placement: CardPlacement }) {
+/** "below": the Overview card under Play (plus the tab-like section when
+ * Steam has no tab container); "above": the one-line row fallback; "tab":
+ * the content of Forge's tab in Steam's own tab container. */
+export function GameModsSection({ appId, placement }: { appId: number; placement: CardPlacement | "tab" }) {
+  if (placement === "tab") return <ModsCard appId={appId} placement="below" view="tab" />;
   return placement === "below" ? <BelowPlay appId={appId} /> : <AbovePlay appId={appId} />;
 }
 
@@ -338,7 +436,7 @@ function BelowPlay({ appId }: { appId: number }) {
     };
   }, [appId, token]);
   if (!placements.isFirstBelow(appId, token)) return null;
-  return <ModsCard appId={appId} placement="below" />;
+  return <ModsCard appId={appId} placement="below" view="card" />;
 }
 
 /** Above the overview panel: only when the copy under Play is not mounted,
@@ -356,11 +454,14 @@ function AbovePlay({ appId }: { appId: number }) {
   }, [appId]);
   if (!aboveFallbackShown(placements.hasBelow(appId), grace)) return null;
   placementLog.noteFallback();
-  return <ModsCard appId={appId} placement="above" />;
+  return <ModsCard appId={appId} placement="above" view="row" />;
 }
 
-function ModsCard({ appId, placement }: { appId: number; placement: CardPlacement }) {
+function ModsCard({ appId, placement, view }: { appId: number; placement: CardPlacement; view: "row" | "card" | "tab" }) {
   const game = getSupportedGame(appId);
+  const [lo, setLo] = useState<_LoState | undefined>();
+  const [tabOpen, setTabOpen] = useState(false);
+  const [, setTabsSeen] = useState(0);
   const [status, setStatus] = useState<Status | undefined>();
   const [mods, setMods] = useState<InstalledMod[] | undefined>();
   const [updates, setUpdates] = useState<Set<string>>(new Set());
@@ -392,12 +493,18 @@ function ModsCard({ appId, placement }: { appId: number; placement: CardPlacemen
     forgeUpdateDots([game.nexusDomain], refreshUpdates)
       .then((r) => current() && setUpdates(new Set(r.games?.[game.nexusDomain]?.folders ?? [])))
       .catch(() => undefined);
+    if (loadOrderSupported(appId, game.nexusDomain)) {
+      forgeLoStatus(appId, game.nexusDomain, game.installDirName)
+        .then((r) => current() && setLo(r))
+        .catch(() => undefined);
+    }
   };
 
   useEffect(() => {
     refresh(true);
     const unsubState = subscribeGameState(() => refresh(false));
     const unsubSettings = subscribeForgeSettings(() => setEnabledSetting(getForgeSetting("gamePage")));
+    const unsubTabs = steamTabs.subscribe(() => setTabsSeen((n) => n + 1));
     const unsubSaves = subscribeSaveBackups((id) => {
       if (id === appId) forgeSaveBackupStatus(appId).then((r) => r.ok && setSaves(r)).catch(() => undefined);
     });
@@ -406,6 +513,7 @@ function ModsCard({ appId, placement }: { appId: number; placement: CardPlacemen
       unsubState();
       unsubSettings();
       unsubSaves();
+      unsubTabs();
     };
   }, [appId]);
 
@@ -463,7 +571,12 @@ function ModsCard({ appId, placement }: { appId: number; placement: CardPlacemen
   };
   // "Mods...": the game's full Forge page, My Mods when it has any.
   const openFull = () => (list.length > 0 ? openManager() : openStore());
-  const openSetup = () => Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
+  // Set up right here (a non-Steam shortcut asks for its folder with the
+  // controller picker); the QAM's rows do the same.
+  const openSetup = () =>
+    void run(async () => {
+      await setUpGame(appId, steamName(appId, "this game"));
+    });
   const openMod = (mod: InstalledMod) =>
     void run(async () => {
       if (!game || !mod.mod_id) return;
@@ -583,6 +696,193 @@ function ModsCard({ appId, placement }: { appId: number; placement: CardPlacemen
       : () => (game ? openFull() : locked ? lockWhy() : openSetup());
   const open = press === "toggle" && expanded;
 
+  const detailsBody = (
+    <Focusable
+            flow-children="column"
+            style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "0 14px 12px 16px" }}
+          >
+            {detailLines(card).map((kind) => {
+              switch (kind) {
+                case "lock":
+                  return (
+                    <Line key={kind} label="Anti-cheat" text={lockSummary(ac)} color={CRIMSON_TEXT}>
+                      {lockLineActions({ locked, managed: Boolean(game), enabledCount, overrideOn: false }).map((a) =>
+                        a === "switch-off" ? (
+                          <Button key={a} primary disabled={busy} onClick={allOff}>
+                            Switch {enabledCount} off
+                          </Button>
+                        ) : a === "why" ? (
+                          <Button key={a} onClick={lockWhy}>
+                            Why?
+                          </Button>
+                        ) : null
+                      )}
+                    </Line>
+                  );
+                case "override":
+                  return (
+                    <Line key={kind} label="Anti-cheat" text={overrideOnLabel(ac)} color={CRIMSON_TEXT}>
+                      {lockLineActions({ locked: false, managed: Boolean(game), enabledCount, overrideOn: true }).map((a) =>
+                        a === "lock-again" ? (
+                          <Button key={a} disabled={busy} onClick={relock}>
+                            Lock mods again
+                          </Button>
+                        ) : a === "why" ? (
+                          <Button key={a} onClick={lockWhy}>
+                            Why?
+                          </Button>
+                        ) : null
+                      )}
+                    </Line>
+                  );
+                case "offer":
+                  return (
+                    <Line key={kind} label="Crashes" text="Closed early twice since its mods changed" color={AMBER}>
+                      <Button primary disabled={busy} onClick={offerRestore}>
+                        Restore...
+                      </Button>
+                      <Button disabled={busy} onClick={() => void run(async () => void (await forgeGuardDismiss(appId)))}>
+                        Not now
+                      </Button>
+                      <Button
+                        onClick={() =>
+                          showWhy(
+                            "Restore last working mods?",
+                            `${game?.displayName ?? "This game"} closed early twice since its mods changed. ` +
+                              "Going back only switches mods on and off; nothing is deleted."
+                          )
+                        }
+                      >
+                        Why?
+                      </Button>
+                    </Line>
+                  );
+                case "undo":
+                  return (
+                    <Line key={kind} label="Crashes" text="Last working mods restored">
+                      <Button disabled={busy} onClick={undoRestore}>
+                        Undo restore
+                      </Button>
+                    </Line>
+                  );
+                case "mods":
+                  return (
+                    <ModList
+                      key={kind}
+                      list={list}
+                      loaded={Boolean(mods)}
+                      updates={updates}
+                      busy={busy}
+                      locked={locked}
+                      onToggle={toggle}
+                      onOpen={openMod}
+                      onStore={openStore}
+                      onManager={openManager}
+                    />
+                  );
+                case "saves":
+                  return saveLine ? (
+                    <Line
+                      key={kind}
+                      label="Saves"
+                      text={
+                        <>
+                          {saveLine.text}
+                          {saveLine.failed && <span style={{ color: AMBER }}> · {saveLine.failed}</span>}
+                        </>
+                      }
+                    >
+                      <Button disabled={busy} onClick={restoreSaves}>
+                        Restore saves...
+                      </Button>
+                    </Line>
+                  ) : null;
+                case "upscaling":
+                  return <UpscalingEntry key={kind} appId={appId} game={game} />;
+                case "loadorder":
+                  return <LoadOrderEntry key={kind} appId={appId} game={game} locked={locked} />;
+                case "setup":
+                  return (
+                    <Line key={kind} label="Setup" text="Mods are not set up for this game yet">
+                      <Button onClick={openSetup}>Set up...</Button>
+                    </Line>
+                  );
+              }
+            })}
+          </Focusable>
+  );
+
+  // ---- The Overview card and the Mods tab (anygame.72) ----
+  const summary = cardSummary({
+    mode,
+    anticheat: ac,
+    mods: game ? mods : [],
+    updates: updates.size,
+    offer: Boolean(guard.offer),
+    loadOrder: lo?.supported ? lo.counts : undefined,
+  });
+  if (view === "tab") {
+    return (
+      <Focusable className={TABPANE} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
+        <style>{CSS}</style>
+        {detailsBody}
+      </Focusable>
+    );
+  }
+  if (view === "card") {
+    // Forge's tab is in Steam's tab container: no tab header of our own.
+    const steamTab = steamTabs.injected(appId);
+    // X (and A) open the Mods tab: Steam's own when the container can be
+    // told to switch, else the tab's content right here.
+    const openTab = () => {
+      if (steamTabs.open(appId, MODS_TAB_ID)) return;
+      setTabOpen((o) => !o);
+    };
+    const showPane = tabOpen;
+    return (
+      <Focusable className={OV} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
+        <style>{CSS}</style>
+        {!steamTab && (
+          <Focusable flow-children="row" style={{ display: "flex", gap: "16px", marginBottom: "6px" }}>
+            <DialogButton
+              className={`${TABHEAD}${showPane ? " forge-tab-on" : ""}`}
+              onClick={openTab}
+              onSecondaryButton={openTab}
+              onSecondaryActionDescription={MODS_TAB_TITLE}
+            >
+              {MODS_TAB_TITLE}
+            </DialogButton>
+          </Focusable>
+        )}
+        <DialogButton
+          className={OV_MAIN}
+          onClick={openTab}
+          onSecondaryButton={openTab}
+          onSecondaryActionDescription={showPane ? "Close Mods" : "Open Mods"}
+          style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", padding: "12px 16px", textAlign: "left" }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+            <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE, flex: "0 0 auto" }}>Mods</span>
+            <span className={TEXT} style={{ color: FORGE_STEEL, flex: "0 1 auto" }}>
+              {activeLabel(summary.active, game ? list.length : 0)}
+            </span>
+            <UpdatesChip n={summary.updates} />
+            <span style={{ flex: "1 1 auto" }} />
+            <Prompt button="X" label={showPane ? "Close" : MODS_TAB_TITLE} />
+          </span>
+          <span className={TEXT} style={{ color: STATUS_COLOR[summary.status.tone] }}>
+            {summary.status.text}
+          </span>
+        </DialogButton>
+        {showPane && (
+          <Focusable className={TABPANE} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
+            {detailsBody}
+          </Focusable>
+        )}
+      </Focusable>
+    );
+  }
+
   return (
     <Focusable className={CARD} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
       <style>{CSS}</style>
@@ -628,121 +928,7 @@ function ModsCard({ appId, placement }: { appId: number; placement: CardPlacemen
         ))}
       </Focusable>
 
-      {open && (
-        <Focusable
-          flow-children="column"
-          style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "0 14px 12px 16px" }}
-        >
-          {detailLines(card).map((kind) => {
-            switch (kind) {
-              case "lock":
-                return (
-                  <Line key={kind} label="Anti-cheat" text={lockSummary(ac)} color={CRIMSON_TEXT}>
-                    {lockLineActions({ locked, managed: Boolean(game), enabledCount, overrideOn: false }).map((a) =>
-                      a === "switch-off" ? (
-                        <Button key={a} primary disabled={busy} onClick={allOff}>
-                          Switch {enabledCount} off
-                        </Button>
-                      ) : a === "why" ? (
-                        <Button key={a} onClick={lockWhy}>
-                          Why?
-                        </Button>
-                      ) : null
-                    )}
-                  </Line>
-                );
-              case "override":
-                return (
-                  <Line key={kind} label="Anti-cheat" text={overrideOnLabel(ac)} color={CRIMSON_TEXT}>
-                    {lockLineActions({ locked: false, managed: Boolean(game), enabledCount, overrideOn: true }).map((a) =>
-                      a === "lock-again" ? (
-                        <Button key={a} disabled={busy} onClick={relock}>
-                          Lock mods again
-                        </Button>
-                      ) : a === "why" ? (
-                        <Button key={a} onClick={lockWhy}>
-                          Why?
-                        </Button>
-                      ) : null
-                    )}
-                  </Line>
-                );
-              case "offer":
-                return (
-                  <Line key={kind} label="Crashes" text="Closed early twice since its mods changed" color={AMBER}>
-                    <Button primary disabled={busy} onClick={offerRestore}>
-                      Restore...
-                    </Button>
-                    <Button disabled={busy} onClick={() => void run(async () => void (await forgeGuardDismiss(appId)))}>
-                      Not now
-                    </Button>
-                    <Button
-                      onClick={() =>
-                        showWhy(
-                          "Restore last working mods?",
-                          `${game?.displayName ?? "This game"} closed early twice since its mods changed. ` +
-                            "Going back only switches mods on and off; nothing is deleted."
-                        )
-                      }
-                    >
-                      Why?
-                    </Button>
-                  </Line>
-                );
-              case "undo":
-                return (
-                  <Line key={kind} label="Crashes" text="Last working mods restored">
-                    <Button disabled={busy} onClick={undoRestore}>
-                      Undo restore
-                    </Button>
-                  </Line>
-                );
-              case "mods":
-                return (
-                  <ModList
-                    key={kind}
-                    list={list}
-                    loaded={Boolean(mods)}
-                    updates={updates}
-                    busy={busy}
-                    locked={locked}
-                    onToggle={toggle}
-                    onOpen={openMod}
-                    onStore={openStore}
-                    onManager={openManager}
-                  />
-                );
-              case "saves":
-                return saveLine ? (
-                  <Line
-                    key={kind}
-                    label="Saves"
-                    text={
-                      <>
-                        {saveLine.text}
-                        {saveLine.failed && <span style={{ color: AMBER }}> · {saveLine.failed}</span>}
-                      </>
-                    }
-                  >
-                    <Button disabled={busy} onClick={restoreSaves}>
-                      Restore saves...
-                    </Button>
-                  </Line>
-                ) : null;
-              case "upscaling":
-                return <UpscalingEntry key={kind} appId={appId} game={game} />;
-              case "loadorder":
-                return <LoadOrderEntry key={kind} appId={appId} game={game} locked={locked} />;
-              case "setup":
-                return (
-                  <Line key={kind} label="Setup" text="Mods are not set up for this game yet">
-                    <Button onClick={openSetup}>Set up...</Button>
-                  </Line>
-                );
-            }
-          })}
-        </Focusable>
-      )}
+      {open && detailsBody}
     </Focusable>
   );
 }

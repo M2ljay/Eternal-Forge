@@ -1,6 +1,8 @@
 # Forge on the game page
 
-Five features that live on Steam's own library pages rather than in the
+Forge's goal is modding for every game in the library: Steam games,
+non-Steam shortcuts and The Collector's ROMs (see "Every game in the
+library" for the coverage table). Five features that live on Steam's own library pages rather than in the
 Quick Access Menu, plus save backups through Ludusavi before mod changes,
 per-game OptiScaler, and a LOOT-style load order with deploy profiles for
 the Bethesda games. Built on Windows (Decky Loader in Steam Big Picture,
@@ -9,7 +11,9 @@ report check, OptiScaler's GPU lookup and the "game is running" check.
 
 | Piece | Frontend | Backend |
 |---|---|---|
-| Mods section on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts`, `src/GameModsSection.tsx` | `forge_game_status` |
+| Mods tab and Overview card on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts`, `src/GameModsSection.tsx` | `forge_game_status` |
+| ROM pages (The Collector) | `src/collectorBridge.ts`, `src/RomMods.tsx` | `py_modules/rom_mods.py`, `forge_rom_*` in `main.py` |
+| Every other library game (shortcuts, no folder, no Nexus page) | `setUpGame` in `src/ExperimentalSetup.tsx`, `src/FolderPicker.tsx` | `set_game_folder`, `forge_list_folders`, `search_nexus_games`, `_experimental_install` |
 | Anti-cheat lock | the section's locked state | `py_modules/forge_guard.py`, wrappers at the end of `main.py` |
 | Way back after a crash | `src/forge.ts` (game start/exit), the section's offer | `forge_guard_*` |
 | Update dots on tiles | `src/forge.ts` (one stylesheet) | `forge_update_dots`, cache filled by `check_updates` too |
@@ -28,6 +32,192 @@ save backups are tested by `tests/test_save_backup.py` against a fake
 
 The frontend parts can be switched off in the plugin's Settings, under
 **Game page**.
+
+## Mods tab and Overview card (anygame.72)
+
+The approved design ("Core: current vision", boards 6 and 7): on every game
+page mods are a **Mods tab** beside the page's own tabs, plus a **Mods card**
+in the Overview. The card replaces the row under Play (anygame.70/.71); the
+row is kept only as the last fallback.
+
+### Where it goes, in order (`gamePagePlacement` in `src/forgeRules.ts`)
+
+1. **Tab**: in every render the patch follows below the overview panel (see
+   below), it also looks for a **tab container**: an element handed an array
+   of at least two tabs, each with an id and a title (`tabs` or `sections`;
+   `id`/`key`; `title`/`label`), the shape of Steam's tabbed page and of
+   `@decky/ui`'s `Tabs` (`findTabContainer` in `src/gamePageAnchor.ts`).
+   Forge's tab (`forge-mods`, "Mods") goes last, in a **new** array (Steam's
+   own list is never changed in place), its content wrapped in the same error
+   boundary. When the container is controlled (`onShowTab`), the card's X
+   switches to it (`SteamTabs`). The card still goes under Play.
+2. **Section** (no tab container): under Play, a focusable **"Mods" tab
+   header** (crimson underline while open), the card, and the tab's content
+   opening right below the card. A or X on either opens and closes it.
+3. **Row** (neither the tab container nor the play section was found): the
+   old one-line row above the overview panel, unchanged, behind the same
+   failure budget and error boundary.
+
+The console says once which way: *Mods tab in Steam's tab container (level
+N below the overview panel)*, *under Play (...)*, or the fallback line.
+
+**Not seen on a TV yet**: whether Steam's game page renders a tab container
+of that shape within four levels of the overview panel. If it does not, the
+section form is what shows; nothing breaks either way.
+
+### The card
+
+Gunmetal, 10 px radius, one press down from Play:
+
+- **Mods**, the active-mod count (*3 active*, *No mods*), and an amber chip
+  with black text when updates exist (*2 updates*);
+- **one status line**, most urgent first (`cardSummary`): *Locked ·
+  Ricochet* (crimson), *Closed early twice · restore offered* (amber), *Not
+  set up · press X to set up*, *Load order OK* / *Load order: 1 problem* (the
+  Bethesda games), *No mods yet*, *All 4 off*, *Updates waiting*, *Up to
+  date*;
+- a controller prompt, **X Mods**; X (or A) opens the Mods tab. Focus is a
+  square crimson edge around the card on a raised surface, no glow.
+
+The tab's content is the old expanded view (lock, crash offer, Undo, mods
+with switches, saves, Upscaling, Load order, Set up).
+
+### Every game is offered setup
+
+`sectionMode` no longer hides unmanaged games: any game without rules shows
+the card with *Not set up*, and **Set up...** runs `setUpGame` right there
+(it switches the any-game mode on itself). A locked game the plugin does not
+manage now says *Locked* instead of showing nothing.
+
+## ROM games (The Collector)
+
+The Collector (eternal-romm, 0.33.0-win.28 and later) draws ROM pages itself
+and offers two versioned globals (contract: The Collector's
+`docs/architecture/game-mods.md#forge-bridge`):
+
+- `window.__eternalGamePage` (`version: 1`): `register(ext)` returns an
+  unregister function; ids are unique across kinds and registering an id
+  again replaces it; `eternal_game_page_ready` fires on `window` each time
+  the registry is installed (a reloaded Collector starts empty).
+- `window.__eternalCollectorMods` (`version: 1`): `getTargets`,
+  `listSources(appId, targetId?)`, `preview`, `install`, `listInstalled`,
+  `remove`, `readSetting`, `enableSetting`, `openFolder`. No wrapper throws;
+  failures are `{success: false, reason, message}`.
+
+### Registration (`watchGamePage` in `src/collectorBridge.ts`)
+
+- When the registry is there, Forge registers **`forge.mods`** as a `tab`
+  (The Collector then hides its own Mods button) and **`forge.mods.card`** as
+  an `overviewCard`. Plugins load in any order, so the global is looked for
+  every 2 s, and the ready event registers again at once; a new global object
+  (The Collector reloaded) gets a fresh registration.
+- Unload unregisters both and stops looking.
+- Without the registry (an old Collector, or another version), nothing is
+  registered and the Steam route patch keeps skipping The Collector's pages
+  (`collectorOwnsPanel`), as before.
+- Rendering uses Steam's shared React (`window.SP_REACT`: `@decky/rollup`
+  maps `react` to it, so the bundle has no React of its own), `@decky/ui`
+  `Focusable` / `DialogButton`, and Forge's own error boundary inside The
+  Collector's.
+- Per-ROM state is re-read when the page switches to another version (same
+  app id, new `romId`); Forge's records carry the `rom_id` they were
+  installed for.
+
+### The ROM card and tab (`src/RomMods.tsx`)
+
+The card: Forge's mod count, the amber updates chip, one status line
+(`romCardSummary`: *Ready · Dolphin*, *Texture packs is off*, *No known mod
+folder for this emulator*, *Install the game to add mods*, *Update The
+Collector to mod ROMs with Forge*), X opens the tab through `ctx.openTab`
+(else the tab's content in a modal).
+
+The tab: the mod folders The Collector found, a **Turn on** for an emulator
+setting that is off (The Collector backs the ini up and refuses while the
+emulator runs), **GameBanana**, **Nexus Mods**, **My Downloads**, **Open
+folder**, the mods Forge installed (source, folder, version, **Update**,
+**Remove**), and the other files in the mod folders with **Remove** (The
+Collector's own Mods button is hidden while Forge's tab is registered).
+
+### Sources
+
+- **GameBanana**: the ROM is linked to its GameBanana game by name and
+  platform (`forge_rom_link`, rules in `py_modules/rom_mods.py`, platform
+  table in [gamebanana.md](gamebanana.md#rom-games-from-the-collector)); a
+  link is made by itself only for one clear match, otherwise the same manual
+  "pick the game" Forge has for Steam games (ranked candidates, a search, a
+  `gamebanana.com/games/<id>` link). Links are shared with the Steam-game
+  ones (`settings.json` → `gamebanana.games`, keyed by app id).
+- **Nexus Mods**: an exact name match on Nexus' game list links by itself;
+  otherwise candidates and a search. Few emulated games have a page there.
+  Kept in `runtime/forge-rom-mods.json` (`links`).
+- **Your own files**: the top of Downloads as The Collector lists it for the
+  folder picked first (a soft-patch folder lists only patches).
+
+### Installing (`runRomInstall`)
+
+1. The user picks the mod, the file, and the target (one fitting target is
+   used as is: a bare soft patch only to a patch target, a folder only to the
+   others, a `.zip` to either).
+2. `listSources(appId, target)` gives the Downloads folder The Collector
+   reads. Forge's backend (`forge_rom_stage`) accepts it only when it is
+   `%USERPROFILE%\Downloads` (the contract; a relocated Downloads folder is
+   not followed), downloads through the usual pipeline (cache, progress,
+   GameBanana checksum), and saves the file there under **the archive's own
+   name** (`pack (2).zip` when taken). A `.zip` or soft patch is copied as
+   is; `.7z` / `.rar` are unpacked into a folder named after the archive,
+   because The Collector reads only `.zip`. The answer is the entry **name**.
+3. `preview(appId, name, target)`: The Collector's preview (files, size,
+   destination, replacements and where they are backed up) is shown in full
+   before anything is written. A refusal is shown with The Collector's own
+   message and reason.
+4. `install(appId, name, target, fingerprint)` only after **Install**. A
+   `changed` answer previews again and asks again (twice at most).
+5. Forge records the mod (`forge_rom_record`: source, mod and file ids,
+   version, file date, target, and the entries it added - new names, plus
+   the top-level names the preview wrote that The Collector lists).
+6. Forge removes the copy it put in Downloads (`forge_rom_unstage`: only
+   names it recorded creating; the archive stays in Forge's cache). The
+   user's own Downloads files are never removed.
+
+No path ever goes to The Collector: only the entry name and a target id
+(tested: `tests/collectorBridge.test.mjs`).
+
+### Updates and removal
+
+`forge_rom_updates` checks GameBanana records with `gamebanana.update_for`
+and Nexus records with `rom_mods.nexus_update_for` (a newer MAIN/UPDATE file,
+not a sibling upload). **Update** installs the new file through the same
+preview into the same target; the record is replaced and keeps the entries
+the new file writes again. **Remove** asks first, naming what moves, then
+calls The Collector's `remove` per entry (moved to `romm-mod-backups`, never
+deleted) and forgets the record once all went. A record with no known
+entries is not removed (Forge never removes a whole folder for it).
+
+### RetroArch cheats
+
+Not done: The Collector's bridge has no cheat target (cheats are a
+per-core `.cht` file plus a RetroArch setting, not a mod folder). Next step:
+a `cheats` target in The Collector, which Forge's tab would list like any
+other.
+
+## Every game in the library
+
+| Game kind | Mod sources | Where mods go | Status |
+|---|---|---|---|
+| Curated Steam game (the 25 supported) | Nexus Mods, GameBanana | The game's rules in `src/games.ts` | Works (as before) |
+| Other Steam game, Nexus page found | Nexus Mods, GameBanana | Guessed mods folder (`experimental_games.inspect_install`); **Mods folder > Change** lists likely folders, a typed folder, or **Browse folders...** (controller picker inside the game folder) | Works; set up from the card or the QAM |
+| Other Steam game, no Nexus page | GameBanana only (`noNexus`, local domain `local-<app id>`, never sent to Nexus; Browse opens GameBanana) | Same as above | Works |
+| Non-Steam shortcut (other launcher, standalone exe) | Nexus Mods (matched by name, picked or searched by hand), or GameBanana only | Folder from the shortcut's start folder (`strShortcutStartDir`, else the exe's folder), else the controller folder picker; remembered per app id (`forge_game_folders`), changeable in the QAM (**Game folder > Change**) | Works; card and tab on its Steam page |
+| Game Steam has no install record for | As above | Controller folder picker | Works |
+| ROM from The Collector (Dolphin, PPSSPP, PCSX2, Azahar/Citra, RetroArch soft patches) | GameBanana (name + platform), Nexus Mods where a page exists, own files in Downloads | The Collector's target for the emulator the ROM launches with (texture packs, graphics mods, Riivolution, `romfs`/`exefs`, soft patches) | Works with The Collector 0.33.0-win.28+; older Collector: page left alone |
+| ROM whose emulator The Collector has no folder rules for (Cemu, xemu, RPCS3, Ryujinx, ...) | - | none | Card says so (*No known mod folder for this emulator*); not moddable until The Collector adds the emulator |
+| PCSX2 `.pnach` patches and cheats, RetroArch cheats | - | - | Not offered (named by the ELF CRC The Collector does not read; cheats have no target yet) |
+| VR games | Same as their kind above (the VR file guard applies to every install) | Same | Works |
+| Anti-cheat game (client-side anti-cheat) | Refused: installs and switching on are blocked by the backend, the card says *Locked · <anti-cheat>* and **Why?** explains; the per-game override stays one press in **Why?** | - | Refused, reason shown (unchanged protections) |
+| Soundtracks, tools, videos | - | - | Not shown (not games) |
+
+**Needs the TV**: the folder hint read from `appDetailsStore` for a shortcut,
+the picker's drive list, and a full shortcut setup.
 
 ## The Mods section
 
@@ -94,11 +284,12 @@ The console (CEF DevTools) says once per session which path was used:
 - *no play section class on this Steam build* when neither class resolves.
 
 RomM shortcuts: The Collector replaces the overview panel with its own
-wrapper (key `romm-play-section`, `data-romm="true"`). Forge does not put
-its row there: non-Steam shortcuts were already left alone (`isGameType`),
-and a page whose `InnerContainer` holds The Collector's wrapper is skipped as
-well (`collectorOwnsPanel`), whichever plugin's route patch runs first. ROMs
-rarely have Nexus mods.
+wrapper (key `romm-play-section`, `data-romm="true"`). The route patch does
+not draw there (`collectorOwnsPanel`), whichever plugin's route patch runs
+first: since anygame.72 Forge is on that page through The Collector's own
+game-page API instead (see "ROM games" above), and the log says *on The
+Collector's page*. Other non-Steam shortcuts (app type `1 << 30`) get the
+card and tab like Steam games (`isGameType`).
 
 **Still to confirm on a TV**: that the play section is within four levels of
 the panel and is handed the game along the way. The depth search is tested
@@ -113,7 +304,11 @@ renamed nearly all classes and whose class names are pinned per Steam build.
 When the class is missing or stale, the fallback goes into whichever
 children array holds the overview panel. No overview panel, no section.
 
-### What it shows
+### What the fallback row shows
+
+Since anygame.72 this row is only the last fallback (neither Steam's tab
+container nor the play section found); its expanded details are the Mods
+tab's content.
 
 **Collapsed (the default)**: one row, 56 px tall, gunmetal with a thin
 crimson bar on the left (`ROW_HEIGHT`, `statusChips`, `compactButtons` and

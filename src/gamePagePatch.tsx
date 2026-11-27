@@ -13,6 +13,15 @@
 // class: basicAppDetailsSectionStylerClasses.PlaySection, else
 // playSectionClasses.Container). The console says once which path was used.
 //
+// anygame.72: in every followed render the patch also looks for Steam's own
+// tab container (an element handed an array of tabs with ids and titles) and
+// adds a "Mods" tab to it; the card under Play then opens that tab with X.
+// Without a tab container, the card under Play carries a tab-like "Mods"
+// header and opens the tab's content in place. Non-Steam shortcuts get the
+// same; a page The Collector draws (a ROM) is left to The Collector, which
+// hosts Forge's tab and card through window.__eternalGamePage
+// (collectorBridge.ts).
+//
 // The old anchor stays as the fallback: a one-line copy in the app details
 // InnerContainer, right before the overview panel. It renders nothing while
 // the copy under Play is mounted, so it only shows when Play's section could
@@ -39,7 +48,11 @@ import { Component, ErrorInfo, ReactNode } from "react";
 import { GameModsSection } from "./GameModsSection";
 import {
   PLAY_SEARCH_DEPTH,
+  addTab,
   collectorOwnsPanel,
+  findTabContainer,
+  steamTabs,
+  tabSwitcher,
   findInsertionChildren,
   gameCarriers,
   isFollowable,
@@ -49,12 +62,14 @@ import {
   placementLog,
   resolveClassModule,
 } from "./gamePageAnchor";
-import { FailureBudget } from "./forgeRules";
+import { FailureBudget, MODS_TAB_ID, MODS_TAB_TITLE } from "./forgeRules";
+import { collectorPageHandled } from "./collectorBridge";
 import { getForgeSetting } from "./forgeSettings";
 
 const ROUTE = "/library/app/:appid";
 const KEY = "forge-mods-section";
 const BELOW_KEY = "forge-mods-below-play";
+const TAB_KEY = "forge-mods-tab";
 const budget = new FailureBudget();
 let patch: RoutePatch | null = null;
 let unloaded = false;
@@ -84,9 +99,12 @@ class ForgeBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 
-// Steam game (1) or demo (8). Shortcuts, soundtracks, tools: left alone.
+// Steam game (1), demo (8) or non-Steam shortcut (1 << 30): every game in
+// the library (anygame.72). Soundtracks, tools, videos: left alone. A ROM
+// shortcut is drawn by The Collector and recognised by its wrapper below.
+const SHORTCUT_TYPE = 1073741824;
 function isGameType(appType: unknown): boolean {
-  return appType === undefined || appType === 1 || appType === 8;
+  return appType === undefined || appType === 1 || appType === 8 || appType === SHORTCUT_TYPE;
 }
 
 let innerContainerClass: string | undefined;
@@ -155,6 +173,25 @@ function onPanelRender(level: number, self: any, args: any[], ret: any): any {
     const own = Number(props?.overview?.appid) || 0;
     const appId = own || activeAppId;
     if (!appId || appId !== activeAppId) return ret;
+    // Steam's own tab container, when this render holds one: Forge's Mods
+    // tab goes last in it, once per render.
+    try {
+      const tabs = findTabContainer(ret);
+      if (tabs) {
+        addTab(
+          tabs,
+          MODS_TAB_ID,
+          MODS_TAB_TITLE,
+          <ForgeBoundary key={TAB_KEY}>
+            <GameModsSection appId={appId} placement="tab" />
+          </ForgeBoundary>
+        );
+        steamTabs.note(appId, tabSwitcher(tabs));
+        placementLog.note(`Mods tab in Steam's tab container (level ${level} below the overview panel)`);
+      }
+    } catch (e) {
+      noteFailure(`adding the Mods tab (level ${level})`, e);
+    }
     const names = playSectionClassNames();
     const match = locatePlaySection(ret, findInReactTree, names);
     if (match) {
@@ -168,6 +205,10 @@ function onPanelRender(level: number, self: any, args: any[], ret: any): any {
           match.slot.children.splice(match.slot.index, 0, section);
         }
         placementLog.note(`under Play (level ${level} below the overview panel, after the play section)`);
+        // Steam's tabs can sit further down than Play: keep looking for them.
+        if (level < PLAY_SEARCH_DEPTH && !steamTabs.injected(appId)) {
+          for (const carrier of gameCarriers(ret)) follow(level + 1, carrier);
+        }
         return ret;
       }
       // The play section is this component's own root: draw the section
@@ -237,9 +278,15 @@ export function registerGamePagePatch(): void {
               // the overview panel, and ROMs rarely have Nexus mods.
               if (collectorOwnsPanel(children)) {
                 activeAppId = 0;
-                placementLog.note("left out (The Collector draws this page)");
+                placementLog.note(
+                  collectorPageHandled(globalThis as any)
+                    ? "on The Collector's page (its tab and card, through window.__eternalGamePage)"
+                    : "left out (The Collector draws this page and has no game-page API)"
+                );
                 return ret;
               }
+              // A fresh page render: the tab container is looked for again.
+              if (activeAppId !== appId) steamTabs.clear(appId);
               activeAppId = appId;
               const at = overviewIndex(children);
               if (at < 0) return ret;

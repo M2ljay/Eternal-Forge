@@ -26,6 +26,10 @@ import {
   outlineTree,
   overviewIndex,
   resolveClassModule,
+  findTabContainer,
+  addTab,
+  tabSwitcher,
+  SteamTabs,
 } from "../.test-build/gamePageAnchor.js";
 
 function find(node, filter, seen = new Set()) {
@@ -366,4 +370,81 @@ test("the outline is bounded and survives odd nodes", () => {
   const wide = { type: "div", props: { children: Array.from({ length: 200 }, () => ({ type: "span", props: {} })) } };
   assert.equal(outlineTree(wide, 6, 60).length, 60);
   assert.deepEqual(outlineTree(null), []);
+});
+
+
+// ---- Steam's tab container (anygame.72) -------------------------------------
+
+const tabsEl = (extra = {}) => ({
+  type: function TabbedPage() {},
+  props: {
+    tabs: [
+      { id: "activity", title: "Activity", content: "a", renderTabAddon: () => null },
+      { id: "info", title: "Game Info", content: "b" },
+    ],
+    activeTab: "activity",
+    ...extra,
+  },
+});
+
+test("a tab container is found by its tabs' shape, deep in a render", () => {
+  const el = tabsEl();
+  const tree = { props: { children: [{ props: { className: "x" } }, { props: { children: el } }] } };
+  const c = findTabContainer(tree);
+  assert.equal(c.node, el);
+  assert.equal(c.prop, "tabs");
+  assert.equal(c.idKey, "id");
+  assert.equal(c.titleKey, "title");
+});
+
+test("label/key shapes and a sections prop also count", () => {
+  const el = { props: { sections: [{ key: "a", label: "A" }, { key: "b", label: "B" }] } };
+  const c = findTabContainer({ props: { children: el } });
+  assert.equal(c.prop, "sections");
+  assert.equal(c.idKey, "key");
+  assert.equal(c.titleKey, "label");
+});
+
+test("no tab container: one tab, plain arrays and missing titles are not tabs", () => {
+  assert.equal(findTabContainer({ props: { tabs: [{ id: "a", title: "A" }] } }), undefined);
+  assert.equal(findTabContainer({ props: { tabs: [1, 2] } }), undefined);
+  assert.equal(findTabContainer({ props: { tabs: [{ id: "a" }, { id: "b" }] } }), undefined);
+  assert.equal(findTabContainer(null), undefined);
+});
+
+test("Forge's tab goes last, once, in a new array, without Steam's callbacks", () => {
+  const el = tabsEl();
+  const before = el.props.tabs;
+  const c = findTabContainer(el);
+  assert.equal(addTab(c, "forge-mods", "Mods", "CONTENT"), true);
+  assert.notEqual(el.props.tabs, before, "Steam's own array is not changed in place");
+  assert.equal(before.length, 2);
+  const last = el.props.tabs[2];
+  assert.deepEqual([last.id, last.title, last.content], ["forge-mods", "Mods", "CONTENT"]);
+  assert.equal(last.renderTabAddon, undefined);
+  assert.equal(addTab(findTabContainer(el), "forge-mods", "Mods", "X"), false);
+  assert.equal(el.props.tabs.length, 3);
+});
+
+test("the card's X opens Steam's tab when the container is controlled, else falls back", () => {
+  const shown = [];
+  const ctl = findTabContainer(tabsEl({ onShowTab: (id) => shown.push(id) }));
+  const tabs = new SteamTabs();
+  tabs.note(5, tabSwitcher(ctl));
+  assert.equal(tabs.open(5, "forge-mods"), true);
+  assert.deepEqual(shown, ["forge-mods"]);
+  tabs.note(6, tabSwitcher(findTabContainer(tabsEl())));
+  assert.equal(tabs.has(6), false);
+  assert.equal(tabs.injected(6), true, "the tab is there, Steam just can't be told to show it");
+  assert.equal(tabs.open(6, "forge-mods"), false, "uncontrolled: open the tab in place instead");
+  tabs.note(7, () => {
+    throw new Error("stale");
+  });
+  assert.equal(tabs.open(7, "forge-mods"), false);
+  assert.equal(tabs.has(7), false, "a broken opener is dropped");
+  let heard = 0;
+  tabs.subscribe(() => heard++);
+  tabs.clear(5);
+  assert.equal(tabs.injected(5), false);
+  assert.equal(heard, 1);
 });

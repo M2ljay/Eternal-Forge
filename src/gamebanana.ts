@@ -17,6 +17,12 @@ export function getGbModId(): number | undefined {
   return gbModId;
 }
 
+/** Point the GameBanana pages at a game without navigating (a store page
+ * rendered in place of another, e.g. Browse for a game with no Nexus page). */
+export function setGbGame(game: SupportedGame): void {
+  gbGame = game;
+}
+
 /** Open the GameBanana store for a game. */
 export function openGameBanana(game: SupportedGame): void {
   gbGame = game;

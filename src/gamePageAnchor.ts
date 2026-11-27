@@ -334,3 +334,152 @@ export const placementLog = new PlacementLog();
 
 /** The one registry the game page uses (GameModsSection reads and writes it). */
 export const placements = new PlacementRegistry();
+
+// ---- Steam's own tab container (anygame.72) --------------------------------
+// Mods become a tab beside Steam's own when a render below the overview panel
+// holds a tab container: an element handed an array of tabs, each with an id
+// and a title (the shape of Steam's tabbed page and of @decky/ui's Tabs:
+// `{ tabs: [{ id, title, content }], activeTab, onShowTab }`). Not seen on a
+// TV yet: when nothing has this shape, the Mods section under Play behaves
+// like a tab instead (forgeRules.gamePagePlacement).
+
+export interface TabContainer {
+  /** The element whose props carry the tabs. */
+  node: any;
+  /** The prop holding the array ("tabs" or "sections"). */
+  prop: string;
+  idKey: "id" | "key";
+  titleKey: "title" | "label";
+}
+
+const TAB_PROPS = ["tabs", "sections"];
+
+function tabShape(list: unknown): { idKey: "id" | "key"; titleKey: "title" | "label" } | undefined {
+  if (!Array.isArray(list) || list.length < 2) return undefined;
+  for (const idKey of ["id", "key"] as const) {
+    for (const titleKey of ["title", "label"] as const) {
+      const all = list.every(
+        (t: any) =>
+          t && typeof t === "object" && (typeof t[idKey] === "string" || typeof t[idKey] === "number") &&
+          (typeof t[titleKey] === "string" || (t[titleKey] && typeof t[titleKey] === "object"))
+      );
+      if (all) return { idKey, titleKey };
+    }
+  }
+  return undefined;
+}
+
+/** The first tab container in one render (tree order), or undefined. Only
+ * props.children is walked, never other props. */
+export function findTabContainer(tree: any, maxDepth = 64): TabContainer | undefined {
+  const seen = new Set<any>();
+  let found: TabContainer | undefined;
+  const walk = (node: any, depth: number): void => {
+    if (found || depth > maxDepth || !node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, depth + 1);
+      return;
+    }
+    const props = node.props;
+    if (!props || typeof props !== "object") return;
+    for (const prop of TAB_PROPS) {
+      const shape = tabShape(props[prop]);
+      if (shape) {
+        found = { node, prop, ...shape };
+        return;
+      }
+    }
+    walk(props.children, depth + 1);
+  };
+  walk(tree, 0);
+  return found;
+}
+
+/** Puts Forge's tab last in the container's tab list (a new array, so a list
+ * Steam reuses is never changed in place). False when it was already there
+ * or the props could not be written. */
+export function addTab(c: TabContainer, id: string, title: string, content: unknown): boolean {
+  const list: any[] = c.node.props[c.prop];
+  if (list.some((t: any) => t?.[c.idKey] === id)) return false;
+  const tab: Record<string, unknown> = { ...(list[list.length - 1] ?? {}) };
+  for (const k of Object.keys(tab)) if (typeof tab[k] === "function" || k === "content" || k === "footer") delete tab[k];
+  tab[c.idKey] = id;
+  tab[c.titleKey] = title;
+  tab.content = content;
+  try {
+    c.node.props[c.prop] = [...list, tab];
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Steam's way to switch tabs, when the container is controlled
+ * (`onShowTab(id)`), else undefined. */
+export function tabSwitcher(c: TabContainer): ((id: string) => void) | undefined {
+  const fn = c.node?.props?.onShowTab ?? c.node?.props?.onSelectTab ?? c.node?.props?.onTabChange;
+  return typeof fn === "function" ? fn : undefined;
+}
+
+/** Remembers, per game, how to open Forge's Steam tab, so the Overview
+ * card's X can switch to it. Falls back to the in-place tab when Steam's tab
+ * could not be opened. */
+export class SteamTabs {
+  private openers = new Map<number, ((id: string) => void) | undefined>();
+  private listeners = new Set<() => void>();
+
+  /** Forge's tab was added to the game's Steam tab container; `open` is
+   * Steam's switcher when the container is controlled. */
+  note(appId: number, open: ((id: string) => void) | undefined): void {
+    const had = this.openers.has(appId);
+    const before = this.openers.get(appId);
+    this.openers.set(appId, open);
+    if (!had || before !== open) this.emit();
+  }
+
+  /** The page was drawn again without a tab container. */
+  clear(appId: number): void {
+    if (this.openers.delete(appId)) this.emit();
+  }
+
+  /** Forge's tab is in Steam's tab container for this game. */
+  injected(appId: number): boolean {
+    return this.openers.has(appId);
+  }
+
+  /** Steam's tab can be switched to from the card. */
+  has(appId: number): boolean {
+    return typeof this.openers.get(appId) === "function";
+  }
+
+  /** True when Steam was asked to show the tab. */
+  open(appId: number, id: string): boolean {
+    const fn = this.openers.get(appId);
+    if (typeof fn !== "function") return false;
+    try {
+      fn(id);
+      return true;
+    } catch {
+      this.openers.set(appId, undefined);
+      return false;
+    }
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of [...this.listeners]) {
+      try {
+        fn();
+      } catch {
+        // one listener's failure must not stop the others
+      }
+    }
+  }
+}
+
+export const steamTabs = new SteamTabs();

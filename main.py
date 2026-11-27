@@ -35075,18 +35075,32 @@ query CollectionInstructions($slug: String!) {
                 return slim
         return []
 
-    def _experimental_install(self, app_id: int) -> dict:
+    def _experimental_install(self, app_id: int, folder_hint: str = "") -> dict:
         """installdir/name from the appmanifest, the game path, and a guess at
-        its engine and mods folder."""
-        manifest = _find_in_libraries(f"appmanifest_{int(app_id)}.acf")
+        its engine and mods folder.
+
+        A game Steam has no manifest for (a non-Steam shortcut, a game from
+        another launcher) uses the folder the user picked for it with the
+        controller folder picker (remembered per app id in settings.json,
+        "forge_game_folders"), else the shortcut's start folder the frontend
+        read from Steam (folder_hint). The install dir is then that absolute
+        path; _game_dir() hands an absolute path back unchanged."""
+        manifest = _find_in_libraries(f"appmanifest_{int(app_id)}.acf") if int(app_id) < 0x80000000 else ""
         info = experimental_games.read_appmanifest(manifest) if manifest else {}
         install_dir = info.get("installdir", "")
         if not install_dir:
-            return {"installDir": "", "steamName": "",
+            chosen = (_load_settings().get("forge_game_folders") or {}).get(str(int(app_id))) or ""
+            for cand in (chosen, folder_hint or ""):
+                if cand and os.path.isabs(cand) and os.path.isdir(cand):
+                    install_dir = os.path.normpath(cand)
+                    break
+        if not install_dir:
+            return {"installDir": "", "steamName": "", "needsFolder": True,
                     "inspection": {"engine": "missing", "modsSubdir": "",
                                    "processName": "",
                                    "note": "Steam has no install record for "
-                                           "this game on this PC."}}
+                                           "this game on this PC. Pick its "
+                                           "folder with Choose folder."}}
         path = _game_dir(install_dir)
         return {
             "installDir": install_dir,
@@ -35095,11 +35109,12 @@ query CollectionInstructions($slug: String!) {
             "inspection": experimental_games.inspect_install(path),
         }
 
-    async def find_experimental_game(self, app_id: int, display_name: str) -> dict:
-        """Match a Steam game to a Nexus domain and inspect its install."""
+    async def find_experimental_game(self, app_id: int, display_name: str, folder_hint: str = "") -> dict:
+        """Match a Steam game (or a non-Steam shortcut) to a Nexus domain and
+        inspect its install."""
         try:
             app_id = int(app_id)
-            local = await asyncio.to_thread(self._experimental_install, app_id)
+            local = await asyncio.to_thread(self._experimental_install, app_id, folder_hint)
             name = local.get("steamName") or display_name or ""
             games = await self._nexus_games_list()
             if games:
@@ -35143,23 +35158,37 @@ query CollectionInstructions($slug: String!) {
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     async def save_experimental_game(
-        self, app_id: int, display_name: str, domain: str, nexus_name: str
+        self, app_id: int, display_name: str, domain: str, nexus_name: str, folder_hint: str = ""
     ) -> dict:
-        """Remember a Steam game as an experimental Nexus game."""
+        """Remember a game as an experimental Nexus game. domain "" sets it up
+        without a Nexus Mods page (GameBanana and the user's own files only):
+        it gets the local domain "local-<app id>", which keys its install
+        records and is never sent to Nexus."""
+        no_nexus = not domain
+        if no_nexus:
+            domain = f"local-{int(app_id or 0)}"
         if not re.fullmatch(r"[a-z0-9_-]+", domain or ""):
             return {"ok": False, "error": "Invalid game domain"}
         try:
             app_id = int(app_id)
-            local = await asyncio.to_thread(self._experimental_install, app_id)
+            local = await asyncio.to_thread(self._experimental_install, app_id, folder_hint)
+            if not local.get("installDir"):
+                return {"ok": False, "needsFolder": True,
+                        "error": "Forge doesn't know where this game is installed. Choose its folder first."}
             game = experimental_games.build_game(
                 app_id, display_name or local.get("steamName", ""),
                 local.get("installDir", ""), domain, nexus_name,
                 local["inspection"],
             )
-            try:
-                await self._experimental_framework(game)
-            except Exception:  # noqa: BLE001 - retried on next load
-                decky.logger.exception("experimental framework check failed")
+            if no_nexus:
+                game["noNexus"] = True
+                game["frameworkChecked"] = True
+                game["profileVersion"] = experimental_games.PROFILE_VERSION
+            else:
+                try:
+                    await self._experimental_framework(game)
+                except Exception:  # noqa: BLE001 - retried on next load
+                    decky.logger.exception("experimental framework check failed")
             settings = _load_settings()
             settings.setdefault("experimental_games", {})[str(app_id)] = game
             _save_settings(settings)
@@ -35889,7 +35918,7 @@ query CollectionInstructions($slug: String!) {
         root = _game_dir(game.get("installDirName") or "")
         opts = await asyncio.to_thread(
             experimental_games.folder_options, root, game.get("modsSubdir") or "")
-        return {"ok": True, "current": game.get("modsSubdir") or "", "options": opts}
+        return {"ok": True, "current": game.get("modsSubdir") or "", "options": opts, "root": root}
 
     async def set_experimental_mods_folder(self, app_id: int, subdir: str) -> dict:
         """Point an experimental game at a different mods folder. Refused
@@ -35916,6 +35945,35 @@ query CollectionInstructions($slug: String!) {
         self._exp_save(game)
         decky.logger.info(f"experimental {game['nexusDomain']}: mods folder set to {subdir!r}")
         return {"ok": True, "game": game}
+
+    async def set_game_folder(self, app_id: int, path: str) -> dict:
+        """Remember where a game Steam has no install record for lives (a
+        non-Steam shortcut, another launcher's game), picked with the
+        controller folder picker. A game already set up moves to it, unless
+        mods installed into the old folder would be stranded."""
+        app_id = int(app_id or 0)
+        if not app_id or not path or not os.path.isabs(path) or not os.path.isdir(path):
+            return {"ok": False, "error": "Pick an existing folder"}
+        path = os.path.normpath(path)
+        if len(path) <= 3 or os.path.dirname(path) == path:
+            return {"ok": False, "error": "Pick the game's own folder, not a whole drive"}
+        game = self._exp_game(app_id)
+        if game and game.get("installDirName") and os.path.normcase(_game_dir(game["installDirName"])) != os.path.normcase(path):
+            records = _load_settings().get("installed", {}).get(game.get("nexusDomain") or "", {})
+            if records:
+                return {"ok": False, "error": (
+                    f"Uninstall this game's {len(records)} mod(s) first: they are in the old folder.")}
+        settings = _load_settings()
+        settings.setdefault("forge_game_folders", {})[str(app_id)] = path
+        _save_settings(settings)
+        if game:
+            game["installDirName"] = path
+            inspection = await asyncio.to_thread(experimental_games.inspect_install, path)
+            if not game.get("modsSubdirChosen") and inspection.get("modsSubdir"):
+                game["modsSubdir"] = inspection["modsSubdir"]
+            self._exp_save(game)
+        decky.logger.info(f"forge: game folder for {app_id} set")
+        return {"ok": True, "path": path, "game": game}
 
     async def set_experimental_framework(self, app_id: int, mode: str) -> dict:
         """mode "none": this game needs no Step 1 (the guess was wrong) - the
@@ -38471,6 +38529,309 @@ Plugin.gb_unlink_game = _gb_unlink_game
 Plugin.gb_list_mods = _gb_list_mods
 Plugin.gb_get_mod = _gb_get_mod
 Plugin.gb_update_target = _gb_update_target
+
+
+# ---- Forge for ROM games (The Collector) ---------------------------------------
+# The Collector (eternal-romm) owns the emulator side: mod folders, preview,
+# install, backups, removal. Forge finds a mod (GameBanana, Nexus Mods),
+# downloads it through the usual pipeline, and puts it at the top of the
+# Downloads folder The Collector lists, under a name of its own. The
+# frontend then hands The Collector that entry NAME (never a path). Forge
+# keeps a record per ROM of what it installed (py_modules/rom_mods.py), so
+# the card can count mods and updates can be offered. Pure rules and the
+# store are in rom_mods.py; this is the I/O.
+
+rom_mods = _guarded_import("rom_mods")
+_ROM_STORE = None
+
+
+def _rom_store():
+    global _ROM_STORE
+    if _ROM_STORE is None:
+        _ROM_STORE = rom_mods.RecordStore(os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "forge-rom-mods.json"))
+    return _ROM_STORE
+
+
+def _collector_downloads_candidates() -> list:
+    """The folder The Collector lists as Downloads: %USERPROFILE%\\Downloads,
+    else the home folder's Downloads when USERPROFILE is unset. A relocated
+    Downloads folder is not followed (the contract with The Collector)."""
+    home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    return [os.path.join(home, "Downloads")]
+
+
+def _rom_downloads(folder: str) -> str:
+    """The Downloads folder to stage into: the one The Collector reported,
+    accepted only when it is one of the user's own Downloads folders."""
+    for cand in _collector_downloads_candidates():
+        if rom_mods.same_folder(folder, cand) and os.path.isdir(cand):
+            return cand
+    return ""
+
+
+async def _forge_rom_link(self, app_id: int, name: str, platform_slug: str = "") -> dict:
+    """The ROM's GameBanana and Nexus Mods games: linked ones, else a link
+    made by itself when one candidate is clearly the game, else ranked
+    candidates for the user to pick. Each source fails on its own."""
+    app_id = int(app_id or 0)
+    if not app_id:
+        return {"ok": False, "error": "No game"}
+    info = rom_mods.platform_info(platform_slug)
+    out = {"ok": True, "platform": info, "gamebanana": {"linked": None, "candidates": []},
+           "nexus": {"linked": None, "candidates": []}}
+    # GameBanana
+    link = _gb_state(_load_settings())["games"].get(str(app_id))
+    if link:
+        out["gamebanana"]["linked"] = link
+    else:
+        try:
+            cands = []
+            for q in rom_mods.search_queries(name, platform_slug):
+                cands += await _gb_client().match_games(q)
+            ranked = rom_mods.rank_candidates(name, platform_slug, cands)
+            best = rom_mods.auto_pick(ranked)
+            if best:
+                link = {"id": best["id"], "name": best["name"], "auto": True}
+                settings = _load_settings()
+                _gb_state(settings)["games"][str(app_id)] = link
+                _save_settings(settings)
+                decky.logger.info(f"forge rom: {name!r} ({info['slug']}) linked to GameBanana game {best['id']}")
+                out["gamebanana"]["linked"] = link
+            else:
+                out["gamebanana"]["candidates"] = ranked[:12]
+        except gamebanana.GBError as e:
+            out["gamebanana"]["error"] = str(e) or "GameBanana did not answer"
+    # Nexus Mods
+    nlink = _rom_store().link(app_id, "nexus")
+    if nlink:
+        out["nexus"]["linked"] = nlink
+    else:
+        try:
+            games = await self._nexus_games_list()
+            match = experimental_games.match_games(games, rom_mods.clean_rom_name(name)) if games else {
+                "exact": None, "candidates": []}
+            if match.get("exact"):
+                nlink = {"domain": match["exact"]["domain"], "name": match["exact"]["name"], "auto": True}
+                _rom_store().link(app_id, "nexus", nlink)
+                out["nexus"]["linked"] = nlink
+            else:
+                out["nexus"]["candidates"] = (match.get("candidates") or [])[:8]
+        except Exception as e:  # noqa: BLE001 - Nexus is optional here
+            out["nexus"]["error"] = f"{type(e).__name__}"
+    return out
+
+
+async def _forge_rom_set_nexus(self, app_id: int, domain: str, name: str = "") -> dict:
+    """Link a ROM to a Nexus Mods game, or forget the link (domain "")."""
+    app_id = int(app_id or 0)
+    if not app_id:
+        return {"ok": False, "error": "No game"}
+    if not domain:
+        _rom_store().link(app_id, "nexus", clear=True)
+        return {"ok": True, "linked": None}
+    if not re.fullmatch(r"[a-z0-9_-]+", domain):
+        return {"ok": False, "error": "Invalid game domain"}
+    link = {"domain": domain, "name": name or domain, "auto": False}
+    _rom_store().link(app_id, "nexus", link)
+    return {"ok": True, "linked": link}
+
+
+async def _search_nexus_games(self, query: str) -> dict:
+    """Nexus Mods games by name, for the manual game picker (any game kind)."""
+    q = (query or "").strip()
+    if len(q) < 2:
+        return {"ok": True, "games": []}
+    games = await self._nexus_games_list()
+    if not games:
+        return {"ok": False, "error": "Nexus Mods' game list could not be loaded."}
+    match = experimental_games.match_games(games, q)
+    found = ([match["exact"]] if match.get("exact") else []) + list(match.get("candidates") or [])
+    nq = rom_mods.norm(q)
+    seen = {g["domain"] for g in found}
+    for g in games:
+        if len(found) >= 15:
+            break
+        gname = str(g.get("name") or "")
+        if nq and nq in rom_mods.norm(gname) and g.get("domain_name") not in seen:
+            seen.add(g.get("domain_name"))
+            found.append({"domain": g.get("domain_name"), "name": gname, "mods": int(g.get("mods") or 0)})
+    return {"ok": True, "games": found[:15]}
+
+
+def _rom_stage_blocking(src: str, downloads: str, entry: str, kind: str, extracted: str) -> str:
+    """Copy (zip, patch) or move (extracted folder) into Downloads. '' or error."""
+    target = os.path.join(downloads, entry)
+    if os.path.lexists(target):
+        return "That name is already taken in Downloads."
+    try:
+        if kind == "extract":
+            shutil.move(extracted, target)
+        else:
+            tmp = target + ".forge-part"
+            shutil.copyfile(src, tmp)
+            os.replace(tmp, target)
+    except OSError as e:
+        return f"Could not write into Downloads: {e}"
+    return ""
+
+
+async def _forge_rom_stage(self, app_id: int, source: str, mod_id: int, file_id: int, file_name: str,
+                           mod_name: str, collector_folder: str, game_domain: str = "") -> dict:
+    """Download a mod file and put it at the top of The Collector's Downloads
+    folder under the archive's own name. Returns the Downloads ENTRY NAME the
+    frontend gives The Collector. A .zip or soft patch is copied as is; any
+    other archive is unpacked into a folder named after it, because The
+    Collector reads only .zip archives."""
+    if source not in ("gamebanana", "nexus"):
+        return {"ok": False, "error": "Unknown source"}
+    mod_id, file_id = int(mod_id or 0), int(file_id or 0)
+    if source == "gamebanana" and not gamebanana.is_gb_id(mod_id):
+        return {"ok": False, "error": "Not a GameBanana mod"}
+    if source == "nexus" and (gamebanana.is_gb_id(mod_id) or not re.fullmatch(r"[a-z0-9_-]+", game_domain or "")):
+        return {"ok": False, "error": "Not a Nexus Mods mod"}
+    downloads = _rom_downloads(collector_folder)
+    if not downloads:
+        return {"ok": False, "reason": "downloads_mismatch",
+                "error": "The Collector reads a Downloads folder Forge can't confirm as yours, so nothing was put there."}
+    err, archive = await _download_archive(game_domain if source == "nexus" else "", mod_id, file_id,
+                                           file_name or "", _load_settings().get("api_key"))
+    if err:
+        return {"ok": False, "error": err}
+    kind = rom_mods.stage_kind(file_name)
+    try:
+        taken = os.listdir(downloads)
+    except OSError as e:
+        return {"ok": False, "error": f"Could not read Downloads: {e}"}
+    entry = rom_mods.stage_entry_name(mod_name, file_name, taken)
+    extracted = ""
+    if kind == "extract":
+        extracted = os.path.join(DOWNLOADS_DIR, f"rom-stage-{mod_id}-{file_id}")
+        _force_rmtree(extracted)
+        os.makedirs(extracted, exist_ok=True)
+        problem = await _extract_archive(archive, extracted)
+        if problem:
+            _force_rmtree(extracted)
+            return {"ok": False, "error": f"Could not unpack the download: {problem}"}
+    problem = await asyncio.to_thread(_rom_stage_blocking, archive, downloads, entry, kind, extracted)
+    if extracted:
+        _force_rmtree(extracted)
+    if problem:
+        return {"ok": False, "error": problem}
+    _rom_store().note_staged(entry)
+    decky.logger.info(f"forge rom: staged {source} {mod_id}/{file_id} for app {int(app_id)} as {entry!r}")
+    return {"ok": True, "entry": entry, "kind": "folder" if kind == "extract" else kind}
+
+
+async def _forge_rom_unstage(self, entry: str, collector_folder: str) -> dict:
+    """Take a Downloads entry Forge itself staged away again (after the
+    install, or when the user backs out). Only names Forge recorded when it
+    created them (a name already taken is never reused: "pack (2).zip") are
+    touched; the archive stays in Forge's own cache."""
+    if not rom_mods.is_entry_name(entry or ""):
+        return {"ok": False, "error": "Not an entry Forge staged"}
+    if entry not in _rom_store().staged():
+        return {"ok": False, "error": "Not an entry Forge staged"}
+    downloads = _rom_downloads(collector_folder)
+    if not downloads:
+        return {"ok": False, "error": "Unknown Downloads folder"}
+    path = os.path.join(downloads, entry)
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            await asyncio.to_thread(_force_rmtree, path)
+        elif os.path.isfile(path):
+            os.remove(path)
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    _rom_store().note_staged(entry, add=False)
+    return {"ok": True}
+
+
+async def _forge_rom_record(self, app_id: int, record: dict) -> dict:
+    """Remember a mod Forge installed for a ROM through The Collector."""
+    try:
+        rec = rom_mods.make_record(record or {}, time.time())
+    except (ValueError, TypeError) as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "mods": _rom_store().put(int(app_id), rec)}
+
+
+async def _forge_rom_forget(self, app_id: int, record_id: str) -> dict:
+    return {"ok": True, "mods": _rom_store().forget(int(app_id), str(record_id or ""))}
+
+
+async def _forge_rom_mods(self, app_id: int) -> dict:
+    return {"ok": True, "mods": _rom_store().records(int(app_id))}
+
+
+async def _forge_rom_updates(self, app_id: int) -> dict:
+    """{record id: {current, file}} for records with a newer file. GameBanana
+    by gamebanana.update_for, Nexus Mods by rom_mods.nexus_update_for."""
+    recs = _rom_store().records(int(app_id))
+    out = {}
+    gb = [r for r in recs if r.get("source") == "gamebanana" and gamebanana.is_gb_id(r.get("mod_id"))]
+    if gb:
+        try:
+            files = await _gb_client().files_for([gamebanana.from_local(r["mod_id"]) for r in gb])
+        except gamebanana.GBError:
+            files = {}
+        for r in gb:
+            got = files.get(gamebanana.from_local(r["mod_id"])) or []
+            u = gamebanana.update_for({"file_id": r.get("file_id"), "file_name": r.get("file_name"),
+                                       "gb_file_date": r.get("file_date"), "installed_at": r.get("installed_at")},
+                                      got)
+            if u.get("update_available") and u.get("file"):
+                f = u["file"]
+                out[r["id"]] = {"current": u.get("current") or "", "file": {
+                    "file_id": f["file_id"], "file_name": f["file_name"], "name": f["name"],
+                    "version": f.get("version") or "", "date": f.get("date") or 0}}
+    for r in recs:
+        if r.get("source") != "nexus" or not r.get("domain"):
+            continue
+        got = await self.get_mod_files(r["domain"], int(r.get("mod_id") or 0))
+        f = rom_mods.nexus_update_for(r, got.get("files") or []) if got.get("ok") else None
+        if f:
+            out[r["id"]] = {"current": f.get("version") or f.get("name") or "", "file": {
+                "file_id": f["file_id"], "file_name": f["file_name"], "name": f["name"],
+                "version": f.get("version") or "", "date": f.get("uploaded_timestamp") or 0}}
+    return {"ok": True, "updates": out}
+
+
+async def _forge_list_folders(self, path: str = "") -> dict:
+    """Folders for the controller folder picker: the drives (Windows) or the
+    filesystem root when path is "", else path's subfolders. Names only."""
+    try:
+        if not path:
+            if sys.platform == "win32":
+                import string
+                roots = [f"{d}:\\" for d in string.ascii_uppercase if os.path.isdir(f"{d}:\\")]
+            else:
+                roots = ["/"]
+            return {"ok": True, "path": "", "parent": "", "folders": roots}
+        real = os.path.abspath(path)
+        if not os.path.isdir(real):
+            return {"ok": False, "error": "That folder does not exist."}
+        names = sorted((n for n in os.listdir(real)
+                        if os.path.isdir(os.path.join(real, n)) and not n.startswith(("$", "."))),
+                       key=str.lower)
+        parent = os.path.dirname(real.rstrip("\\/"))
+        if parent == real or (sys.platform == "win32" and len(real) <= 3):
+            parent = ""
+        return {"ok": True, "path": real, "parent": parent, "folders": names[:500],
+                "truncated": len(names) > 500}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+
+Plugin.forge_rom_link = _forge_rom_link
+Plugin.forge_rom_set_nexus = _forge_rom_set_nexus
+Plugin.search_nexus_games = _search_nexus_games
+Plugin.forge_rom_stage = _forge_rom_stage
+Plugin.forge_rom_unstage = _forge_rom_unstage
+Plugin.forge_rom_record = _forge_rom_record
+Plugin.forge_rom_forget = _forge_rom_forget
+Plugin.forge_rom_mods = _forge_rom_mods
+Plugin.forge_rom_updates = _forge_rom_updates
+Plugin.forge_list_folders = _forge_list_folders
 
 
 def _gb_nexus_file(f: dict, primary: bool) -> dict:

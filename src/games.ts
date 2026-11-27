@@ -347,6 +347,10 @@ export interface SupportedGame {
   /** Shown as a banner at the top of the QAM panel: support for this game
    * is real but rough. Honest signposting beats silent rough edges. */
   underConstruction?: string;
+  /** Set up without a Nexus Mods page (anygame.72): its domain is the local
+   * "local-<app id>", which keys install records and is never sent to Nexus.
+   * Its store is GameBanana; Browse opens that instead. */
+  noNexus?: boolean;
   /** Shown near the top of the QAM panel for good: what a player must know
    * about modding this game that no Step can do for them (RDR2: mods are
    * Story Mode only). Unlike underConstruction, it stays once support is

@@ -54,6 +54,11 @@ import {
   profileSwitchSummary,
   sortOutcome,
   warningSummary,
+  cardSummary,
+  gamePagePlacement,
+  updatesChip,
+  activeLabel,
+  MODS_TAB_ID,
 } from "../.test-build/forgeRules.js";
 import { exitReturnsToGamePage } from "../.test-build/navRules.js";
 
@@ -106,13 +111,14 @@ test("the patch switches itself off after the failure limit, and says so once", 
 
 test("the section shows only where it has something to say", () => {
   const m = (o) => sectionMode({ managed: false, locked: false, experimental: false, enabledSetting: true, ...o });
-  assert.equal(m({}), "hidden");
+  // Every game is offered setup (anygame.72), any-game mode on or off.
+  assert.equal(m({}), "setup");
   assert.equal(m({ managed: true }), "mods");
   assert.equal(m({ managed: true, locked: true }), "locked");
   assert.equal(m({ experimental: true }), "setup");
   assert.equal(m({ experimental: true, locked: true }), "locked");
-  // An unmanaged locked game with any-game mode off is not ours to talk about.
-  assert.equal(m({ locked: true }), "hidden");
+  // A locked game says so, set up or not: the refusal is shown, not hidden.
+  assert.equal(m({ locked: true }), "locked");
   assert.equal(m({ managed: true, locked: true, enabledSetting: false }), "hidden");
 });
 
@@ -495,8 +501,11 @@ test("A on the row expands under Play; the one-line fallback above never grows",
   assert.equal(rowPress("above"), "open");
   const src = readCode("GameModsSection.tsx");
   assert.match(src, /const open = press === "toggle" && expanded;/);
-  assert.match(src, /\{open && \(/, "details render only when expanded under Play");
+  assert.match(src, /\{open && detailsBody\}/, "details render only when expanded under Play");
   assert.match(src, /useState\(false\)/, "collapsed by default");
+  // anygame.72: the card's tab content is the same details, closed by default.
+  assert.match(src, /const \[tabOpen, setTabOpen\] = useState\(false\);/);
+  assert.match(src, /onSecondaryButton=\{openTab\}/, "X opens the Mods tab");
 });
 
 test("expanded: details are one line each, OptiScaler and Load order live there", () => {
@@ -536,4 +545,44 @@ test("the anti-cheat override is reachable only through the Why? modal", () => {
   assert.deepEqual(lockModalActions({ locked: true, override_allowed: true, override_on: false }), ["allow-anyway"]);
   assert.deepEqual(lockModalActions({ locked: true, override_allowed: false, override_on: false }), []);
   assert.deepEqual(lockModalActions({ locked: false, override_allowed: true, override_on: true }), ["lock-again"]);
+});
+
+
+// ---- The Overview card and the placement order (anygame.72) -------------------
+
+const AC_OFF = { products: [], override_on: false, detected: false };
+
+test("placement falls back tab -> section -> row, and nothing without the overview", () => {
+  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: true, playSection: true }), "tab");
+  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: false, playSection: true }), "section");
+  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: true, playSection: false }), "tab");
+  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: false, playSection: false }), "row");
+  assert.equal(gamePagePlacement({ overviewFound: false, tabContainer: true, playSection: true }), "none");
+  assert.equal(MODS_TAB_ID, "forge-mods");
+});
+
+test("the card counts active mods and updates, with one status line", () => {
+  const mods = [{ folder: "a", enabled: true }, { folder: "b", enabled: true }, { folder: "c", enabled: false }];
+  const c = cardSummary({ mode: "mods", anticheat: AC_OFF, mods, updates: 2, offer: false });
+  assert.deepEqual(c, { active: 2, updates: 2, status: { text: "Updates waiting", tone: "warn" } });
+  assert.equal(updatesChip(2), "2 updates");
+  assert.equal(updatesChip(1), "1 update");
+  assert.equal(updatesChip(0), null);
+  assert.equal(activeLabel(2, 3), "2 active");
+  assert.equal(activeLabel(0, 0), "No mods");
+});
+
+test("the status line: load order OK, problems, lock, offer, setup", () => {
+  const mods = [{ folder: "a", enabled: true }];
+  const base = { mode: "mods", anticheat: AC_OFF, mods, updates: 0, offer: false };
+  assert.deepEqual(cardSummary({ ...base, loadOrder: { error: 0, warn: 0 } }).status, { text: "Load order OK", tone: "ok" });
+  assert.deepEqual(cardSummary({ ...base, loadOrder: { error: 1, warn: 0 } }).status, { text: "Load order: 1 problem", tone: "error" });
+  assert.equal(cardSummary(base).status.text, "Up to date");
+  assert.equal(cardSummary({ ...base, mods: [] }).status.text, "No mods yet");
+  assert.equal(cardSummary({ ...base, mods: undefined }).status.text, "Reading...");
+  assert.equal(cardSummary({ ...base, offer: true }).status.tone, "warn");
+  const locked = cardSummary({ ...base, mode: "locked", anticheat: { products: ["Ricochet"], override_on: false, detected: true }, updates: 3 });
+  assert.deepEqual(locked.status, { text: "Locked · Ricochet", tone: "error" });
+  assert.equal(locked.updates, 0, "no update chip on a locked game");
+  assert.equal(cardSummary({ ...base, mode: "setup" }).status.tone, "hint");
 });

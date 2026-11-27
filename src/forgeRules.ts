@@ -47,9 +47,12 @@ export function sectionMode(o: {
   if (!o.enabledSetting) return "hidden";
   // A locked game says so even when the plugin does not manage it: that is
   // the moment someone is about to mod it some other way.
-  if (o.locked && (o.managed || o.experimental)) return "locked";
+  if (o.locked) return "locked";
   if (o.managed) return "mods";
-  return o.experimental ? "setup" : "hidden";
+  // Every game in the library is offered setup (anygame.72): the setup flow
+  // switches the any-game mode on itself, so `experimental` no longer hides
+  // the card.
+  return "setup";
 }
 
 export interface ModLike {
@@ -602,3 +605,88 @@ export function lockModalActions(ac: Pick<AntiCheatVerdict, "locked" | "override
 export function lockSummary(ac: Pick<AntiCheatVerdict, "products">): string {
   return `${anticheatName(ac.products)}: installing or switching mods on is off`;
 }
+
+
+// ---- The Overview card (anygame.72) --------------------------------------------
+// On the game page, mods are a Mods tab (beside Steam's or The Collector's own
+// tabs) plus a card in the Overview: the active-mod count, an amber "N
+// updates" chip when updates exist, and ONE status line. X on the card opens
+// the Mods tab. It replaces the row under Play; the row stays only as the
+// fallback when neither the tab container nor the play section is found.
+
+export type StatusTone = "ok" | "warn" | "error" | "hint";
+
+export interface CardSummary {
+  /** Mods switched on (always-on loose files included). */
+  active: number;
+  /** Pending updates; the chip shows only when > 0. */
+  updates: number;
+  status: { text: string; tone: StatusTone };
+}
+
+export interface CardSummaryInput {
+  mode: SectionMode;
+  anticheat: Pick<AntiCheatVerdict, "products" | "override_on" | "detected">;
+  mods?: ModLike[];
+  updates: number;
+  offer: boolean;
+  /** Load-order problem counts for games with a load order, else undefined. */
+  loadOrder?: { error: number; warn: number };
+}
+
+/** The card's numbers and its one status line, most urgent first: the
+ * anti-cheat lock, a crash restore offer, setup, reading, the load order
+ * ("Load order OK"), then a plain state. */
+export function cardSummary(c: CardSummaryInput): CardSummary {
+  const list = c.mods ?? [];
+  const active = list.filter((m) => m.enabled).length;
+  const updates = c.mode === "mods" ? Math.max(0, c.updates) : 0;
+  const status = ((): CardSummary["status"] => {
+    if (c.mode === "locked") return { text: `Locked · ${anticheatName(c.anticheat.products)}`, tone: "error" };
+    if (c.offer) return { text: "Closed early twice · restore offered", tone: "warn" };
+    if (c.mode === "setup") return { text: "Not set up · press X to set up", tone: "hint" };
+    if (!c.mods) return { text: "Reading...", tone: "hint" };
+    if (c.anticheat.detected && c.anticheat.override_on) return { text: "Anti-cheat lock off", tone: "error" };
+    if (c.loadOrder) {
+      const w = warningSummary(c.loadOrder);
+      return w.tone === "ok" ? { text: "Load order OK", tone: "ok" } : { text: `Load order: ${w.text}`, tone: w.tone };
+    }
+    if (list.length === 0) return { text: "No mods yet", tone: "hint" };
+    if (active === 0) return { text: `All ${list.length} off`, tone: "hint" };
+    return { text: updates ? "Updates waiting" : "Up to date", tone: updates ? "warn" : "ok" };
+  })();
+  return { active, updates, status };
+}
+
+/** "3 active", "1 active", "No mods". */
+export function activeLabel(n: number, total: number): string {
+  if (total === 0) return "No mods";
+  return `${n} active`;
+}
+
+/** "1 update", "2 updates". */
+export function updatesChip(n: number): string | null {
+  return n > 0 ? `${n} update${n === 1 ? "" : "s"}` : null;
+}
+
+/** Where the game page puts Forge, in fallback order:
+ * - "tab": a Mods tab in Steam's own tab container, plus the card under Play;
+ * - "section": no tab container, so a Mods section that behaves like a tab
+ *   (a focusable "Mods" tab header, the card, and the tab's content opening
+ *   below it) under Play;
+ * - "row": neither anchor - the old one-line row above the overview panel.
+ * "none" when the page is not one Forge draws on. */
+export type GamePagePlacement = "tab" | "section" | "row" | "none";
+
+export function gamePagePlacement(o: { overviewFound: boolean; tabContainer: boolean; playSection: boolean }): GamePagePlacement {
+  if (!o.overviewFound) return "none";
+  if (o.playSection && o.tabContainer) return "tab";
+  if (o.playSection) return "section";
+  if (o.tabContainer) return "tab";
+  return "row";
+}
+
+/** The id and title Forge's tab carries in Steam's tab container and in The
+ * Collector's game page. */
+export const MODS_TAB_ID = "forge-mods";
+export const MODS_TAB_TITLE = "Mods";

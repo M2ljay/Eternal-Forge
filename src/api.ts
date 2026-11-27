@@ -2352,10 +2352,13 @@ export const setExperimentalEnabled = callable<
 >("set_experimental_enabled");
 
 export const findExperimentalGame = callable<
-  [app_id: number, display_name: string],
+  /** folder_hint: a non-Steam shortcut's start folder, read from Steam. */
+  [app_id: number, display_name: string, folder_hint?: string],
   {
     ok: boolean;
     error?: string;
+    /** Steam has no install record and no folder is known: pick one. */
+    needsFolder?: boolean;
     name?: string;
     exact?: ExperimentalCandidate | null;
     candidates?: ExperimentalCandidate[];
@@ -2365,9 +2368,29 @@ export const findExperimentalGame = callable<
 >("find_experimental_game");
 
 export const saveExperimentalGame = callable<
-  [app_id: number, display_name: string, domain: string, nexus_name: string],
-  { ok: boolean; error?: string; game?: SupportedGame }
+  /** domain "": no Nexus Mods page (GameBanana and own files only). */
+  [app_id: number, display_name: string, domain: string, nexus_name: string, folder_hint?: string],
+  { ok: boolean; error?: string; needsFolder?: boolean; game?: SupportedGame }
 >("save_experimental_game");
+
+/** Where a game Steam has no install record for lives (controller folder
+ * picker), remembered per app id. */
+export const setGameFolder = callable<
+  [app_id: number, path: string],
+  { ok: boolean; error?: string; path?: string; game?: SupportedGame | null }
+>("set_game_folder");
+
+/** Folder names for the controller folder picker; "" lists the drives. */
+export const forgeListFolders = callable<
+  [path: string],
+  { ok: boolean; error?: string; path?: string; parent?: string; folders?: string[]; truncated?: boolean }
+>("forge_list_folders");
+
+/** Nexus Mods games by name, for the manual game picker. */
+export const searchNexusGames = callable<
+  [query: string],
+  { ok: boolean; error?: string; games?: ExperimentalCandidate[] }
+>("search_nexus_games");
 
 export const removeExperimentalGame = callable<
   [app_id: number],
@@ -2458,7 +2481,7 @@ export const checkExperimentalCoverage = callable<
 
 export const experimentalFolderOptions = callable<
   [app_id: number],
-  { ok: boolean; error?: string; current?: string; options?: string[] }
+  { ok: boolean; error?: string; current?: string; options?: string[]; root?: string }
 >("experimental_folder_options");
 
 export const installReshade = callable<
@@ -3221,3 +3244,73 @@ export const forgeProfileApplyOrder = callable<
   [app_id: number, name: string, game_domain: string, install_dir: string],
   { ok: boolean; error?: string; running?: boolean; notes?: string[]; released?: string[]; state?: ForgeLoadOrderState }
 >("forge_profile_apply_order");
+
+
+// ---- ROM games via The Collector (anygame.72) ------------------------------
+// See py_modules/rom_mods.py and src/collectorBridge.ts.
+
+export interface RomPlatformInfo {
+  slug: string;
+  name: string;
+  tokens: string[];
+  mapped: boolean;
+}
+
+export interface RomGbCandidate extends GbGame {
+  score?: number;
+  platform_match?: boolean;
+}
+
+export interface RomLinks {
+  ok: boolean;
+  error?: string;
+  platform?: RomPlatformInfo;
+  gamebanana?: { linked: GbGame | null; candidates: RomGbCandidate[]; error?: string };
+  nexus?: { linked: { domain: string; name: string; auto?: boolean } | null; candidates: ExperimentalCandidate[]; error?: string };
+}
+
+export interface RomModRecord {
+  id: string;
+  source: "gamebanana" | "nexus" | "local";
+  mod_id: number;
+  file_id: number;
+  file_name: string;
+  file_date: number;
+  name: string;
+  version: string;
+  domain: string;
+  target_id: string;
+  target_label: string;
+  entries: string[];
+  rom_id: number;
+  installed_at: number;
+}
+
+export interface RomUpdate {
+  current: string;
+  file: { file_id: number; file_name: string; name: string; version: string; date: number };
+}
+
+export const forgeRomLink = callable<[app_id: number, name: string, platform_slug: string], RomLinks>("forge_rom_link");
+export const forgeRomSetNexus = callable<
+  [app_id: number, domain: string, name: string],
+  { ok: boolean; error?: string; linked?: { domain: string; name: string } | null }
+>("forge_rom_set_nexus");
+export const forgeRomStage = callable<
+  [app_id: number, source: string, mod_id: number, file_id: number, file_name: string, mod_name: string,
+    collector_folder: string, game_domain: string],
+  { ok: boolean; error?: string; reason?: string; entry?: string; kind?: string }
+>("forge_rom_stage");
+export const forgeRomUnstage = callable<[entry: string, collector_folder: string], { ok: boolean; error?: string }>(
+  "forge_rom_unstage"
+);
+export const forgeRomRecord = callable<[app_id: number, record: Record<string, unknown>], { ok: boolean; error?: string; mods?: RomModRecord[] }>(
+  "forge_rom_record"
+);
+export const forgeRomForget = callable<[app_id: number, record_id: string], { ok: boolean; mods?: RomModRecord[] }>(
+  "forge_rom_forget"
+);
+export const forgeRomMods = callable<[app_id: number], { ok: boolean; mods?: RomModRecord[] }>("forge_rom_mods");
+export const forgeRomUpdates = callable<[app_id: number], { ok: boolean; updates?: Record<string, RomUpdate> }>(
+  "forge_rom_updates"
+);

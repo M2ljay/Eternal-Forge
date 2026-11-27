@@ -1,6 +1,6 @@
 {
   "name": "decky-nexus",
-  "version": "1.21.40-anygame.71",
+  "version": "1.21.40-anygame.72",
   "pluginFolder": "Nexus Mods",
   "description": "Browse, install and manage Nexus Mods for the game you are playing, from Gaming Mode on a controller. Unofficial Decky Loader plugin.",
   "type": "module",
@@ -19,13 +19,14 @@
     "test:link": "tsc src/collectionLink.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/collectionLink.test.mjs",
     "test:launch": "tsc src/launchOptions.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/launchOptions.test.mjs",
     "test:merge": "tsc src/mergeSupport.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/mergeSupport.test.mjs",
-    "check": "pnpm run typecheck && pnpm run lint:py && pnpm run test && pnpm run test:nav && pnpm run test:proton && pnpm run test:panel && pnpm run test:games && pnpm run test:compat && pnpm run test:loadorder && pnpm run test:link && pnpm run test:merge && pnpm run test:pluginupdate && pnpm run test:forge && pnpm run test:modded && pnpm run test:anchor && pnpm run test:experimental && pnpm run test:launch",
+    "check": "pnpm run typecheck && pnpm run lint:py && pnpm run test && pnpm run test:nav && pnpm run test:proton && pnpm run test:panel && pnpm run test:games && pnpm run test:compat && pnpm run test:loadorder && pnpm run test:link && pnpm run test:merge && pnpm run test:pluginupdate && pnpm run test:forge && pnpm run test:modded && pnpm run test:anchor && pnpm run test:experimental && pnpm run test:launch && pnpm run test:collector",
     "lint:py": "python -m pyflakes main.py tests",
     "test:pluginupdate": "tsc src/pluginUpdate.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/pluginUpdate.test.mjs",
     "test:experimental": "tsc src/games.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/experimental.test.mjs",
     "test:forge": "tsc src/forgeRules.ts src/navRules.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/forge.test.mjs",
     "test:anchor": "tsc src/gamePageAnchor.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/gamePageAnchor.test.mjs",
-    "test:modded": "tsc src/moddedCollection.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/moddedCollection.test.mjs"
+    "test:modded": "tsc src/moddedCollection.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/moddedCollection.test.mjs",
+    "test:collector": "tsc src/collectorBridge.ts --outDir .test-build --module es2020 --target es2020 --skipLibCheck --declaration false && node --test tests/collectorBridge.test.mjs"
   },
   "keywords": [
     "decky",

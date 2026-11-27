@@ -424,17 +424,33 @@ and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
 
 Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
 
-- **Mods section on Steam's game page.** One compact row under the Play bar
-  on a game's library page (never over the hero): "Mods", a status chip
-  (*Locked · Ricochet*, *3 enabled*, *Updates 2*, *Not modded*), the last
-  save backup, and up to two buttons (**Mods...**, **Restore saves...**). A
-  opens one-line details: the mods with a switch each, Open / Update, Add
-  mods, My Mods, saves, Upscaling and Load order; long explanations are
-  behind **Why?**. Where Play's section cannot be found it falls back to a
-  single line above Play. Not shown on non-Steam shortcuts, so not on
-  The Collector's ROM pages. Controller only; B from a page opened here
-  returns to the game page. Any error leaves Steam's page untouched, and the
-  section switches itself off for the session after three.
+- **Mods tab and Overview card on every game page (anygame.72).** On a
+  game's library page, mods are a **Mods tab** (in Steam's own tab row when
+  Forge finds one; otherwise a "Mods" tab header under Play that opens the
+  tab right there) plus a **Mods card** under Play: the active-mod count, an
+  amber *N updates* chip, one status line (*Load order OK*, *Up to date*,
+  *Locked · Ricochet*, *Not set up*) and **X** to open the tab. The tab holds
+  the mods with a switch each, Open / Update, Add mods, My Mods, saves,
+  Upscaling and Load order; long explanations are behind **Why?**. The old
+  row survives only as a one-line fallback above Play when neither anchor is
+  found. Controller only; B from a page opened here returns to the game
+  page. Any error leaves Steam's page untouched, and the patch switches
+  itself off for the session after three.
+- **Every game in the library.** Steam games, non-Steam shortcuts (other
+  launchers, standalone exes) and The Collector's ROMs. Any game Forge has no
+  rules for is offered **Set up** right on the card: a non-Steam game's
+  folder comes from its shortcut or from a controller-only folder picker
+  (remembered per game), the Nexus Mods game is matched by name or picked /
+  searched by hand, and a game with no Nexus Mods page can be set up for
+  GameBanana only. Coverage table: [docs/forge.md](docs/forge.md#every-game-in-the-library).
+- **ROM games (The Collector).** On The Collector's ROM pages, Forge
+  registers the same Mods tab and Overview card through The Collector's
+  game-page API. Mods come from GameBanana (matched by name and platform,
+  or picked by hand), Nexus Mods where the game has a page, and your own
+  files in Downloads; Forge downloads into Downloads and The Collector
+  previews, installs and backs up into the emulator's mod folder. Forge
+  tracks what it installed, so updates and the card's count work, and
+  removal goes through The Collector's backup.
 - **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
   BattlEye, Vanguard, Ricochet, FACEIT, EA Javelin, GameGuard...) are locked:
   installs and switching mods on are refused by the backend, not just hidden.

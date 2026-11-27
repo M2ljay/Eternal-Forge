@@ -36,8 +36,11 @@ import {
   removeExperimentalFramework,
   removeExperimentalGame,
   saveExperimentalGame,
+  searchNexusGames,
   setExperimentalEnabled,
+  setGameFolder,
 } from "./api";
+import { pickFolder, relativeTo } from "./FolderPicker";
 import {
   SupportedGame,
   isExperimentalEnabled,
@@ -125,33 +128,153 @@ function PickGameModal({
 }: {
   steamName: string;
   candidates: ExperimentalCandidate[];
-  onPick: (c: ExperimentalCandidate) => void;
+  /** null: no Nexus Mods page - GameBanana and the user's own files only. */
+  onPick: (c: ExperimentalCandidate | null) => void;
   closeModal?: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<ExperimentalCandidate[] | undefined>();
+  const [searching, setSearching] = useState(false);
+  const [note, setNote] = useState("");
+  const list = found ?? candidates;
+  const search = async () => {
+    if (query.trim().length < 2 || searching) return;
+    setSearching(true);
+    setNote("");
+    try {
+      const r = await searchNexusGames(query.trim());
+      setFound(r.ok ? r.games ?? [] : []);
+      if (!r.ok) setNote(r.error ?? "Search failed");
+      else if (!(r.games ?? []).length) setNote(`No Nexus Mods game is called "${query.trim()}".`);
+    } finally {
+      setSearching(false);
+    }
+  };
+  const pick = (c: ExperimentalCandidate | null) => {
+    closeModal?.();
+    onPick(c);
+  };
   return (
     <ModalRoot closeModal={closeModal}>
       <h3 style={{ marginTop: 0 }}>Which Nexus Mods game is {steamName}?</h3>
       <div style={{ fontSize: "13px", opacity: 0.9, marginBottom: "8px" }}>
-        The names did not match exactly. Pick the right one, or back out if
-        none of these is the game.
+        {list.length
+          ? "The names did not match exactly. Pick the right one, search for it, or set the game up without a Nexus Mods page."
+          : "Nothing on Nexus Mods matched its name. Search for it, or set the game up without a Nexus Mods page."}
       </div>
-      {candidates.map((c) => (
+      {list.map((c) => (
         <ButtonItem
           key={c.domain}
           layout="below"
           description={
             c.mods ? `${c.mods.toLocaleString()} mods · ${c.domain}` : c.domain
           }
-          onClick={() => {
-            closeModal?.();
-            onPick(c);
-          }}
+          onClick={() => pick(c)}
         >
           {c.name}
         </ButtonItem>
       ))}
+      <TextField
+        label="Search Nexus Mods games"
+        value={query}
+        onChange={(e: any) => setQuery(e.target.value)}
+      />
+      <ButtonItem layout="below" disabled={searching || query.trim().length < 2} onClick={() => void search()}>
+        {searching ? "Searching…" : "Search"}
+      </ButtonItem>
+      {note && <div style={{ fontSize: "13px", opacity: 0.85, margin: "4px 0" }}>{note}</div>}
+      <ButtonItem
+        layout="below"
+        description="For games Nexus Mods has no page for: mods come from GameBanana. Nothing about the game is sent to Nexus Mods."
+        onClick={() => pick(null)}
+      >
+        No Nexus Mods page: use GameBanana
+      </ButtonItem>
     </ModalRoot>
   );
+}
+
+/** A non-Steam shortcut's start folder (else its exe's folder), as Steam
+ * holds it; "" for Steam games or when Steam does not say. */
+export function shortcutFolderHint(appId: number): string {
+  try {
+    const d = (globalThis as any).appDetailsStore?.GetAppDetails?.(appId);
+    const unq = (v: unknown) => String(v ?? "").trim().replace(/^"(.*)"$/, "$1");
+    const dir = unq(d?.strShortcutStartDir);
+    if (dir) return dir;
+    const exe = unq(d?.strShortcutExe);
+    return exe ? exe.replace(/[\\/][^\\/]*$/, "") : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Ask for the folder of a game Steam has no install record for, remember
+ * it, then carry on with the setup. */
+export function chooseGameFolder(appId: number, name: string, then?: () => void): void {
+  pickFolder({
+    title: `Where is ${name} installed?`,
+    hint: "Pick the game's own folder (the one with its .exe). Forge remembers it for this game.",
+    start: shortcutFolderHint(appId),
+    onPick: async (path) => {
+      const r = await setGameFolder(appId, path);
+      if (!r.ok) {
+        toaster.toast({ title: "Folder not used", body: r.error ?? "" });
+        return;
+      }
+      await loadExperimentalState();
+      toaster.toast({ title: `${name}: folder set`, body: path });
+      then?.();
+    },
+  });
+}
+
+/** One press from the game page or the QAM: switch the any-game mode on if
+ * needed, find the game (a non-Steam shortcut included), ask for its folder
+ * when Steam does not know it, match it on Nexus Mods (or pick by hand, or no
+ * Nexus page at all), and save it. Resolves true when the game is set up. */
+export async function setUpGame(appId: number, name: string): Promise<boolean> {
+  if (!isExperimentalEnabled()) {
+    const on = await setExperimentalEnabled(true);
+    if (on.ok) setExperimentalState(on.enabled, on.games ?? []);
+  }
+  const hint = shortcutFolderHint(appId);
+  const save = async (c: ExperimentalCandidate | null): Promise<boolean> => {
+    const r = await saveExperimentalGame(appId, name, c?.domain ?? "", c?.name ?? "", hint);
+    if (!r.ok || !r.game) {
+      if (r.needsFolder) {
+        chooseGameFolder(appId, name, () => void save(c));
+        return false;
+      }
+      toaster.toast({ title: "Setup failed", body: r.error ?? "Unknown error" });
+      return false;
+    }
+    await loadExperimentalState();
+    toaster.toast({
+      title: `${name}: mods set up`,
+      body: c ? `Nexus Mods game: ${c.name}. Mods go in ${r.game.modsSubdir}.` : `GameBanana only. Mods go in ${r.game.modsSubdir}.`,
+    });
+    return true;
+  };
+  const r = await findExperimentalGame(appId, name, hint);
+  if (!r.ok) {
+    toaster.toast({ title: "Setup failed", body: r.error ?? "Unknown error" });
+    return false;
+  }
+  if (r.needsFolder || r.inspection?.engine === "missing") {
+    chooseGameFolder(appId, name, () => void setUpGame(appId, name));
+    return false;
+  }
+  if (r.exact) return save(r.exact);
+  return new Promise<boolean>((resolve) => {
+    showModal(
+      <PickGameModal
+        steamName={name}
+        candidates={r.candidates ?? []}
+        onPick={(c) => void save(c).then(resolve)}
+      />
+    );
+  });
 }
 
 const VERDICT_TEXT: Record<CoverageRow["verdict"], string> = {
@@ -253,74 +376,29 @@ export function ExperimentalUnsupportedRows({
   const [busy, setBusy] = useState(false);
   const enabled = isExperimentalEnabled();
 
-  const save = async (c: ExperimentalCandidate) => {
-    if (appId === undefined) return;
-    const r = await saveExperimentalGame(appId, name, c.domain, c.name);
-    if (!r.ok || !r.game) {
-      toaster.toast({ title: "Setup failed", body: r.error ?? "Unknown error" });
-      return;
-    }
-    await loadExperimentalState();
-    toaster.toast({
-      title: `${name}: experimental support on`,
-      body: `Nexus Mods game: ${c.name}. Mods go in ${r.game.modsSubdir}.`,
-    });
-  };
-
   const setup = async () => {
     if (appId === undefined || busy) return;
     setBusy(true);
     try {
-      const r = await findExperimentalGame(appId, name);
-      if (!r.ok) {
-        toaster.toast({ title: "Setup failed", body: r.error ?? "Unknown error" });
-        return;
-      }
-      if (r.inspection?.engine === "missing") {
-        toaster.toast({
-          title: `${name} isn't installed here`,
-          body: r.inspection.note,
-        });
-        return;
-      }
-      if (r.exact) {
-        await save(r.exact);
-        return;
-      }
-      const candidates = r.candidates ?? [];
-      if (candidates.length === 0) {
-        toaster.toast({
-          title: "No Nexus Mods page found",
-          body: `Nothing on Nexus Mods matched "${r.name || name}".`,
-        });
-        return;
-      }
-      showModal(
-        <PickGameModal
-          steamName={name}
-          candidates={candidates}
-          onPick={(c) => void save(c)}
-        />
-      );
+      await setUpGame(appId, name);
     } finally {
       setBusy(false);
     }
   };
 
-  if (!enabled) {
-    return (
-      <PanelSectionRow>
-        <ExperimentalToggle />
-      </PanelSectionRow>
-    );
-  }
+  // Every game is offered setup (anygame.72); setUpGame switches the
+  // any-game mode on itself.
   return (
     <>
       <PanelSectionRow>
         <ButtonItem
           layout="below"
           disabled={busy || appId === undefined}
-          description="Experimental: matches this game on Nexus Mods and guesses where its mods go."
+          description={
+            enabled
+              ? "Matches this game on Nexus Mods (or GameBanana only) and guesses where its mods go. Non-Steam games: pick the folder."
+              : "Switches on any-game support, matches this game on Nexus Mods (or GameBanana only) and guesses where its mods go."
+          }
           onClick={setup}
         >
           {busy ? "Looking it up…" : `Set up mods for ${name}`}
@@ -422,11 +500,13 @@ function FolderModal({
   game,
   current,
   options,
+  root,
   closeModal,
 }: {
   game: SupportedGame;
   current: string;
   options: string[];
+  root?: string;
   closeModal?: () => void;
 }) {
   const [custom, setCustom] = useState(current);
@@ -452,6 +532,25 @@ function FolderModal({
           {o === current ? `${o} (current)` : o}
         </ButtonItem>
       ))}
+      {root && (
+        <ButtonItem
+          layout="below"
+          description="Pick it with the controller, one folder at a time."
+          onClick={() =>
+            pickFolder({
+              title: `Mods folder for ${game.displayName}`,
+              hint: "Folders inside the game folder.",
+              root,
+              onPick: async (path) => {
+                const rel = relativeTo(root, path);
+                if (rel) await pick(rel);
+              },
+            })
+          }
+        >
+          Browse folders…
+        </ButtonItem>
+      )}
       <TextField
         label="Or type a folder (relative to the game folder)"
         value={custom}
@@ -467,8 +566,24 @@ function FolderModal({
 export function ExperimentalGameRows({ game }: { game: SupportedGame }) {
   const [busy, setBusy] = useState(false);
   if (!isExperimentalGame(game)) return null;
+  // A game outside Steam's libraries (a non-Steam shortcut) keeps its folder
+  // as an absolute path.
+  const outside = /^([A-Za-z]:[\\/]|\/)/.test(game.installDirName);
   return (
     <>
+      {outside && (
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            label="Game folder"
+            disabled={busy}
+            description={game.installDirName}
+            onClick={() => chooseGameFolder(game.appId, game.displayName)}
+          >
+            Change
+          </ButtonItem>
+        </PanelSectionRow>
+      )}
       <PanelSectionRow>
         <ButtonItem
           layout="below"
@@ -486,6 +601,7 @@ export function ExperimentalGameRows({ game }: { game: SupportedGame }) {
                 game={game}
                 current={r.current ?? game.modsSubdir}
                 options={r.options ?? []}
+                root={r.root}
               />
             );
           }}

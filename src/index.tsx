@@ -116,6 +116,8 @@ import {
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
 import { registerGamePagePatch, unregisterGamePagePatch } from "./gamePagePatch";
+import { watchGamePage } from "./collectorBridge";
+import { romExtensions } from "./RomMods";
 import { ForgeLockSection } from "./ForgeLock";
 import {
   guardGameStarted,
@@ -4792,6 +4794,19 @@ export default definePlugin(() => {
   // Forge: the Mods section on Steam's game page, the tile dots and the
   // crash guard's game-start bookkeeping.
   registerGamePagePatch();
+  // Forge on The Collector's ROM pages: a Mods tab and an Overview card,
+  // registered through window.__eternalGamePage whenever it appears.
+  const collectorPages = watchGamePage({
+    getWin: () => globalThis as any,
+    exts: romExtensions,
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    log: (m) => console.info(m),
+    listen: (event, fn) => {
+      window.addEventListener(event, fn);
+      return () => window.removeEventListener(event, fn);
+    },
+  });
   const stopForge = startForgeBackground();
   loadOptiScalerGames();
 
@@ -4941,6 +4956,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(GB_MOD_ROUTE);
       routerHook.removeRoute(HEALTH_ROUTE);
       unregisterGamePagePatch();
+      collectorPages.stop();
       stopForge();
       removeEventListener("backend_event", listener);
       removeEventListener("install_progress", progressListener);

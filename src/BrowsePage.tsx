@@ -62,7 +62,8 @@ import { AdultBadge, PageBackdrop, SectionHeading, StackedThumb } from "./chrome
 import { BLUE_BUTTON_CLASS, PAGE_SCROLLER, PRIMARY_BUTTON_CSS } from "./theme";
 import { storeHeaderPlan, STORE_HEADER_EDGE } from "./panelRules";
 import { TabBar, exitTabsToQam, handleTabButtons, pushOurPage } from "./Tabs";
-import { openGameBanana } from "./gamebanana";
+import { openGameBanana, setGbGame } from "./gamebanana";
+import { GameBananaPage } from "./GameBananaPage";
 import { alpha, AMBER, BLACK, CRIMSON, GREEN, GUNMETAL, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
 
 // The filter dropdown's value while one author's mods are shown (#46).
@@ -663,7 +664,18 @@ let lastRailCols = 5;
 // snap on every navigation.
 let lastHeaderWidth = 0;
 
+/** Browse for a game set up without a Nexus Mods page is its GameBanana
+ * store (anygame.72): nothing about it is ever sent to Nexus. */
 export function BrowsePage() {
+  const scoped = getBrowseGame();
+  if (scoped?.noNexus) {
+    setGbGame(scoped);
+    return <GameBananaPage />;
+  }
+  return <NexusBrowsePage />;
+}
+
+function NexusBrowsePage() {
   // Explicit scope from the QAM beats ambient resolution (which could
   // go stale and surface another game's store).
   const explicitScope = getBrowseGame() !== undefined;
