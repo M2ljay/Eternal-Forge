@@ -1403,7 +1403,9 @@ export function romExtensions(): GamePageExtension[] {
       id: FORGE_EXT_ID,
       kind: "tab",
       label: MODS_TAB_TITLE,
-      order: 50,
+      // The Collector's built-in tabs: Overview 0, Achievements 20, Saves 30, Media 34, Details 37, BIOS 40.
+      // 25 puts Mods between Achievements and Saves, where the Core game-page mockup has it.
+      order: 25,
       isAvailable: () => true,
       render: (ctx: RomPageContext) => (
         <RomBoundary key={`forge-rom-tab-${ctx.appId}-${ctx.romId}`}>
