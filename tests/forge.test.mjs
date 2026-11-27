@@ -34,6 +34,14 @@ import {
   sectionMode,
   skipWindowLabel,
   undoOutcome,
+  LOAD_ORDER_APP_IDS,
+  firstWarning,
+  loadOrderSupported,
+  masterlistLine,
+  profileSwitchBlocked,
+  profileSwitchSummary,
+  sortOutcome,
+  warningSummary,
 } from "../.test-build/forgeRules.js";
 import { exitReturnsToGamePage } from "../.test-build/navRules.js";
 
@@ -327,4 +335,58 @@ test("optiscaler: installed, update and suspect lines", () => {
   assert.equal(crashed.tone, "suspect");
   assert.match(crashed.text, /crashed/);
   assert.equal(optiscalerLine({ allowed: true, installed: { installed: false } }).tone, "off");
+});
+
+// ---- Load order (LOOT rules) and profiles --------------------------------------
+
+test("load order: only the four supported Bethesda games", () => {
+  assert.deepEqual(LOAD_ORDER_APP_IDS, [489830, 377160, 1716740, 2623190]);
+  assert.equal(loadOrderSupported(489830), true);
+  assert.equal(loadOrderSupported(0, "starfield"), true);
+  assert.equal(loadOrderSupported(22330, "oblivion"), false);
+  assert.equal(loadOrderSupported(22380, "newvegas"), false);
+});
+
+test("load order: errors come before warnings, and the summary says which", () => {
+  const ws = [
+    { plugin: "A.esp", level: "warn", text: "Dirty." },
+    { plugin: "A.esp", level: "error", text: "Needs B.esm, which is not installed." },
+  ];
+  assert.equal(firstWarning(ws).level, "error");
+  assert.equal(firstWarning([]), undefined);
+  assert.deepEqual(warningSummary({ error: 0, warn: 0 }), { tone: "ok", text: "No problems found" });
+  assert.deepEqual(warningSummary({ error: 1, warn: 2 }), { tone: "error", text: "1 problem, 2 warnings" });
+  assert.deepEqual(warningSummary({ error: 0, warn: 1 }), { tone: "warn", text: "1 warning" });
+});
+
+test("load order: the masterlist line says where the rules come from, offline too", () => {
+  const now = 1_000_000;
+  assert.match(masterlistLine(undefined, now), /not downloaded yet/);
+  assert.match(masterlistLine({ available: false, fetched_at: 0, error: "OSError" }, now), /offline/);
+  assert.equal(masterlistLine({ available: true, fetched_at: now - 7200, error: "" }, now), "LOOT masterlist, updated 2 h ago");
+  assert.match(masterlistLine({ available: true, fetched_at: now - 90000, error: "offline" }, now), /using the saved copy/);
+});
+
+test("load order: sort toasts for a move, nothing to do, and a cycle", () => {
+  assert.deepEqual(sortOutcome({ ok: true, moved: 3, masterlist_used: true }), {
+    title: "Sorted: 3 plugins moved",
+    body: "By LOOT's rules. Undo is on the Load order page.",
+  });
+  assert.equal(sortOutcome({ ok: true, moved: 0, masterlist_used: false }).title, "Already in order");
+  const c = sortOutcome({ ok: false, cycle: ["A.esp", "B.esp", "A.esp"], error: "These plugins ..." });
+  assert.equal(c.title, "Not sorted: rules go in a circle");
+});
+
+test("profiles: refused while the game runs, summary names what happened", () => {
+  assert.match(profileSwitchBlocked(489830, 489830), /Close the game first/);
+  assert.equal(profileSwitchBlocked(undefined, 489830), "");
+  assert.equal(profileSwitchBlocked(377160, 489830), "");
+  const plan = { changes: [{ folder: "A", enabled: true }, { folder: "B", enabled: false }], missing: ["Gone"], new_off: [] };
+  assert.deepEqual(profileSwitchSummary("Vanilla+", plan, [], true), {
+    title: "Profile: Vanilla+",
+    body: "1 mod on, 1 off. Not installed any more: Gone.",
+  });
+  const bad = profileSwitchSummary("Full modlist", plan, ["A: locked"], false);
+  assert.equal(bad.title, "Profile Full modlist, with problems");
+  assert.match(bad.body, /The load order was not written/);
 });

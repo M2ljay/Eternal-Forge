@@ -1,10 +1,11 @@
 # Forge on the game page
 
 Five features that live on Steam's own library pages rather than in the
-Quick Access Menu, plus save backups through Ludusavi before mod changes
-and per-game OptiScaler. Built on Windows (Decky Loader in Steam Big
-Picture, started by Core), and nothing in them is Windows-only except the
-crash report check and OptiScaler's GPU lookup.
+Quick Access Menu, plus save backups through Ludusavi before mod changes,
+per-game OptiScaler, and a LOOT-style load order with deploy profiles for
+the Bethesda games. Built on Windows (Decky Loader in Steam Big Picture,
+started by Core), and nothing in them is Windows-only except the crash
+report check, OptiScaler's GPU lookup and the "game is running" check.
 
 | Piece | Frontend | Backend |
 |---|---|---|
@@ -15,11 +16,13 @@ crash report check and OptiScaler's GPU lookup.
 | Steam collection "Modded" | `src/moddedSync.ts`, rules in `src/moddedCollection.ts` | `forge_note_modded`, `forge_modded_state`, `forge_set_modded_collection`, the `forge_mods_changed` event |
 | Save backups (Ludusavi, optional) | `src/SaveBackup.tsx`, the section's save line | `py_modules/save_backup.py`, `forge_save_*`, `_wrap_save_backups` in `main.py`, the `forge_save_backup` event |
 | Upscaling (OptiScaler) | `UpscalingEntry` in `src/GameModsSection.tsx`, run watch in `src/optiscaler.ts` | `py_modules/optiscaler.py`, `forge_optiscaler_*` and `_wrap_optiscaler_refusal` in `main.py` |
+| Load order (LOOT rules) and profiles | `LoadOrderEntry` in `src/GameModsSection.tsx`, `src/ForgeLoadOrder.tsx`, `src/LoadOrderPage.tsx` (its `forge` mode), `src/forgeLoScope.ts` | `py_modules/load_order.py`, `forge_lo_*` and `forge_profile_*` in `main.py` |
 
 Pure rules are in `src/forgeRules.ts` (tested by `tests/forge.test.mjs`),
 `src/moddedCollection.ts` (tested by `tests/moddedCollection.test.mjs`)
 `py_modules/forge_guard.py` (tested by `tests/test_forge.py`) and
-`py_modules/optiscaler.py` (tested by `tests/test_optiscaler.py`). The
+`py_modules/optiscaler.py` (tested by `tests/test_optiscaler.py`) and
+`py_modules/load_order.py` (tested by `tests/test_load_order.py`). The
 save backups are tested by `tests/test_save_backup.py` against a fake
 `ludusavi` that answers like the real one's `--api` mode.
 
@@ -565,3 +568,184 @@ the game loads OptiScaler under `dxgi.dll` (Insert opens its menu even with
 the splash hidden); that the minimal ini is honoured (the FSR 4 watermark,
 `Fsr4EnableWatermark=true` added by hand, confirms FSR 4); that PowerShell
 reports the GPU name; and that a game crash shows the removal offer.
+
+## Load order (LOOT rules) and deploy profiles
+
+For **Skyrim Special Edition, Fallout 4, Starfield and Oblivion
+Remastered** only (Steam app ids 489830, 377160, 1716740, 2623190, or
+their Nexus domains). Every other game shows nothing new. The game page's
+Mods section gets one **Load order** line: how many plugins are on, the
+current profile, problems in crimson and warnings in amber, where the
+rules came from, and three buttons: **Load order** (the panel), **Sort
+with LOOT rules** and **Profiles**. On an anti-cheat locked game only the
+panel is offered, and the backend refuses its writes anyway.
+
+### The files, per game
+
+| Game | Plugins file | Format | Not written (the game loads them itself) |
+|---|---|---|---|
+| Skyrim SE | `%LOCALAPPDATA%\Skyrim Special Edition\Plugins.txt` | every plugin in load order, `*` on the active ones | Skyrim, Update, Dawnguard, HearthFires, Dragonborn |
+| Fallout 4 | `%LOCALAPPDATA%\Fallout4\Plugins.txt` | as Skyrim SE | Fallout4.esm and the seven DLC masters |
+| Starfield | `%LOCALAPPDATA%\Starfield\Plugins.txt` | as Skyrim SE | Starfield, Constellation, OldMars, ShatteredSpace, SFBGS003/004/006/007/008/00D/047/050, and blueprint masters (flag 0x800) |
+| Oblivion Remastered | `<game>\OblivionRemastered\Content\Dev\ObvData\Data\Plugins.txt` and `loadorder.txt` beside it | `Plugins.txt`: the active plugins in order, no markers; `loadorder.txt`: every plugin | nothing: Oblivion.esm and the DLC plugins stay listed |
+
+These are the asterisk and text-file methods as libloadorder documents
+them (its changelog for Oblivion Remastered, 18.4.0, and Starfield's
+blueprint plugins, 18.6.0 / 18.8.0). Comment lines at the top of
+`Plugins.txt` are kept, the file's line endings (CRLF / LF) and encoding
+(UTF-8, else Windows-1252) are kept, and a line naming a plugin that is
+not in Data is kept as it was. A `loadorder.txt` whose active plugins are
+in a different order from `Plugins.txt` is ignored (the game reads
+`Plugins.txt`). Every write first copies the old file to
+`Plugins.txt.decky-bak` (and `loadorder.txt.decky-bak`); **Undo** on the
+panel swaps them back (one step).
+
+Plugin headers: the TES4 record's flags and MAST subrecords, a 24-byte
+record header (20 for Oblivion Remastered, which uses Oblivion's format),
+XXXX extended sizes handled. Master: flag 0x1, or a `.esm` / `.esl` name
+(not on Oblivion Remastered, where only the flag counts). Light: 0x200 on
+Skyrim SE and Fallout 4, 0x100 on Starfield, or a `.esl` name; Starfield
+also has medium (0x400) and blueprint (0x800). Headers are cached by size
+and date.
+
+### Sorting
+
+**Sort with LOOT rules** (`forge_lo_sort`), in `py_modules/load_order.py`,
+pure Python, no LOOT binary:
+
+1. **Hard rules**, never broken: a plugin after every master in its header;
+   master files before the rest (except a plugin a master names in its
+   header, which goes before that master, as the engine does); the
+   masterlist's `after` and `req` entries for the plugin whose condition
+   holds. Forge keeps masters first on Oblivion Remastered too, although
+   that game would load them anywhere.
+2. **Groups** from the masterlist (`group:` and the groups' `after`), as a
+   soft rule: a plugin waits for the groups its group loads after, unless a
+   hard rule needs it earlier.
+3. **The current order** breaks every tie, so an order that already obeys
+   the rules is left exactly as it is, and sorting twice moves nothing.
+4. **Pins**: a pinned plugin is put back at its pinned position, as close
+   as its hard rules allow (it never lands above its own master). When it
+   cannot stay, the toast says where it went.
+
+A **cycle** in the hard rules (two masterlist entries asking to load after
+each other, plugins mastering each other, a master asked to load after a
+plain plugin) is reported with the plugins in it, and **nothing is
+written**. A cycle among the groups is reported and the groups are
+ignored.
+
+Not done, on purpose: LOOT's record-overlap rule (it reads every record of
+every plugin to put the one that overrides more first), Bash Tags, the
+userlist, and plugin ghosting. Conditions are evaluated three-valued:
+`file()`, `readable()`, `active()`, `many()`, `many_active()`,
+`is_master()` and `checksum()` are answered; `version()`,
+`product_version()`, `file_size()` and the rest are "unknown". An unknown
+condition hides its message and skips its rule rather than guessing.
+Paths in conditions are confined to the game folder.
+
+### Warnings
+
+Only for plugins that are on: a master **not installed** or **switched
+off** (crimson), a masterlist `req` that is missing (crimson) or off
+(amber), an `inc` (incompatible) file or plugin that is present (crimson),
+**dirty** plugins whose CRC-32 matches the masterlist's `dirty` entry
+(amber: ITM / deleted references / deleted navmeshes, and the cleaning tool
+it names), the masterlist's own `warn` / `error` messages for the plugin
+whose condition holds, its global messages, and lines for plugins that are
+not installed (amber). `say` messages are not shown. Markdown in messages
+is shown as plain text. The CRC uses `zlib` (built into Windows CPython);
+without it a pure-Python CRC runs for files up to 8 MB and larger ones are
+not checked.
+
+### The masterlist
+
+Downloaded per game by the user's PC from LOOT's own repositories,
+`https://raw.githubusercontent.com/loot/<repo>/v0.26/masterlist.yaml`
+(LOOT 0.26's branch; `master` when that is missing), repos `skyrimse`,
+`fallout4`, `starfield` and `oblivion-remastered`. Only URLs under
+`https://raw.githubusercontent.com/loot/` are fetched, at most 8 MB.
+
+- **Licence**: those four masterlists are **CC0 1.0** (each repository's
+  `LICENSE`, checked 2026-11-26). Credit: masterlists by the LOOT team and
+  contributors, https://github.com/loot. Forge never ships them; the
+  tests use small synthetic masterlists. (LOOT's classic `oblivion`
+  masterlist is GPL-3.0; Forge does not use it.) LOOT itself (GPL-3.0) and
+  Amethyst Deploy (GPL-3.0) were reference only: no code was taken. The
+  sort, the YAML reader and the formats were written from LOOT's metadata
+  documentation and libloadorder's documentation and changelog.
+- **Refresh**: at most once a day (a 304 with the saved ETag counts), and
+  an hour after a failed try. **Offline**, the saved copy is used and the
+  panel says so; with no copy at all, sorting uses headers and flags only,
+  and says that too.
+- **Cache**: `runtime/loot/<repo>.json`, the parts of the masterlist the
+  sort uses (groups, per-plugin group / after / req / inc / msg / dirty,
+  globals), so the YAML is parsed once a day at most. A download that does
+  not parse keeps the old copy.
+- **The YAML**: a small reader in `load_order.py` for what masterlists use
+  (anchors, aliases, merge keys, quoted and multi-line scalars, flow
+  collections, block scalars). On 2026-11-26 it read the four live
+  masterlists and LOOT's prelude identically to PyYAML.
+
+### The panel
+
+The Load Order page in its one-game mode, opened from the game page
+(`/nexus-mods/forge-load-order`; B goes back to the game page; no tabs).
+Same controls as the Load Order tab: A picks a plugin up, the D-pad
+carries it (LB / RB ten at a time), A puts it down, B puts it back; a
+plugin cannot be carried above something it needs. ≡ (Options) switches a
+plugin on or off, with its masters or its dependents. Each row shows its
+worst warning (crimson or amber) and a pin when pinned; the right-hand
+panel lists every warning and has **Pin its position** / **Unpin**. The
+header has **Sort with LOOT rules**, **Undo** and **Profiles**, the
+problem count and the masterlist line. No text entry anywhere except the
+optional search field.
+
+### Deploy profiles
+
+Named per game (*Vanilla+*, *Full modlist*, *Light*, *Testing*, or a typed
+name; 20 at most), kept in `forge.json` under `load_order.<app id>`:
+`profiles.<name>` = the mods that are on, every mod the profile has seen,
+the plugin order and the active plugins; `current`; and `pins`.
+
+- **Saving**: *Save the current setup as a new profile...* (preset names
+  need no typing; *Type a name* opens Steam's keyboard), or *Update
+  <current>*.
+- **Switching** (`src/ForgeLoadOrder.tsx`): refused while the game is
+  running (Steam's running apps in the frontend, `tasklist` for the game's
+  exe in the backend); the live state is saved into the current profile
+  first, so profiles follow your changes; `forge_profile_plan` lists the
+  mod switches (off first); a **Ludusavi backup** runs (the usual switch
+  and skip window; a failed backup does not stop the switch, as for every
+  mod change); the mods are switched one at a time through `install.ts`
+  (`toggleMod`), the same calls as everywhere else, so the anti-cheat lock,
+  the Modded collection and plugin activation all apply; then
+  `forge_profile_apply_order` writes the profile's order and active
+  plugins. Plugins the profile never saw keep their state at the end;
+  masters an active plugin needs are switched on; a plugin whose master is
+  missing or deliberately skipped stays off; skipped plugins whose master
+  came back are released first (the 1.21.40 rule).
+- Mods installed after a profile was saved are **off** in that profile (as
+  in other mod managers' profiles), and the toast says how many. A mod the
+  profile wants that is no longer installed is named.
+- Deleting a profile changes nothing in the game.
+
+The writers (`forge_lo_sort`, `forge_lo_set`, `forge_lo_undo`,
+`forge_lo_set_active` and `forge_profile_apply_order`) are in
+`_FORGE_GATED`: behind the anti-cheat lock, then a Ludusavi backup. Reads
+(`forge_lo_status`, `forge_lo_get`, `forge_profile_plan`) and the
+`forge.json` bookkeeping (`forge_lo_pin`, `forge_profile_save`,
+`forge_profile_delete`) are on the structural test's allow-list.
+
+### Not verified on the PC yet
+
+Everything here ran on Linux against fake game folders, fixture plugin
+bytes and synthetic masterlists; the real masterlists were only parsed
+and sorted against made-up plugin sets. On the PC, check: that each
+game's `Plugins.txt` is found where the table says (Skyrim SE from GOG or
+Epic uses a different folder name and is not handled); that a LOOT sort of
+a real modlist matches LOOT's own order closely (it will differ where
+LOOT's overlap rule decides); that the game loads with the written file
+(Starfield and Oblivion Remastered especially); that Oblivion Remastered
+reads the rewritten `Plugins.txt` and ignores `loadorder.txt`; that the
+running check refuses while the game is up; and that a profile switch
+round trip on a real modlist leaves the game as it was.

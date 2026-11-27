@@ -347,6 +347,9 @@ ALLOWED_UNGATED = {
         "crash_since", "experimental_folder_options", "export_mod_setup", "find_collection",
         "find_experimental_game", "forge_game_status", "forge_guard_plan", "forge_modded_state",
         "forge_optiscaler_installed", "forge_optiscaler_status",
+        # Load order: reads the game's files; forge_lo_get may refresh the
+        # cached LOOT masterlist in Forge's own runtime folder.
+        "forge_lo_status", "forge_lo_get", "forge_profile_plan",
         "forge_save_backup_list", "forge_save_backup_status", "forge_update_dots", "gb_get_game", "gb_get_mod", "gb_list_mods", "gb_search_games",
         "gb_update_target", "get_auth_status", "get_blamed_folders", "get_collection",
         "get_collection_attention", "get_collection_extras", "get_collection_manifest",
@@ -391,6 +394,9 @@ ALLOWED_UNGATED = {
         "forge_save_backup", "forge_save_backup_settings",
         # OptiScaler's run watch: times in forge.json, no files.
         "forge_optiscaler_dismiss", "forge_optiscaler_exit", "forge_optiscaler_launch",
+        # Pins and profiles live in forge.json; switching applies them
+        # through gated calls.
+        "forge_lo_pin", "forge_profile_save", "forge_profile_delete",
         "gb_link_game", "gb_unlink_game", "mark_launch_options_set", "mark_vr_releases_seen",
         "note_update_hold", "record_collection_installed", "refresh_content_gate",
         "register_collection", "release_update_hold", "save_experimental_game", "save_mod_setup",

@@ -352,3 +352,110 @@ export function optiscalerLine(s: OptiScalerLineInput): { tone: "refused" | "sus
   }
   return { tone: "off", text: "Not installed. Swaps the game's upscaler for FSR 4, FSR 3.1, XeSS or DLSS." };
 }
+
+// ---- Load order (LOOT rules) and deploy profiles -------------------------------
+// The game page's Load order entry and panel, for the Bethesda games whose load
+// order is a text file. The backend (py_modules/load_order.py) does the sorting.
+
+/** Skyrim SE, Fallout 4, Starfield, Oblivion Remastered (Steam app ids). */
+export const LOAD_ORDER_APP_IDS = [489830, 377160, 1716740, 2623190];
+export const LOAD_ORDER_DOMAINS = ["skyrimspecialedition", "fallout4", "starfield", "oblivionremastered"];
+
+export function loadOrderSupported(appId: number, domain?: string): boolean {
+  return LOAD_ORDER_APP_IDS.includes(Number(appId)) || LOAD_ORDER_DOMAINS.includes(domain ?? "");
+}
+
+export interface LoWarningLike {
+  plugin: string;
+  level: "error" | "warn";
+  text: string;
+}
+
+/** The worst warning of a plugin, for its row: errors (crimson) before
+ * warnings (amber). */
+export function firstWarning(ws?: LoWarningLike[]): LoWarningLike | undefined {
+  if (!ws || ws.length === 0) return undefined;
+  return ws.find((w) => w.level === "error") ?? ws[0];
+}
+
+/** The one line the game page shows about problems. */
+export function warningSummary(counts?: { error: number; warn: number }): { tone: "error" | "warn" | "ok"; text: string } {
+  const e = counts?.error ?? 0;
+  const w = counts?.warn ?? 0;
+  if (!e && !w) return { tone: "ok", text: "No problems found" };
+  const parts: string[] = [];
+  if (e) parts.push(`${e} problem${e === 1 ? "" : "s"}`);
+  if (w) parts.push(`${w} warning${w === 1 ? "" : "s"}`);
+  return { tone: e ? "error" : "warn", text: parts.join(", ") };
+}
+
+export interface MasterlistLike {
+  available: boolean;
+  fetched_at: number;
+  error: string;
+}
+
+/** Where the sorting rules come from, in one line. */
+export function masterlistLine(m: MasterlistLike | undefined, now: number): string {
+  if (!m || !m.available) {
+    return m?.error
+      ? "LOOT masterlist not downloaded yet (offline?): sorting by masters and plugin flags only"
+      : "LOOT masterlist not downloaded yet: sorting by masters and plugin flags only";
+  }
+  const age = m.fetched_at ? backupAge(m.fetched_at, now) : "a while ago";
+  return `LOOT masterlist, updated ${age}` + (m.error ? " (offline: using the saved copy)" : "");
+}
+
+/** The toast after "Sort with LOOT rules". */
+export function sortOutcome(r: {
+  ok: boolean;
+  error?: string;
+  moved?: number;
+  notes?: string[];
+  cycle?: string[];
+  masterlist_used?: boolean;
+}): { title: string; body: string } {
+  if (r.cycle && r.cycle.length) {
+    return { title: "Not sorted: rules go in a circle", body: r.error ?? r.cycle.join(" -> ") };
+  }
+  if (!r.ok) return { title: "Could not sort", body: r.error ?? "" };
+  const notes = (r.notes ?? []).slice(0, 2).join(" ");
+  const source = r.masterlist_used ? "LOOT's rules" : "masters and plugin flags (no masterlist yet)";
+  if (!r.moved) return { title: "Already in order", body: (`Nothing to move by ${source}. ` + notes).trim() };
+  return {
+    title: `Sorted: ${r.moved} plugin${r.moved === 1 ? "" : "s"} moved`,
+    body: (`By ${source}. Undo is on the Load order page. ` + notes).trim(),
+  };
+}
+
+/** "" when a profile switch may start, else why not. */
+export function profileSwitchBlocked(runningAppId: number | undefined, appId: number, busy = false): string {
+  if (busy) return "Another change is still running.";
+  if (runningAppId && Number(runningAppId) === Number(appId)) {
+    return "Close the game first: profiles can't be switched while it runs.";
+  }
+  return "";
+}
+
+/** The toast after a profile switch. */
+export function profileSwitchSummary(
+  name: string,
+  plan: { changes?: { folder: string; enabled: boolean }[]; missing?: string[]; new_off?: string[] },
+  failed: string[],
+  orderOk: boolean,
+  notes: string[] = []
+): { title: string; body: string } {
+  const changes = plan.changes ?? [];
+  const on = changes.filter((c) => c.enabled).length;
+  const off = changes.length - on;
+  const bits: string[] = [];
+  if (on || off) bits.push(`${on} mod${on === 1 ? "" : "s"} on, ${off} off.`);
+  else bits.push("No mods to switch.");
+  if ((plan.missing ?? []).length) bits.push(`Not installed any more: ${plan.missing!.slice(0, 3).join(", ")}.`);
+  if ((plan.new_off ?? []).length) bits.push(`New since the profile was saved, left off: ${plan.new_off!.length}.`);
+  if (failed.length) bits.push(`Could not switch: ${failed.slice(0, 2).join("; ")}.`);
+  if (!orderOk) bits.push("The load order was not written.");
+  if (notes.length) bits.push(notes[0]);
+  const clean = failed.length === 0 && orderOk;
+  return { title: clean ? `Profile: ${name}` : `Profile ${name}, with problems`, body: bits.join(" ") };
+}

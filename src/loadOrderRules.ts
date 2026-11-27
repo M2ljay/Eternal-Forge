@@ -29,6 +29,10 @@ export interface LoadOrderEntry {
   /** Has a place in the order. False for a New Vegas plugin that is off:
    * those games have no "listed but off", so it has no position yet. */
   positioned: boolean;
+  /** Forge's load order panel only: kept in place by auto-sort. */
+  pinned?: boolean;
+  /** Forge's load order panel only: what is wrong with it, worst first. */
+  warnings?: { plugin: string; level: "error" | "warn"; text: string }[];
 }
 
 /** What stopped a move: the plugin standing in the way, and why. An empty

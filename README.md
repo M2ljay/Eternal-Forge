@@ -479,6 +479,20 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   for) and for online-competitive games: *Not allowed: anti-cheat (DLL
   injection)*.
 
+- **Load order with LOOT rules, and profiles.** For Skyrim SE, Fallout 4,
+  Starfield and Oblivion Remastered: a Load order line on the game page
+  (problems in crimson, warnings in amber) and a panel to move plugins
+  with the D-pad, pin one in place, and **Sort with LOOT rules**: masters
+  and plugin flags from the plugin headers, plus the `after` / `req` /
+  group rules of [LOOT's masterlist](https://github.com/loot) (CC0,
+  downloaded at most daily, the saved copy used offline; never shipped).
+  Pure Python, no LOOT program. Warns about missing masters,
+  incompatibilities and dirty plugins. **Profiles** ("Vanilla+", "Full
+  modlist"...) hold which mods are on and the load order; switching one
+  backs up saves with Ludusavi, switches mods through Forge's usual
+  install path and rewrites `Plugins.txt` (and Oblivion Remastered's
+  `loadorder.txt`), and is refused while the game runs.
+
 These can be turned off in Settings, under **Game page**. Turning off the
 Modded collection leaves it as it is; **Remove Modded collection** deletes
 only Forge's own.

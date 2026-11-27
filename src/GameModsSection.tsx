@@ -20,11 +20,14 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   ForgeGuardSummary,
+  ForgeLoadOrderState,
   InstalledMod,
   OptiScalerResult,
   OptiScalerStatus,
   SaveBackupStatus,
   forgeGameStatus,
+  forgeLoSort,
+  forgeLoStatus,
   forgeOptiScalerDismiss,
   forgeOptiScalerInstall,
   forgeOptiScalerRemove,
@@ -48,6 +51,10 @@ import {
   FORGE_STEEL,
   RestorePlan,
   countLabel,
+  loadOrderSupported,
+  masterlistLine,
+  sortOutcome,
+  warningSummary,
   lockBody,
   lockHeadline,
   modSet,
@@ -68,6 +75,9 @@ import { pushFromGamePage } from "./Tabs";
 import { backupBeforeChange, openRestoreSaves, subscribeSaveBackups } from "./SaveBackup";
 import { AMBER, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
 import { noteOptiScaler, subscribeOptiScaler } from "./optiscaler";
+import { openForgeLoadOrder, openProfiles } from "./ForgeLoadOrder";
+import { ForgeLoScope } from "./forgeLoScope";
+import { isGameRunning } from "./steam";
 
 // Our own routes (registered in index.tsx).
 const BROWSE_ROUTE = "/nexus-mods";
@@ -456,6 +466,8 @@ export function GameModsSection({ appId }: { appId: number }) {
 
       <UpscalingEntry appId={appId} game={game} />
 
+      <LoadOrderEntry appId={appId} game={game} locked={locked} />
+
       {mode === "setup" && !locked && (
         <div style={{ fontSize: "13px" }}>
           Mods are not set up for this game yet. Open the Quick Access Menu, Forge, to set it up.
@@ -704,6 +716,91 @@ function UpscalingEntry({ appId, game }: { appId: number; game?: SupportedGame }
         {inst.installed && line.tone !== "suspect" && (
           <Button disabled={busy} onClick={remove}>
             Remove
+          </Button>
+        )}
+      </Focusable>
+    </Focusable>
+  );
+}
+
+// ---- Load order (LOOT rules) and profiles -------------------------------------
+// Skyrim SE, Fallout 4, Starfield and Oblivion Remastered only. One line with
+// the counts, problems and the current profile; the plugin list itself is the
+// Load order panel (a page, opened from here; B comes back). Sorting and
+// profile switches are refused by the backend while the game runs, and on a
+// locked game the writers are not offered.
+
+function steamName(appId: number, fallback: string): string {
+  try {
+    return (globalThis as any).appStore?.GetAppOverviewByAppID?.(appId)?.display_name || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function LoadOrderEntry({ appId, game, locked }: { appId: number; game?: SupportedGame; locked: boolean }) {
+  const [st, setSt] = useState<ForgeLoadOrderState | undefined>();
+  const [busy, setBusy] = useState(false);
+  const supported = loadOrderSupported(appId, game?.nexusDomain);
+  const scope: ForgeLoScope = {
+    appId,
+    domain: game?.nexusDomain ?? "",
+    installDir: game?.installDirName ?? "",
+    name: game?.displayName ?? steamName(appId, "this game"),
+    game,
+  };
+  const refresh = () => {
+    if (!supported) return;
+    forgeLoStatus(appId, scope.domain, scope.installDir)
+      .then((r) => setSt(r))
+      .catch(() => undefined);
+  };
+  useEffect(() => {
+    refresh();
+    return subscribeGameState(() => refresh());
+  }, [appId]);
+  if (!supported || !st?.supported) return null;
+
+  const sum = warningSummary(st.counts);
+  const sort = async () => {
+    if (busy) return;
+    if (isGameRunning(appId)) {
+      toaster.toast({ title: "Close the game first", body: "Its load order can't change while it runs." });
+      return;
+    }
+    setBusy(true);
+    try {
+      toaster.toast(sortOutcome(await forgeLoSort(appId, scope.domain, scope.installDir)));
+    } catch (e) {
+      toaster.toast({ title: "Could not sort", body: String(e) });
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+  return (
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap", fontSize: "13px" }}>
+        <span style={{ color: WHITE, fontWeight: 600 }}>Load order</span>
+        <span style={{ color: STEEL_MUTED }}>
+          {st.counts?.active ?? 0} of {st.counts?.plugins ?? 0} plugins on
+        </span>
+        {st.current_profile && <Chip>Profile: {st.current_profile}</Chip>}
+        <span style={{ color: sum.tone === "error" ? CRIMSON_TEXT : sum.tone === "warn" ? AMBER : GREEN }}>
+          {sum.text}
+        </span>
+      </div>
+      <div style={{ fontSize: "12px", color: STEEL_MUTED }}>{masterlistLine(st.masterlist, Date.now() / 1000)}</div>
+      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <Button onClick={() => openForgeLoadOrder(scope)}>Load order</Button>
+        {!locked && (
+          <Button disabled={busy} onClick={() => void sort()}>
+            Sort with LOOT rules
+          </Button>
+        )}
+        {!locked && (
+          <Button disabled={busy} onClick={() => openProfiles(scope, st, refresh)}>
+            {st.current_profile ? `Profiles (${st.current_profile})` : "Profiles"}
           </Button>
         )}
       </Focusable>

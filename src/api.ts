@@ -3109,3 +3109,115 @@ export const forgeOptiScalerExit = callable<
 >("forge_optiscaler_exit");
 
 export const forgeOptiScalerDismiss = callable<[app_id: number], { ok: boolean }>("forge_optiscaler_dismiss");
+
+// ---- Forge: load order with LOOT rules, and deploy profiles ------------------
+// Skyrim SE, Fallout 4, Starfield and Oblivion Remastered. Writers refuse while
+// the game is running and sit behind the anti-cheat lock and the save backup.
+
+export interface LoWarning {
+  plugin: string;
+  level: "error" | "warn";
+  text: string;
+}
+
+export interface LoMasterlist {
+  available: boolean;
+  fetched_at: number;
+  checked_at: number;
+  error: string;
+  repo: string;
+  source: string;
+}
+
+export interface ForgeLoadOrderState extends LoadOrderState {
+  forge?: boolean;
+  game?: string;
+  key?: string;
+  app_id?: number;
+  method?: "asterisk" | "textfile";
+  known_game?: boolean;
+  blueprint?: string[];
+  warnings?: LoWarning[];
+  counts?: { error: number; warn: number; plugins: number; active: number };
+  masterlist?: LoMasterlist;
+  profiles?: string[];
+  current_profile?: string;
+  file_exists?: boolean;
+  running?: boolean;
+}
+
+export interface ForgeLoSortResult {
+  ok: boolean;
+  error?: string;
+  moved?: number;
+  notes?: string[];
+  cycle?: string[];
+  masterlist_used?: boolean;
+  running?: boolean;
+  state?: ForgeLoadOrderState;
+}
+
+export interface ForgeProfilePlan {
+  ok: boolean;
+  error?: string;
+  running?: boolean;
+  changes?: { folder: string; enabled: boolean }[];
+  missing?: string[];
+  new_off?: string[];
+}
+
+export const forgeLoStatus = callable<
+  [app_id: number, game_domain: string, install_dir: string],
+  ForgeLoadOrderState
+>("forge_lo_status");
+
+/** refresh: update LOOT's masterlist first when the cached copy is a day old. */
+export const forgeLoGet = callable<
+  [app_id: number, game_domain: string, install_dir: string, refresh: boolean],
+  ForgeLoadOrderState
+>("forge_lo_get");
+
+export const forgeLoSort = callable<
+  [app_id: number, game_domain: string, install_dir: string],
+  ForgeLoSortResult
+>("forge_lo_sort");
+
+export const forgeLoSet = callable<
+  [app_id: number, names: string[], game_domain: string, install_dir: string],
+  ForgeLoadOrderState
+>("forge_lo_set");
+
+export const forgeLoUndo = callable<
+  [app_id: number, game_domain: string, install_dir: string],
+  ForgeLoadOrderState
+>("forge_lo_undo");
+
+export const forgeLoSetActive = callable<
+  [app_id: number, name: string, enabled: boolean, game_domain: string, install_dir: string],
+  ForgeLoadOrderState
+>("forge_lo_set_active");
+
+export const forgeLoPin = callable<
+  [app_id: number, name: string, pinned: boolean, game_domain: string, install_dir: string],
+  ForgeLoadOrderState
+>("forge_lo_pin");
+
+export const forgeProfileSave = callable<
+  [app_id: number, name: string, mods: { folder: string; enabled: boolean; togglable?: boolean }[], game_domain: string, install_dir: string],
+  { ok: boolean; error?: string; name?: string; mods?: number; plugins?: number }
+>("forge_profile_save");
+
+export const forgeProfileDelete = callable<
+  [app_id: number, name: string, game_domain: string],
+  { ok: boolean; profiles?: string[]; current_profile?: string }
+>("forge_profile_delete");
+
+export const forgeProfilePlan = callable<
+  [app_id: number, name: string, mods: { folder: string; enabled: boolean; togglable?: boolean }[], game_domain: string, install_dir: string],
+  ForgeProfilePlan
+>("forge_profile_plan");
+
+export const forgeProfileApplyOrder = callable<
+  [app_id: number, name: string, game_domain: string, install_dir: string],
+  { ok: boolean; error?: string; running?: boolean; notes?: string[]; released?: string[]; state?: ForgeLoadOrderState }
+>("forge_profile_apply_order");

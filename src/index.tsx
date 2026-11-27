@@ -265,6 +265,7 @@ import { DownloadsPage } from "./DownloadsPage";
 import { ModDetailPage } from "./ModDetailPage";
 import { ManagerPage } from "./ManagerPage";
 import LoadOrderPage from "./LoadOrderPage";
+import { FORGE_LOAD_ORDER_ROUTE } from "./forgeLoScope";
 import { SettingsPage } from "./SettingsPage";
 import { UpdatesPage } from "./UpdatesPage";
 import { GameBananaPage } from "./GameBananaPage";
@@ -317,6 +318,7 @@ const HEALTH_ROUTE = "/nexus-mods/health";
 const UPDATES_ROUTE = "/nexus-mods/updates";
 const MANAGER_ROUTE = "/nexus-mods/manager";
 const LOAD_ORDER_ROUTE = "/nexus-mods/load-order";
+const ForgeLoadOrderRoute = () => <LoadOrderPage forge />;
 const SETTINGS_ROUTE = "/nexus-mods/settings";
 
 interface BackendInfo {
@@ -4781,6 +4783,9 @@ export default definePlugin(() => {
   routerHook.addRoute(UPDATES_ROUTE, UpdatesPage, { exact: true });
   routerHook.addRoute(MANAGER_ROUTE, ManagerPage, { exact: true });
   routerHook.addRoute(LOAD_ORDER_ROUTE, LoadOrderPage, { exact: true });
+  // Forge's Load order panel, opened from a game's page (LOOT rules, pins,
+  // profiles). The same page in its one-game mode.
+  routerHook.addRoute(FORGE_LOAD_ORDER_ROUTE, ForgeLoadOrderRoute, { exact: true });
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage, { exact: true });
   routerHook.addRoute(GB_BROWSE_ROUTE, GameBananaPage, { exact: true });
   routerHook.addRoute(GB_MOD_ROUTE, GameBananaModPage, { exact: true });
@@ -4930,6 +4935,7 @@ export default definePlugin(() => {
       routerHook.removeRoute(UPDATES_ROUTE);
       routerHook.removeRoute(MANAGER_ROUTE);
       routerHook.removeRoute(LOAD_ORDER_ROUTE);
+      routerHook.removeRoute(FORGE_LOAD_ORDER_ROUTE);
       routerHook.removeRoute(SETTINGS_ROUTE);
       routerHook.removeRoute(GB_BROWSE_ROUTE);
       routerHook.removeRoute(GB_MOD_ROUTE);

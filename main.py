@@ -40207,6 +40207,725 @@ _FORGE_GATED["forge_optiscaler_set_upscaler"] = None
 _FORGE_OWN_BACKUP = {"forge_optiscaler_install", "forge_optiscaler_set_upscaler"}
 
 
+# ---- Forge: load order with LOOT's masterlist rules, and deploy profiles -------
+# For Skyrim SE, Fallout 4, Starfield and Oblivion Remastered. The rules, the
+# YAML subset, the sort and the file formats are in py_modules/load_order.py;
+# this is the paths, the masterlist download and cache, and the callables.
+# Writers are in _FORGE_GATED (the anti-cheat lock, then a Ludusavi backup);
+# all of them refuse while the game is running.
+import load_order  # noqa: E402
+
+_LO_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "loot")
+_LO_LOCK = threading.RLock()
+_LO_ML_CACHE: dict = {}      # repo -> (mtime, Masterlist, meta)
+_LO_HEADER_CACHE: dict = {}  # (path, size, mtime_ns) -> header
+_LO_CRC_CACHE: dict = {}     # (path, size, mtime_ns) -> crc
+_LO_REFRESHING: dict = {}    # repo -> asyncio.Lock
+LO_RUNNING = "Close the game first: its load order can't change while it runs."
+LO_UNSUPPORTED = "Load order sorting is for Skyrim Special Edition, Fallout 4, Starfield and Oblivion Remastered."
+
+
+async def _lo_http_get(url: str, etag: str = ""):
+    """(status, body, etag) for a masterlist URL. Only LOOT's own repositories
+    on raw.githubusercontent.com are fetched."""
+    if not url.startswith(load_order.MASTERLIST_PREFIX):
+        raise ValueError("not a LOOT masterlist URL")
+    headers = {"User-Agent": "Forge-load-order", "Accept": "text/plain"}
+    if etag:
+        headers["If-None-Match"] = etag
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=45)) as session:
+        async with session.get(url, headers=headers, ssl=SSL_CONTEXT) as r:
+            if r.status != 200:
+                return r.status, b"", ""
+            body = await r.content.read(load_order.MASTERLIST_MAX_BYTES + 1)
+            if len(body) > load_order.MASTERLIST_MAX_BYTES:
+                raise ValueError("masterlist too large")
+            return 200, body, r.headers.get("ETag", "")
+
+
+_LO_HTTP_GET = _lo_http_get
+
+
+def _lo_ml_file(repo: str) -> str:
+    return os.path.join(_LO_DIR, f"{repo}.json")
+
+
+def _lo_ml_read(repo: str) -> dict:
+    data = _forge_read(_lo_ml_file(repo))
+    data["meta"] = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    return data
+
+
+def _lo_masterlist(repo: str):
+    """(Masterlist, meta) from the cached copy; an empty masterlist when
+    there is none yet."""
+    path = _lo_ml_file(repo)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = None
+    hit = _LO_ML_CACHE.get(repo)
+    if hit and hit[0] == mtime:
+        return hit[1], hit[2]
+    data = _lo_ml_read(repo) if mtime is not None else {"meta": {}}
+    try:
+        ml = load_order.Masterlist(data.get("data")) if data.get("data") else load_order.Masterlist()
+    except Exception as e:  # noqa: BLE001 - a bad cache is no cache
+        decky.logger.warning(f"forge: masterlist cache for {repo} unreadable: {e}")
+        ml, data = load_order.Masterlist(), {"meta": data.get("meta") or {}}
+    meta = dict(data["meta"], available=bool(data.get("data")))
+    _LO_ML_CACHE[repo] = (mtime, ml, meta)
+    return ml, meta
+
+
+def _lo_ml_write(repo: str, meta: dict, reduced=None) -> None:
+    with _LO_LOCK:
+        old = _lo_ml_read(repo)
+        data = {"meta": meta, "data": reduced if reduced is not None else old.get("data")}
+        _forge_write(_lo_ml_file(repo), data)
+        _LO_ML_CACHE.pop(repo, None)
+
+
+async def _lo_refresh_masterlist(repo: str, force: bool = False) -> dict:
+    """Download LOOT's masterlist for one game when the cached copy is a day
+    old (an hour after a failed try), keeping the cached copy when offline.
+    Never raises; returns the meta."""
+    lock = _LO_REFRESHING.setdefault(repo, asyncio.Lock())
+    async with lock:
+        meta = dict(_lo_ml_read(repo)["meta"])
+        now = time.time()
+        if not force:
+            if now - float(meta.get("fetched_at") or 0) < load_order.REFRESH_SECONDS:
+                return meta
+            if now - float(meta.get("checked_at") or 0) < load_order.RETRY_SECONDS:
+                return meta
+        meta["checked_at"] = int(now)
+        try:
+            for branch in load_order.MASTERLIST_BRANCHES:
+                url = load_order.MASTERLIST_URL.format(repo=repo, branch=branch)
+                etag = meta.get("etag", "") if meta.get("url") == url and _lo_ml_read(repo).get("data") else ""
+                status, body, new_etag = await _LO_HTTP_GET(url, etag)
+                if status == 404:
+                    continue
+                if status == 304:
+                    meta.update(fetched_at=int(now), error="")
+                    _lo_ml_write(repo, meta)
+                    return meta
+                if status != 200:
+                    meta["error"] = f"HTTP {status}"
+                    break
+
+                def parse():
+                    text, _enc = load_order.decode_text(body)
+                    return load_order.reduce_masterlist(load_order.parse_yaml(text))
+
+                reduced = await asyncio.to_thread(parse)
+                meta.update(url=url, etag=new_etag, fetched_at=int(now), error="",
+                            sha256=hashlib.sha256(body).hexdigest(), size=len(body),
+                            entries=len(reduced["plugins"]))
+                _lo_ml_write(repo, meta, reduced)
+                decky.logger.info(f"forge: LOOT masterlist {repo} updated from {url} "
+                                  f"({len(body)} bytes, {len(reduced['plugins'])} entries)")
+                return meta
+            else:
+                meta["error"] = "not found"
+        except Exception as e:  # noqa: BLE001 - offline keeps the cached copy
+            meta["error"] = f"{type(e).__name__}: {e}"[:200]
+        decky.logger.info(f"forge: LOOT masterlist {repo} not updated ({meta.get('error')}); "
+                          "using the cached copy")
+        _lo_ml_write(repo, meta)
+        return meta
+
+
+def _lo_paths(app_id: int, game_domain: str = "", install_dir: str = ""):
+    """Where one game's plugins and load-order files are, or None when the
+    game is not supported or not found."""
+    key, game = load_order.game_for(app_id, game_domain)
+    if not game:
+        return None
+    app_id = int(app_id or 0) or game["app_ids"][0]
+    st = _forge_state()
+    game_dir = _forge_game_dir(st, app_id, key, install_dir)
+    if not game_dir:
+        return None
+    data = os.path.join(game_dir, *game["data"].split("/"))
+    if game["method"] == "asterisk":
+        ptxt = _plugins_txt_path(app_id, game["local"] + "/Plugins.txt")
+        lotxt = ""
+    else:
+        ptxt = _adopt_case(os.path.join(data, "Plugins.txt"))
+        lotxt = _adopt_case(os.path.join(data, "loadorder.txt"))
+    return {"key": key, "game": game, "app_id": app_id, "game_dir": game_dir, "data": data,
+            "plugins_txt": ptxt, "loadorder_txt": lotxt}
+
+
+def _lo_cached(cache: dict, path: str, fn):
+    try:
+        s = os.stat(path)
+    except OSError:
+        return None
+    k = (path, s.st_size, s.st_mtime_ns)
+    if k not in cache:
+        if len(cache) > 20000:
+            cache.clear()
+        cache[k] = fn(path)
+    return cache[k]
+
+
+def _lo_read_text(path: str):
+    """(text, encoding, newline) of a load-order file; ("", None, None) when
+    it is not there."""
+    if not path or not os.path.isfile(path):
+        return "", None, None
+    with open(path, "rb") as f:
+        raw = f.read()
+    text, enc = load_order.decode_text(raw)
+    return text, enc, load_order.newline_of(text, "")
+
+
+def _lo_scan(p: dict) -> dict:
+    """The game's plugins (headers read, cached by size and date) and its
+    current load order."""
+    game = p["game"]
+    try:
+        names = [n for n in os.listdir(p["data"])
+                 if load_order.is_plugin_name(n) and os.path.isfile(os.path.join(p["data"], n))]
+    except OSError:
+        names = []
+    plugins = {}
+    for n in names:
+        head = _lo_cached(_LO_HEADER_CACHE, os.path.join(p["data"], n),
+                          lambda path: load_order.read_header(path, game))
+        info = dict(head) if head else {"flags": 0, "masters": [],
+                                        **load_order.plugin_kind(n, 0, game), "unreadable": True}
+        info["name"] = n
+        plugins[n.lower()] = info
+    ptext, penc, pnl = _lo_read_text(p["plugins_txt"])
+    ltext, lenc, lnl = _lo_read_text(p["loadorder_txt"])
+    state = load_order.read_state(game, ptext, ltext, names)
+    blueprint = [plugins[n.lower()]["name"] for n in state["order"]
+                 if plugins.get(n.lower(), {}).get("blueprint")]
+    if blueprint:
+        bl = {b.lower() for b in blueprint}
+        state["order"] = [n for n in state["order"] if n.lower() not in bl]
+    return dict(state, plugins=plugins, blueprint=blueprint,
+                encoding=penc or lenc or ("utf-8" if game["method"] == "textfile" else "cp1252"),
+                newline=pnl or lnl or "\r\n", exists=penc is not None)
+
+
+def _lo_crc_fn(p: dict):
+    def crc(name):
+        return _lo_cached(_LO_CRC_CACHE, os.path.join(p["data"], name), load_order.crc32_file)
+    return crc
+
+
+def _lo_context(p: dict, scan: dict, active=None):
+    ctx = load_order.ConditionContext(
+        data_dir=p["data"], game_dir=p["game_dir"],
+        active=scan["active"] if active is None else active, plugins=scan["plugins"])
+
+    def crc(rel):
+        path = ctx.path(rel)
+        return _lo_cached(_LO_CRC_CACHE, path, load_order.crc32_file) if path else None
+    ctx._crc = crc
+    return ctx
+
+
+def _lo_record(app_id: int, st: dict = None) -> dict:
+    st = st if st is not None else _forge_state()
+    rec = (st.get("load_order") or {}).get(str(int(app_id)))
+    rec = dict(rec) if isinstance(rec, dict) else {}
+    rec["pins"] = dict(rec.get("pins") or {}) if isinstance(rec.get("pins"), dict) else {}
+    rec["profiles"] = dict(rec.get("profiles") or {}) if isinstance(rec.get("profiles"), dict) else {}
+    rec["current"] = rec.get("current") if isinstance(rec.get("current"), str) else ""
+    return rec
+
+
+def _lo_update(app_id: int, fn) -> dict:
+    """Change one game's load_order record in forge.json under the lock."""
+    with _FORGE_LOCK:
+        st = _forge_state()
+        rec = fn(_lo_record(app_id, st))
+        if not isinstance(st.get("load_order"), dict):
+            st["load_order"] = {}
+        st["load_order"][str(int(app_id))] = rec
+        _forge_write(FORGE_STATE, st)
+        return rec
+
+
+def _lo_pins(rec: dict) -> dict:
+    out = {}
+    for low, v in (rec.get("pins") or {}).items():
+        try:
+            out[low] = int(v.get("index") if isinstance(v, dict) else v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _lo_owners(domain: str) -> dict:
+    owner = {}
+    for key, rec in (_load_settings().get("installed", {}).get(domain, {}) or {}).items():
+        for pl in rec.get("plugins") or []:
+            owner.setdefault(str(pl).lower(), (rec.get("name") or key, key,
+                                                rec.get("collection_slug") or "", rec.get("mod_id")))
+    return owner
+
+
+def _lo_state(p: dict, scan: dict = None, refresh_meta: dict = None) -> dict:
+    """Everything the Load order panel shows, in the shape of the Load Order
+    page's state, plus pins, warnings, the masterlist and the profiles."""
+    scan = scan or _lo_scan(p)
+    game = p["game"]
+    ml, meta = _lo_masterlist(game["masterlist"])
+    rec = _lo_record(p["app_id"])
+    pins = _lo_pins(rec)
+    ctx = _lo_context(p, scan)
+    warns = load_order.warnings(game, scan["order"], scan["active"], scan["plugins"], ml, ctx,
+                                fixed=scan["fixed"], crc=_lo_crc_fn(p))
+    for n, on in scan["missing"]:
+        if on:
+            warns.append({"plugin": n, "level": "warn",
+                          "text": "Listed in the load order but not installed."})
+    by_plugin = {}
+    for w in warns:
+        by_plugin.setdefault(w["plugin"].lower(), []).append(w)
+    skips = _load_skips(p["key"])
+    owner = _lo_owners(p["key"])
+    listed = {n.lower() for n in scan["order"]}
+    entries = []
+    for n in scan["order"]:
+        low = n.lower()
+        info = scan["plugins"].get(low) or {}
+        needs, missing = [], []
+        for m in info.get("masters") or []:
+            if m.lower() in listed:
+                needs.append(scan["plugins"][m.lower()]["name"])
+            elif m.lower() not in scan["plugins"]:
+                missing.append(m)
+        mod, key, slug, mod_id = owner.get(low) or ("", "", "", None)
+        entries.append({
+            "name": n, "enabled": low in scan["active"], "master": bool(info.get("master")),
+            "light": bool(info.get("light")), "medium": bool(info.get("medium")),
+            "needs": needs, "missing": missing, "on_disk": True, "mod": mod, "mod_key": key,
+            "collection": slug, "mod_id": mod_id,
+            "skipped": (skips.get(low) or {}).get("reason", "") if isinstance(skips.get(low), dict) else "",
+            "positioned": True, "pinned": low in pins,
+            "warnings": by_plugin.get(low, []),
+        })
+    for n, on in scan["missing"]:
+        entries.append({"name": n, "enabled": on, "master": False, "light": False, "medium": False,
+                        "needs": [], "missing": [], "on_disk": False, "mod": "", "mod_key": "",
+                        "collection": "", "mod_id": None, "skipped": "", "positioned": False,
+                        "pinned": False, "warnings": by_plugin.get(n.lower(), [])})
+    profiles = rec["profiles"]
+    return {
+        "ok": True, "supported": True, "forge": True, "game": game["name"], "key": p["key"],
+        "app_id": p["app_id"], "method": game["method"],
+        "style": "starred" if game["method"] == "asterisk" else "listed",
+        "entries": entries,
+        "implicit": [n for n in scan["fixed"]],
+        "blueprint": scan["blueprint"],
+        "warnings": [w for w in warns if not w["plugin"]],
+        "counts": {"error": sum(1 for w in warns if w["level"] == "error"),
+                   "warn": sum(1 for w in warns if w["level"] == "warn"),
+                   "plugins": len(scan["order"]),
+                   "active": sum(1 for n in scan["order"] if n.lower() in scan["active"])},
+        "masterlist": {"available": bool(meta.get("available")),
+                       "fetched_at": int(meta.get("fetched_at") or 0),
+                       "checked_at": int(meta.get("checked_at") or 0),
+                       "error": str(meta.get("error") or ""),
+                       "repo": game["masterlist"],
+                       "source": f"https://github.com/loot/{game['masterlist']}"},
+        "profiles": sorted(profiles),
+        "current_profile": rec["current"] if rec["current"] in profiles else "",
+        "file_exists": scan["exists"],
+    }
+
+
+def _lo_write(p: dict, scan: dict, order: list, active: set) -> None:
+    """Write plugins.txt (and loadorder.txt for text-file games) for an
+    order, keeping a .decky-bak copy of what was there."""
+    game = p["game"]
+    ptext, ltext = load_order.render(game, order, active, scan["header"], scan["missing"],
+                                     scan["newline"], scan["blueprint"])
+    for path, text in ((p["plugins_txt"], ptext), (p["loadorder_txt"], ltext)):
+        if not path or text is None:
+            continue
+        if os.path.isfile(path):
+            try:
+                shutil.copy2(path, path + LOAD_ORDER_BACKUP)
+            except OSError:
+                pass
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".forge-tmp"
+        with open(tmp, "wb") as f:
+            f.write(text.encode(scan["encoding"] if scan["encoding"] != "utf-8-sig" else "utf-8-sig",
+                                "replace"))
+        os.replace(tmp, path)
+
+
+async def _lo_running(p: dict) -> bool:
+    for exe in p["game"]["exes"]:
+        if await _process_running(exe):
+            return True
+    return False
+
+
+def _lo_reposition_pins(app_id: int, order: list) -> None:
+    pos = {n.lower(): i for i, n in enumerate(order)}
+
+    def fn(rec):
+        for low, v in list(rec["pins"].items()):
+            if low in pos:
+                rec["pins"][low] = {"name": order[pos[low]], "index": pos[low]}
+        return rec
+    _lo_update(app_id, fn)
+
+
+def _lo_bad(error: str, **extra) -> dict:
+    return dict({"ok": False, "error": error}, **extra)
+
+
+async def _forge_lo_status(self, app_id: int, game_domain: str = "", install_dir: str = "") -> dict:
+    """For the game page: is this a supported game, its counts, warnings,
+    profiles. Local only: the cached masterlist, no download."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        key, game = load_order.game_for(app_id, game_domain)
+        return {"ok": True, "supported": False, "known_game": bool(game)}
+    try:
+        st = await asyncio.to_thread(_lo_state, p)
+    except Exception as e:  # noqa: BLE001 - the game page shows nothing rather than break
+        decky.logger.warning(f"forge: load-order status for {app_id} failed: {e}")
+        return {"ok": False, "supported": True, "error": str(e)}
+    st.pop("entries", None)
+    return st
+
+
+async def _forge_lo_get(self, app_id: int, game_domain: str = "", install_dir: str = "",
+                        refresh: bool = True) -> dict:
+    """The full load order for the panel. Refreshes LOOT's masterlist first
+    when the cached copy is a day old (offline: the cached copy)."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return {"ok": True, "supported": False, "error": LO_UNSUPPORTED}
+    if refresh:
+        await _lo_refresh_masterlist(p["game"]["masterlist"])
+    return await asyncio.to_thread(_lo_state, p)
+
+
+async def _forge_lo_sort(self, app_id: int, game_domain: str = "", install_dir: str = "") -> dict:
+    """Sort with LOOT's rules (masters, flags, the masterlist's after / req
+    and groups), pinned plugins kept in place, and write it. A cycle is
+    reported and nothing is written."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    if await _lo_running(p):
+        return _lo_bad(LO_RUNNING, running=True)
+    await _lo_refresh_masterlist(p["game"]["masterlist"])
+
+    def run():
+        with _LO_LOCK:
+            scan = _lo_scan(p)
+            ml, meta = _lo_masterlist(p["game"]["masterlist"])
+            pins = _lo_pins(_lo_record(p["app_id"]))
+            result = load_order.sort_plugins(scan["order"], scan["plugins"], ml,
+                                             _lo_context(p, scan), pins)
+            if result["cycle"]:
+                return dict(_lo_bad("These plugins have to load after each other in a circle, so "
+                                    "nothing was sorted: " + " -> ".join(result["cycle"]) + "."),
+                            cycle=result["cycle"], notes=result["notes"], state=_lo_state(p, scan))
+            if result["changed"]:
+                _lo_write(p, scan, result["order"], scan["active"])
+                _lo_reposition_pins(p["app_id"], result["order"])
+                scan = _lo_scan(p)
+            return {"ok": True, "moved": result["moved"], "notes": result["notes"],
+                    "masterlist_used": bool(meta.get("available")), "state": _lo_state(p, scan)}
+
+    r = await asyncio.to_thread(run)
+    decky.logger.info(f"forge: LOOT sort for {p['key']}: "
+                      + (f"cycle {r.get('cycle')}" if r.get("cycle") else f"{r.get('moved', 0)} moved"))
+    return r
+
+
+async def _forge_lo_set(self, app_id: int, names: list, game_domain: str = "",
+                        install_dir: str = "") -> dict:
+    """Write an order arranged by hand: exactly the listed plugins, permuted.
+    Refused when it adds a broken rule (a plugin above its master, a master
+    below a plugin); a fault the order already had does not block a move."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    if await _lo_running(p):
+        return _lo_bad(LO_RUNNING, running=True)
+
+    def run():
+        with _LO_LOCK:
+            scan = _lo_scan(p)
+            want = [str(n) for n in (names or [])]
+            low = [n.lower() for n in want]
+            if sorted(low) != sorted(n.lower() for n in scan["order"]) or len(set(low)) != len(low):
+                return _lo_bad("The list changed since the panel read it. Open it again and retry.")
+            added = (load_order.order_violations(want, scan["plugins"])
+                     - load_order.order_violations(scan["order"], scan["plugins"]))
+            if added:
+                kind, who, master = sorted(added)[0]
+                name = scan["plugins"][who]["name"]
+                if kind == "master":
+                    return _lo_bad(f"{name} is a master file, and those load before everything else.")
+                return _lo_bad(f"{name} has to load after {scan['plugins'][master]['name']}, which it needs.")
+            spelled = [scan["plugins"][n]["name"] for n in low]
+            _lo_write(p, scan, spelled, scan["active"])
+            _lo_reposition_pins(p["app_id"], spelled)
+            return _lo_state(p)
+
+    return await asyncio.to_thread(run)
+
+
+async def _forge_lo_undo(self, app_id: int, game_domain: str = "", install_dir: str = "") -> dict:
+    """Put the load-order files back as they were before the last write
+    (one step; pressing it again swaps back)."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    if await _lo_running(p):
+        return _lo_bad(LO_RUNNING, running=True)
+
+    def run():
+        with _LO_LOCK:
+            done = 0
+            for path in (p["plugins_txt"], p["loadorder_txt"]):
+                if not path or not os.path.isfile(path + LOAD_ORDER_BACKUP):
+                    continue
+                tmp = path + ".forge-swap"
+                if os.path.isfile(path):
+                    shutil.copy2(path, tmp)
+                shutil.copy2(path + LOAD_ORDER_BACKUP, path)
+                if os.path.isfile(tmp):
+                    os.replace(tmp, path + LOAD_ORDER_BACKUP)
+                done += 1
+            if not done:
+                return _lo_bad("There is nothing to undo.")
+            return _lo_state(p)
+
+    return await asyncio.to_thread(run)
+
+
+async def _forge_lo_set_active(self, app_id: int, name: str, enabled: bool, game_domain: str = "",
+                               install_dir: str = "") -> dict:
+    """Switch one plugin on (with the masters it needs) or off (with the
+    plugins that need it)."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    if await _lo_running(p):
+        return _lo_bad(LO_RUNNING, running=True)
+
+    def run():
+        with _LO_LOCK:
+            scan = _lo_scan(p)
+            plugins, active = scan["plugins"], set(scan["active"])
+            low = str(name or "").lower()
+            if low not in plugins or low not in {n.lower() for n in scan["order"]}:
+                return _lo_bad(f"{name} is not in the load order.")
+            title = plugins[low]["name"]
+            skips = {k.lower() for k in _load_skips(p["key"])}
+            also = []
+            if enabled:
+                if low in skips:
+                    return _lo_bad(f"{title} stays off: Forge switched it off because it breaks the game.")
+                todo = [low]
+                while todo:
+                    cur = todo.pop()
+                    for m in plugins[cur].get("masters") or []:
+                        ml = m.lower()
+                        if ml in active or ml == low:
+                            continue
+                        if ml not in plugins:
+                            return _lo_bad(f"{title} needs {m}, which is not installed.")
+                        if ml in skips:
+                            return _lo_bad(f"{title} needs {m}, which stays off.")
+                        active.add(ml)
+                        also.append(plugins[ml]["name"])
+                        todo.append(ml)
+                active.add(low)
+            else:
+                if low in {n.lower() for n in scan["fixed"]}:
+                    return _lo_bad(f"{title} is part of the game and always loads.")
+                off = {low}
+                changed = True
+                while changed:
+                    changed = False
+                    for n in list(active):
+                        if n in off:
+                            continue
+                        if any(m.lower() in off for m in plugins.get(n, {}).get("masters") or []):
+                            off.add(n)
+                            also.append(plugins[n]["name"])
+                            changed = True
+                active -= off
+            _lo_write(p, scan, scan["order"], active)
+            return dict(_lo_state(p), also=also)
+
+    return await asyncio.to_thread(run)
+
+
+async def _forge_lo_pin(self, app_id: int, name: str, pinned: bool, game_domain: str = "",
+                        install_dir: str = "") -> dict:
+    """Pin a plugin where it is now (auto-sort keeps it there), or unpin it.
+    forge.json only."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+
+    def run():
+        scan = _lo_scan(p)
+        pos = {n.lower(): i for i, n in enumerate(scan["order"])}
+        low = str(name or "").lower()
+        if pinned and low not in pos:
+            return _lo_bad(f"{name} is not in the load order.")
+
+        def fn(rec):
+            if pinned:
+                rec["pins"][low] = {"name": scan["order"][pos[low]], "index": pos[low]}
+            else:
+                rec["pins"].pop(low, None)
+            return rec
+        _lo_update(p["app_id"], fn)
+        return _lo_state(p, scan)
+
+    return await asyncio.to_thread(run)
+
+
+def _lo_mods_arg(mods) -> list:
+    out = []
+    for m in (mods or [])[:5000]:
+        if isinstance(m, dict) and isinstance(m.get("folder"), str) and m["folder"]:
+            out.append({"folder": m["folder"], "enabled": bool(m.get("enabled")),
+                        "togglable": m.get("togglable") is not False})
+    return out
+
+
+async def _forge_profile_save(self, app_id: int, name: str, mods: list, game_domain: str = "",
+                              install_dir: str = "") -> dict:
+    """Save (or update) a named profile from the live state: which mods are
+    on, the plugin order and the active plugins. It becomes the current one."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    clean = load_order.clean_profile_name(name)
+    if not clean:
+        return _lo_bad("Give the profile a name of up to 40 characters.")
+
+    def run():
+        scan = _lo_scan(p)
+        snap = load_order.snapshot(_lo_mods_arg(mods), scan["order"], scan["active"])
+        snap["saved_at"] = int(time.time())
+        result = {}
+
+        def fn(rec):
+            if clean not in rec["profiles"] and len(rec["profiles"]) >= load_order.MAX_PROFILES:
+                result["error"] = f"A game can have {load_order.MAX_PROFILES} profiles."
+                return rec
+            rec["profiles"][clean] = snap
+            rec["current"] = clean
+            return rec
+        _lo_update(p["app_id"], fn)
+        if result.get("error"):
+            return _lo_bad(result["error"])
+        return {"ok": True, "name": clean, "mods": len(snap["mods"]), "plugins": len(snap["order"])}
+
+    return await asyncio.to_thread(run)
+
+
+async def _forge_profile_delete(self, app_id: int, name: str, game_domain: str = "") -> dict:
+    """Forget a profile. Nothing in the game changes."""
+    key, game = load_order.game_for(app_id, game_domain)
+    if not game:
+        return _lo_bad(LO_UNSUPPORTED)
+    app_id = int(app_id or 0) or game["app_ids"][0]
+
+    def fn(rec):
+        rec["profiles"].pop(str(name or ""), None)
+        if rec["current"] == name:
+            rec["current"] = ""
+        return rec
+    rec = await asyncio.to_thread(_lo_update, app_id, fn)
+    return {"ok": True, "profiles": sorted(rec["profiles"]), "current_profile": rec["current"]}
+
+
+async def _forge_profile_plan(self, app_id: int, name: str, mods: list, game_domain: str = "",
+                              install_dir: str = "") -> dict:
+    """Which mods a switch to a profile turns on and off, and whether the
+    game is running (a switch is then refused). Changes nothing."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    profile = _lo_record(p["app_id"])["profiles"].get(str(name or ""))
+    if not isinstance(profile, dict):
+        return _lo_bad(f"There is no profile called {name}.")
+    running = await _lo_running(p)
+    plan = load_order.profile_plan(profile, _lo_mods_arg(mods))
+    return dict(plan, ok=True, running=running, name=name,
+                error=LO_RUNNING if running else "")
+
+
+async def _forge_profile_apply_order(self, app_id: int, name: str, game_domain: str = "",
+                                     install_dir: str = "") -> dict:
+    """The last step of a profile switch, after the mods were switched: write
+    the profile's plugin order and active plugins (fitted to what is on disk
+    now) and make it the current profile."""
+    p = await asyncio.to_thread(_lo_paths, app_id, game_domain, install_dir)
+    if not p:
+        return _lo_bad(LO_UNSUPPORTED)
+    if await _lo_running(p):
+        return _lo_bad(LO_RUNNING, running=True)
+    profile = _lo_record(p["app_id"])["profiles"].get(str(name or ""))
+    if not isinstance(profile, dict):
+        return _lo_bad(f"There is no profile called {name}.")
+
+    def run():
+        with _LO_LOCK:
+            released = []
+            if p["plugins_txt"] and os.path.isfile(p["plugins_txt"]):
+                released = _release_skips_whose_masters_arrived(
+                    p["key"], p["data"], p["plugins_txt"],
+                    "starred" if p["game"]["method"] == "asterisk" else "listed")
+            scan = _lo_scan(p)
+            order, active, notes = load_order.profile_order(
+                profile, scan["order"], scan["active"], scan["plugins"], _load_skips(p["key"]))
+            active |= {n.lower() for n in scan["fixed"]}
+            _lo_write(p, scan, order, active)
+            _lo_update(p["app_id"], lambda rec: dict(rec, current=str(name)))
+            return {"ok": True, "notes": notes, "released": released, "state": _lo_state(p)}
+
+    r = await asyncio.to_thread(run)
+    decky.logger.info(f"forge: profile {name!r} applied to {p['key']} ({len(r.get('notes') or [])} notes)")
+    return r
+
+
+Plugin.forge_lo_status = _forge_lo_status
+Plugin.forge_lo_get = _forge_lo_get
+Plugin.forge_lo_sort = _forge_lo_sort
+Plugin.forge_lo_set = _forge_lo_set
+Plugin.forge_lo_undo = _forge_lo_undo
+Plugin.forge_lo_set_active = _forge_lo_set_active
+Plugin.forge_lo_pin = _forge_lo_pin
+Plugin.forge_profile_save = _forge_profile_save
+Plugin.forge_profile_delete = _forge_profile_delete
+Plugin.forge_profile_plan = _forge_profile_plan
+Plugin.forge_profile_apply_order = _forge_profile_apply_order
+# Load-order writers: behind the anti-cheat lock and the save backup like the
+# existing ones (set_load_order, fix_load_order).
+_FORGE_GATED["forge_lo_sort"] = None
+_FORGE_GATED["forge_lo_set"] = None
+_FORGE_GATED["forge_lo_undo"] = None
+_FORGE_GATED["forge_lo_set_active"] = "enabled"
+_FORGE_GATED["forge_profile_apply_order"] = None
+
+
 def _wrap_save_backups() -> None:
     for name, switch in _FORGE_GATED.items():
         if name in _FORGE_OWN_BACKUP:

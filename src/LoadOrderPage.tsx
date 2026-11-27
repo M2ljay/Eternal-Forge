@@ -25,14 +25,23 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaArrowsAltV,
   FaExternalLinkAlt,
+  FaLayerGroup,
   FaLock,
   FaSortAmountDown,
+  FaThumbtack,
   FaUndo,
 } from "react-icons/fa";
 
 import {
+  ForgeLoadOrderState,
   LoadOrderState,
   fixLoadOrder,
+  forgeLoGet,
+  forgeLoPin,
+  forgeLoSet,
+  forgeLoSetActive,
+  forgeLoSort,
+  forgeLoUndo,
   getLoadOrder,
   getLoadOrderGames,
   getModDetails,
@@ -40,6 +49,9 @@ import {
   setPluginEnabled,
 } from "./api";
 import { SectionHeading, WarningBox } from "./chrome";
+import { firstWarning, masterlistLine, sortOutcome, warningSummary } from "./forgeRules";
+import { ForgeLoScope, getForgeLoadOrderScope } from "./forgeLoScope";
+import { openProfiles } from "./ForgeLoadOrder";
 import { ALL_GAMES, SupportedGame, getActiveGame } from "./games";
 import {
   CARRY_HINT,
@@ -72,7 +84,7 @@ import {
   pushOurPage,
 } from "./Tabs";
 import { PAGE_SCROLLER, PRIMARY_BUTTON_CSS } from "./theme";
-import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, GUNMETAL_RAISED, STEEL, WHITE } from "./palette";
+import { alpha, AMBER, BLACK, CRIMSON, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL, STEEL_MUTED, WHITE } from "./palette";
 
 const Scroller: any = ScrollPanelGroup;
 
@@ -170,8 +182,12 @@ const Row = memo(function Row({
 }: RowProps) {
   const off = !entry.enabled;
   const held = Boolean(entry.skipped) || entry.missing.length > 0 || !entry.on_disk;
+  // Forge's panel: the worst warning (crimson error, amber warning) wins.
+  const fw = firstWarning(entry.warnings);
   const note = entry.skipped
     ? `Off: ${entry.skipped}`
+    : fw
+    ? fw.text
     : entry.missing.length > 0
     ? `Needs ${entry.missing.map(pluginTitle).join(", ")}, which is not installed`
     : !entry.on_disk
@@ -179,6 +195,7 @@ const Row = memo(function Row({
     : lock
     ? lock
     : "";
+  const noteColor = !entry.skipped && fw?.level === "error" ? CRIMSON_TEXT : AMBER;
   const cls =
     "nexus-lo-row" +
     (carried ? " nexus-lo-carried" : "") +
@@ -227,6 +244,7 @@ const Row = memo(function Row({
     >
       <div className={"nexus-lo-num" + (lock ? " locked" : "")}>
         {lock ? <FaLock size={11} /> : index < 0 ? "·" : index + 1}
+        {entry.pinned && !lock ? <FaThumbtack size={9} style={{ marginLeft: "3px", color: CRIMSON_TEXT }} /> : null}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
@@ -244,7 +262,7 @@ const Row = memo(function Row({
           style={{
             fontSize: "12px",
             opacity: note ? 0.95 : 0.65,
-            color: note ? AMBER : undefined,
+            color: note ? noteColor : undefined,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -282,17 +300,38 @@ const EMPTY: LoadOrderState = {
   implicit: [],
 };
 
-export default function LoadOrderPage() {
+/** A stand-in game for Forge's panel when Forge does not manage the game
+ * (Oblivion Remastered set up by hand): only its name and ids are read. */
+function scopeGame(sc: ForgeLoScope): SupportedGame {
+  return (
+    sc.game ??
+    ({
+      appId: sc.appId,
+      displayName: sc.name,
+      nexusDomain: sc.domain,
+      installDirName: sc.installDir,
+      pluginsTxtSubpath: "forge",
+    } as unknown as SupportedGame)
+  );
+}
+
+/** forge: Forge's Load order panel, opened from a game's page. The same
+ * list and controls, plus LOOT sorting, pins, warnings and profiles, for
+ * Skyrim SE, Fallout 4, Starfield and Oblivion Remastered; no tabs, and B
+ * goes back to the game page. */
+export default function LoadOrderPage({ forge }: { forge?: boolean } = {}) {
+  const sc = forge ? getForgeLoadOrderScope() : undefined;
   const pluginGames = ALL_GAMES.filter((g) => g.pluginsTxtSubpath);
   // Same scope as My Mods: the game being browsed or run.
-  const scoped =
-    getBrowseGame() ??
-    getActiveGame(
-      Router.MainRunningApp ? Number(Router.MainRunningApp.appid) : undefined
-    );
+  const scoped = sc
+    ? scopeGame(sc)
+    : getBrowseGame() ??
+      getActiveGame(
+        Router.MainRunningApp ? Number(Router.MainRunningApp.appid) : undefined
+      );
   const [available, setAvailable] = useState<AvailableGame[] | undefined>();
   const [game, setGame] = useState<SupportedGame | undefined>(
-    scoped?.pluginsTxtSubpath ? scoped : undefined
+    sc ? scopeGame(sc) : scoped?.pluginsTxtSubpath ? scoped : undefined
   );
   const [state, setState] = useState<LoadOrderState | undefined>();
   const [loading, setLoading] = useState(true);
@@ -342,10 +381,22 @@ export default function LoadOrderPage() {
       g.nexusDomain,
     ] as const;
 
+  // The three calls that differ between the Load Order tab and Forge's panel.
+  const api = {
+    get: (g: SupportedGame): Promise<ForgeLoadOrderState> =>
+      sc ? forgeLoGet(sc.appId, sc.domain, sc.installDir, true) : getLoadOrder(...args(g)),
+    set: (g: SupportedGame, names: string[]): Promise<ForgeLoadOrderState> =>
+      sc ? forgeLoSet(sc.appId, names, sc.domain, sc.installDir) : setLoadOrder(...args(g), names),
+    toggle: (g: SupportedGame, name: string, on: boolean): Promise<ForgeLoadOrderState> =>
+      sc
+        ? forgeLoSetActive(sc.appId, name, on, sc.domain, sc.installDir)
+        : setPluginEnabled(...args(g), name, on),
+  };
+
   const load = async (g: SupportedGame) => {
     setLoading(true);
     try {
-      const r = await getLoadOrder(...args(g));
+      const r = await api.get(g);
       setState(r.ok && r.supported ? r : EMPTY);
     } catch {
       setState(EMPTY);
@@ -354,6 +405,7 @@ export default function LoadOrderPage() {
   };
 
   useEffect(() => {
+    if (sc) return; // Forge's panel is for one game: no game chips.
     getLoadOrderGames(
       pluginGames.map((g) => ({
         app_id: g.appId,
@@ -498,7 +550,7 @@ export default function LoadOrderPage() {
     const next = moveEntry(list, c.from, to).map((e) => e.name);
     setBusy(true);
     try {
-      const r = await setLoadOrder(...args(g), next);
+      const r = await api.set(g, next);
       if (!r.ok) {
         toaster.toast({ title: "Could not move it", body: r.error ?? "" });
       } else {
@@ -616,7 +668,7 @@ export default function LoadOrderPage() {
       if (!e) return;
       setBusy(true);
       try {
-        const r = await setPluginEnabled(...args(g), name, !e.enabled);
+        const r = await api.toggle(g, name, !e.enabled);
         if (!r.ok) {
           toaster.toast({
             title: e.enabled ? "Could not switch it off" : "Could not switch it on",
@@ -625,6 +677,7 @@ export default function LoadOrderPage() {
           return;
         }
         setState(r);
+        if (sc) setUndo((u) => [...u.slice(-19), []]);
         const t = toggleToast(e, !e.enabled, r.also ?? []);
         if (t) toaster.toast(t);
       } finally {
@@ -680,6 +733,18 @@ export default function LoadOrderPage() {
     const g = gameRef.current;
     const s = stateRef.current;
     if (!g || !s || carryRef.current) return;
+    if (sc) {
+      setBusy(true);
+      try {
+        const r = await forgeLoSort(sc.appId, sc.domain, sc.installDir);
+        if (r.state) setState(r.state);
+        if (r.ok && r.moved) setUndo((u) => [...u.slice(-19), []]);
+        toaster.toast(sortOutcome(r));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
       const before = positioned(s).map((e) => e.name);
@@ -711,7 +776,14 @@ export default function LoadOrderPage() {
     if (!g || !prev || carryRef.current) return;
     setBusy(true);
     try {
-      const r = await setLoadOrder(...args(g), prev);
+      // Forge's panel: one step back, from the copy the last write kept.
+      const r = sc ? await forgeLoUndo(sc.appId, sc.domain, sc.installDir) : await setLoadOrder(...args(g), prev);
+      if (r.ok && sc) {
+        setUndo([]);
+        setState(r);
+        toaster.toast({ title: "Put back", body: "The load order is as it was before the last change." });
+        return;
+      }
       if (r.ok) {
         setUndo((u) => u.slice(0, -1));
         setState(r);
@@ -729,6 +801,36 @@ export default function LoadOrderPage() {
     }
   };
 
+  const togglePin = async (name: string) => {
+    const s = stateRef.current;
+    if (!sc || !s || carryRef.current || busyRef.current) return;
+    const e = (s.entries ?? []).find((x) => x.name === name);
+    if (!e) return;
+    setBusy(true);
+    try {
+      const r = await forgeLoPin(sc.appId, name, !e.pinned, sc.domain, sc.installDir);
+      if (r.ok) {
+        setState(r);
+        toaster.toast({
+          title: e.pinned ? "Unpinned" : "Pinned",
+          body: e.pinned
+            ? `${pluginTitle(name)} moves with the sort again.`
+            : `${pluginTitle(name)} keeps its place when you sort with LOOT rules.`,
+        });
+      } else toaster.toast({ title: "Could not pin it", body: r.error ?? "" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const showProfiles = () => {
+    if (!sc || carryRef.current) return;
+    openProfiles(sc, stateRef.current as ForgeLoadOrderState, () => {
+      const g = gameRef.current;
+      if (g) void load(g);
+    });
+  };
+
   const onRootCancel = () => {
     if (carryRef.current) {
       cancelCarry();
@@ -738,8 +840,9 @@ export default function LoadOrderPage() {
   };
 
   const tabButtons = (evt: CustomEvent) => {
-    // LB/RB jump the carried row instead of switching tabs.
-    if (carryRef.current) return;
+    // LB/RB jump the carried row instead of switching tabs. Forge's panel
+    // has no tabs.
+    if (carryRef.current || sc) return;
     handleTabButtons("loadorder")(evt);
   };
 
@@ -800,6 +903,8 @@ export default function LoadOrderPage() {
   const carriedEntry = carry ? entries.find((e) => e.name === carry.name) : undefined;
   const inspected = carriedEntry ?? focusedEntry;
   const filtering = filter.trim().length > 0;
+  const fstate = state as ForgeLoadOrderState | undefined;
+  const summary = sc ? warningSummary(fstate?.counts) : undefined;
   const showGameChips =
     (available ?? []).filter((a) => a.app_id !== game?.appId).length > 0;
 
@@ -815,7 +920,7 @@ export default function LoadOrderPage() {
         style={PAGE_SCROLLER}
       >
         <style>{PRIMARY_BUTTON_CSS + LO_CSS}</style>
-        <TabBar currentId="loadorder" />
+        {!sc && <TabBar currentId="loadorder" />}
 
         <Focusable
           style={{
@@ -867,8 +972,25 @@ export default function LoadOrderPage() {
                 gap: "8px",
               }}
             >
-              <FaSortAmountDown size={12} /> Sort for me
+              <FaSortAmountDown size={12} /> {sc ? "Sort with LOOT rules" : "Sort for me"}
             </DialogButton>
+            {sc && (
+              <DialogButton
+                onClick={showProfiles}
+                disabled={busy || !state?.supported || Boolean(carry)}
+                style={{
+                  minWidth: "0",
+                  width: "auto",
+                  padding: "8px 16px",
+                  fontSize: "13px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <FaLayerGroup size={12} /> {fstate?.current_profile ? `Profile: ${fstate.current_profile}` : "Profiles"}
+              </DialogButton>
+            )}
             <DialogButton
               onClick={undoLast}
               disabled={busy || undo.length === 0 || Boolean(carry)}
@@ -887,7 +1009,7 @@ export default function LoadOrderPage() {
           </div>
         </Focusable>
 
-        {showGameChips && (
+        {!sc && showGameChips && (
           <Focusable
             style={{ display: "flex", gap: "6px", flexWrap: "wrap", margin: "8px 0 4px" }}
           >
@@ -926,7 +1048,7 @@ export default function LoadOrderPage() {
 
         {!loading && (!game || !state?.supported) && (
           <div style={{ opacity: 0.85, marginTop: "12px", maxWidth: "720px", lineHeight: 1.5 }}>
-            {scoped && !scoped.pluginsTxtSubpath && (
+            {!sc && scoped && !scoped.pluginsTxtSubpath && (
               <div style={{ marginBottom: "8px" }}>{unsupportedNote(scoped.displayName)}</div>
             )}
             {game ? (
@@ -951,6 +1073,36 @@ export default function LoadOrderPage() {
             <div style={{ fontSize: "13px", opacity: 0.7, margin: "4px 0 10px" }}>
               {orderSummary(ordered)}
             </div>
+            {sc && summary && (
+              <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", fontSize: "13px", margin: "-4px 0 10px" }}>
+                <span
+                  style={{
+                    fontWeight: 600,
+                    color: summary.tone === "error" ? CRIMSON_TEXT : summary.tone === "warn" ? AMBER : GREEN,
+                  }}
+                >
+                  {summary.text}
+                </span>
+                <span style={{ color: STEEL_MUTED }}>{masterlistLine(fstate?.masterlist, Date.now() / 1000)}</span>
+              </div>
+            )}
+            {sc &&
+              (fstate?.warnings ?? []).map((w, i) => (
+                <div
+                  key={`g${i}`}
+                  style={{
+                    fontSize: "13px",
+                    margin: "0 0 8px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    borderLeft: `3px solid ${w.level === "error" ? CRIMSON : AMBER}`,
+                    background: alpha(w.level === "error" ? CRIMSON : AMBER, 0.12),
+                    color: w.level === "error" ? CRIMSON_TEXT : AMBER,
+                  }}
+                >
+                  {w.text}
+                </div>
+              ))}
             {/* A fault the order arrived with. Said here, once, rather
                 than discovered when a move is refused: the backend
                 allows moves that do not make things worse, so this can
@@ -963,7 +1115,7 @@ export default function LoadOrderPage() {
                     : `${problems.length} plugins load too early`
                 }
                 body={problemNote(problems)}
-                action={{ label: "Sort for me", onClick: sortForMe }}
+                action={{ label: sc ? "Sort with LOOT rules" : "Sort for me", onClick: sortForMe }}
               />
             )}
 
@@ -1012,10 +1164,11 @@ export default function LoadOrderPage() {
 
                 {offTail.length > 0 && (
                   <>
-                    <SectionHeading title={`Off · ${offTail.length}`} />
+                    <SectionHeading title={sc ? `Listed but not installed · ${offTail.length}` : `Off · ${offTail.length}`} />
                     <div style={{ fontSize: "12px", opacity: 0.6, margin: "-4px 0 4px 4px" }}>
-                      {game.displayName} has no place for a plugin that is off.
-                      Switch one on and it joins the order.
+                      {sc
+                        ? "These lines name plugins that are not in the Data folder. Forge keeps them as they are."
+                        : `${game.displayName} has no place for a plugin that is off. Switch one on and it joins the order.`}
                     </div>
                   </>
                 )}
@@ -1157,6 +1310,38 @@ export default function LoadOrderPage() {
                       <div style={{ fontSize: "13px", marginTop: "10px", color: AMBER, lineHeight: 1.45 }}>
                         Switched off by the plugin: {inspected.skipped}.
                       </div>
+                    )}
+                    {(inspected.warnings ?? []).map((w, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          fontSize: "13px",
+                          marginTop: "8px",
+                          lineHeight: 1.45,
+                          color: w.level === "error" ? CRIMSON_TEXT : AMBER,
+                        }}
+                      >
+                        {w.text}
+                      </div>
+                    ))}
+                    {sc && inspected.positioned && (
+                      <DialogButton
+                        onClick={() => void togglePin(inspected.name)}
+                        disabled={busy}
+                        style={{
+                          marginTop: "14px",
+                          minWidth: "0",
+                          width: "100%",
+                          padding: "9px 12px",
+                          fontSize: "13px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <FaThumbtack size={11} /> {inspected.pinned ? "Unpin" : "Pin its position"}
+                      </DialogButton>
                     )}
                     {Boolean(inspected.mod_id) && (
                       <DialogButton
