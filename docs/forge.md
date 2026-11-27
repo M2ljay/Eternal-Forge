@@ -33,6 +33,14 @@ app details `InnerContainer`, directly before Steam's own overview panel
 props it is rendered with (`overview`, `details`, `bFastRender`), the same
 shape HLTB for Deck keys on.
 
+`InnerContainer` is found by its class from `appDetailsClasses`, looked up
+through `src/gamePageAnchor.ts`: the named `@decky/ui` export, else
+`findClassModule`, else `findVar` (only in `@decky/ui` 5). The loader supplies
+`@decky/ui`: 4.x under Decky 3.3.1, 5.x under Decky 4.0, whose Steam client
+renamed nearly all classes and whose class names are pinned per Steam build.
+When the class is missing or stale, the section goes into whichever children
+array holds the overview panel. No overview panel, no section.
+
 It shows, for a game the plugin manages: how many mods are on, how many
 have an update, up to six mods (updates first, then the ones that are on)
 with a switch each, **Open** / **Update** to go to the mod's page in the

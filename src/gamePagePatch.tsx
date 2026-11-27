@@ -12,18 +12,17 @@
 //   patch stops touching the page until the plugin reloads;
 // - if the overview panel is not where it is expected (a soundtrack page,
 //   a Steam update that moved things) nothing is inserted at all;
+// - InnerContainer is found by its class, or, where the loader's class map
+//   lacks it (Decky 4.0's renamed classes), as the overview panel's parent;
 // - unregisterGamePagePatch removes the route patch on unload.
 import { routerHook } from "@decky/api";
 import type { RoutePatch } from "@decky/api";
-import {
-  afterPatch,
-  appDetailsClasses,
-  createReactTreePatcher,
-  findInReactTree,
-} from "@decky/ui";
+import * as DFL from "@decky/ui";
+import { afterPatch, createReactTreePatcher, findInReactTree } from "@decky/ui";
 import { Component, ErrorInfo, ReactNode } from "react";
 
 import { GameModsSection } from "./GameModsSection";
+import { findInsertionChildren, overviewIndex, resolveClassModule } from "./gamePageAnchor";
 import { FailureBudget } from "./forgeRules";
 import { getForgeSetting } from "./forgeSettings";
 
@@ -63,15 +62,18 @@ function isGameType(appType: unknown): boolean {
   return appType === undefined || appType === 1 || appType === 8;
 }
 
-/** Steam's own overview panel among InnerContainer's children, by the
- * props it is rendered with (the same shape HLTB for Deck keys on). */
-function overviewIndex(children: any[]): number {
-  return children.findIndex(
-    (c: any) =>
-      c?.props?.children?.props?.overview !== undefined &&
-      c?.props?.children?.props?.details !== undefined &&
-      c?.props?.children?.props?.bFastRender !== undefined
-  );
+let innerContainerClass: string | undefined;
+let classLookupDone = false;
+
+// Read once per session: the class module is fixed for a Steam build. A miss
+// is logged once and the section is then placed by the overview panel alone.
+function innerContainer(): string | undefined {
+  if (!classLookupDone) {
+    classLookupDone = true;
+    innerContainerClass = resolveClassModule(DFL, "appDetailsClasses", ["InnerContainer"])?.InnerContainer;
+    if (!innerContainerClass) console.warn("Forge game page: no InnerContainer class on this Steam build; using the overview panel");
+  }
+  return innerContainerClass;
 }
 
 export function registerGamePagePatch(): void {
@@ -81,7 +83,7 @@ export function registerGamePagePatch(): void {
     patch = routerHook.addPatch(ROUTE, (tree: any) => {
       if (unloaded || budget.disabled) return tree;
       try {
-        const routeProps = findInReactTree(tree, (x: any) => x?.renderFunc);
+        const routeProps = findInReactTree(tree, (x: any) => typeof x?.renderFunc === "function");
         if (!routeProps) return tree;
         let appId = 0;
         let appType: unknown;
@@ -111,14 +113,8 @@ export function registerGamePagePatch(): void {
                 appId = Number(own.appid) || appId;
                 appType = own.app_type ?? appType;
               }
-              if (!appId || !isGameType(appType) || !appDetailsClasses?.InnerContainer) return ret;
-              const container = findInReactTree(
-                ret,
-                (x: any) =>
-                  Array.isArray(x?.props?.children) &&
-                  x?.props?.className?.includes?.(appDetailsClasses.InnerContainer)
-              );
-              const children: any[] | undefined = container?.props?.children;
+              if (!appId || !isGameType(appType)) return ret;
+              const children = findInsertionChildren(ret, findInReactTree, innerContainer());
               if (!Array.isArray(children)) return ret;
               if (children.some((c: any) => c?.key === KEY)) return ret;
               const at = overviewIndex(children);
