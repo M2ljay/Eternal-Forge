@@ -424,9 +424,14 @@ and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
 
 Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
 
-- **Mods section on Steam's game page.** Above Play on a game's library
-  page: mods on/total, updates, up to six mods with a switch each, Open /
-  Update, Add mods and My Mods. Controller only; B from a page opened here
+- **Mods section on Steam's game page.** One compact row under the Play bar
+  on a game's library page (never over the hero): "Mods", a status chip
+  (*Locked · Ricochet*, *3 enabled*, *Updates 2*, *Not modded*), the last
+  save backup, and up to two buttons (**Mods...**, **Restore saves...**). A
+  opens one-line details: the mods with a switch each, Open / Update, Add
+  mods, My Mods, saves, Upscaling and Load order; long explanations are
+  behind **Why?**. Where Play's section cannot be found it falls back to a
+  single line above Play. Controller only; B from a page opened here
   returns to the game page. Any error leaves Steam's page untouched, and the
   section switches itself off for the session after three.
 - **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
@@ -434,8 +439,8 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   installs and switching mods on are refused by the backend, not just hidden.
   Switching off always works. Sources: a 500-game list generated from
   AreWeAntiCheatYet (MIT) and the anti-cheat file markers Core's Gaming Mode
-  uses. Every locked game has a one-press "Allow mods anyway" on the game
-  page and in the QAM, labelled with its risk ("play modded offline only"
+  uses. Every locked game has a one-press "Allow mods anyway" in the QAM
+  and, on the game page, inside the lock's **Why?** modal, labelled with its risk ("play modded offline only"
   for games with an offline mode, "may get this account banned" for the
   rest), and "Lock mods again". Elden Ring and Helldivers 2 start locked.
 - **Way back after a crash.** A run of at least 60 seconds with no Windows
@@ -465,7 +470,7 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   which restores only after a confirmation and a fresh backup of the
   current saves. Without Ludusavi, Settings shows one line and nothing else
   changes.
-- **Upscaling (OptiScaler).** An entry in the game page's Mods section that
+- **Upscaling (OptiScaler).** A line in the game page's Mods section that
   installs [OptiScaler](https://github.com/optiscaler/OptiScaler) (GPL-3.0)
   for that one game: FSR 4 on an RDNA 4 Radeon, otherwise FSR 3.1, XeSS, or
   DLSS passed through on NVIDIA. It is downloaded from OptiScaler's official

@@ -1,7 +1,17 @@
 // Puts Forge's Mods section on Steam's game page, the way ProtonDB Badges
-// and HLTB for Deck add theirs: a routerHook patch on /library/app/:appid
-// that splices one element into the app details InnerContainer, right
-// before Steam's own overview panel (play section and tabs).
+// and HLTB for Deck add theirs: a routerHook patch on /library/app/:appid.
+//
+// Where it goes: directly UNDER Steam's Play bar, so the hero is never
+// covered and Play keeps the page's first focus. Steam's overview panel
+// draws the Play bar and the tabs itself, so the patch follows that panel's
+// component one level further and splices the section in after the play
+// section of its render (found by class: basicAppDetailsSectionStylerClasses
+// .PlaySection, else playSectionClasses.Container).
+//
+// The old anchor stays as the fallback: a one-line copy in the app details
+// InnerContainer, right before the overview panel. It renders nothing while
+// the copy under Play is mounted, so it only shows when Play's section could
+// not be found (gamePageAnchor.ts, PlacementRegistry).
 //
 // Fail-safe by construction:
 // - every step is inside try/catch, and a failure returns Steam's tree
@@ -22,12 +32,18 @@ import { afterPatch, createReactTreePatcher, findInReactTree } from "@decky/ui";
 import { Component, ErrorInfo, ReactNode } from "react";
 
 import { GameModsSection } from "./GameModsSection";
-import { findInsertionChildren, overviewIndex, resolveClassModule } from "./gamePageAnchor";
+import {
+  findInsertionChildren,
+  insertAfterPlay,
+  overviewIndex,
+  resolveClassModule,
+} from "./gamePageAnchor";
 import { FailureBudget } from "./forgeRules";
 import { getForgeSetting } from "./forgeSettings";
 
 const ROUTE = "/library/app/:appid";
 const KEY = "forge-mods-section";
+const BELOW_KEY = "forge-mods-below-play";
 const budget = new FailureBudget();
 let patch: RoutePatch | null = null;
 let unloaded = false;
@@ -76,6 +92,56 @@ function innerContainer(): string | undefined {
   return innerContainerClass;
 }
 
+let playClasses: (string | undefined)[] = [];
+let playLookupDone = false;
+let playMissLogged = false;
+
+// The play section's classes, read once per session. Under Decky 4.0 either
+// can be missing or stale; then nothing matches and the line above is used.
+function playSectionClassNames(): (string | undefined)[] {
+  if (!playLookupDone) {
+    playLookupDone = true;
+    playClasses = [
+      resolveClassModule(DFL, "basicAppDetailsSectionStylerClasses", ["PlaySection", "AppDetailsRoot"])?.PlaySection,
+      resolveClassModule(DFL, "playSectionClasses", ["PlayBarDetailLabel", "Container"])?.Container,
+    ];
+    if (!playClasses.some(Boolean)) console.warn("Forge game page: no play section class on this Steam build; the section stays above");
+  }
+  return playClasses;
+}
+
+// The overview panel's own render: put the section after its play section.
+// A render without one is not an error (Steam draws some states without a
+// Play bar); the one-line copy above covers it.
+const belowPlay = createReactTreePatcher(
+  [(wrapper: any) => (wrapper?.props?.children?.props?.overview ? wrapper.props.children : null)],
+  function (this: any, args: any[], ret?: any) {
+    if (unloaded || budget.disabled || !getForgeSetting("gamePage")) return ret;
+    try {
+      const overview = args?.[0]?.overview ?? this?.props?.overview;
+      const appId = Number(overview?.appid) || 0;
+      if (!appId || !isGameType(overview?.app_type)) return ret;
+      const at = insertAfterPlay(
+        ret,
+        findInReactTree,
+        playSectionClassNames(),
+        <ForgeBoundary key={BELOW_KEY}>
+          <GameModsSection appId={appId} placement="below" />
+        </ForgeBoundary>,
+        BELOW_KEY
+      );
+      if (at < 0 && !playMissLogged && !findInReactTree(ret, (x: any) => x?.key === BELOW_KEY)) {
+        playMissLogged = true;
+        console.warn("Forge game page: no play section in the overview panel; showing the one-line section above it");
+      }
+    } catch (e) {
+      noteFailure("placing the section under Play", e);
+    }
+    return ret;
+  },
+  "ForgeGameModsBelowPlay"
+);
+
 export function registerGamePagePatch(): void {
   if (patch) return;
   unloaded = false;
@@ -119,11 +185,21 @@ export function registerGamePagePatch(): void {
               if (children.some((c: any) => c?.key === KEY)) return ret;
               const at = overviewIndex(children);
               if (at < 0) return ret;
+              // Under Play: patch the overview panel's own render (cached per
+              // component type by the tree patcher). Guarded on its own so a
+              // failure there still leaves the line above.
+              try {
+                belowPlay([], children[at]);
+              } catch (e) {
+                noteFailure("following the overview panel", e);
+              }
+              // Above: a single line, shown only when the copy under Play is
+              // not mounted.
               children.splice(
                 at,
                 0,
                 <ForgeBoundary key={KEY}>
-                  <GameModsSection appId={appId} />
+                  <GameModsSection appId={appId} placement="above" />
                 </ForgeBoundary>
               );
             } catch (e) {

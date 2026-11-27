@@ -9,7 +9,7 @@ report check, OptiScaler's GPU lookup and the "game is running" check.
 
 | Piece | Frontend | Backend |
 |---|---|---|
-| Mods section on the game page | `src/gamePagePatch.tsx`, `src/GameModsSection.tsx` | `forge_game_status` |
+| Mods section on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts`, `src/GameModsSection.tsx` | `forge_game_status` |
 | Anti-cheat lock | the section's locked state | `py_modules/forge_guard.py`, wrappers at the end of `main.py` |
 | Way back after a crash | `src/forge.ts` (game start/exit), the section's offer | `forge_guard_*` |
 | Update dots on tiles | `src/forge.ts` (one stylesheet) | `forge_update_dots`, cache filled by `check_updates` too |
@@ -32,27 +32,80 @@ The frontend parts can be switched off in the plugin's Settings, under
 ## The Mods section
 
 Steam's game page is `/library/app/:appid`. Like ProtonDB Badges and HLTB
-for Deck, the plugin adds a `routerHook.addPatch` on that route, follows
-`renderFunc` with `createReactTreePatcher`, and splices one element into the
-app details `InnerContainer`, directly before Steam's own overview panel
-(the play section and the tabs). The overview panel is recognised by the
-props it is rendered with (`overview`, `details`, `bFastRender`), the same
-shape HLTB for Deck keys on.
+for Deck, the plugin adds a `routerHook.addPatch` on that route and follows
+`renderFunc` with `createReactTreePatcher` to the app details
+`InnerContainer`, which holds the header (hero) and Steam's own overview
+panel. The overview panel is recognised by the props it is rendered with
+(`overview`, `details`, `bFastRender`), the same shape HLTB for Deck keys on.
+
+### Where it goes: under the Play bar
+
+The overview panel draws the Play bar, the stats and the tabs itself, so
+anything spliced into `InnerContainer` lands either above Play (over the
+hero) or below every tab. The section goes **directly under the Play bar**
+instead: the patch follows the overview panel's component one level further
+(a second `createReactTreePatcher`, cached per component type) and, in that
+render, splices the section in right after the play section. The play
+section is found by its class, `basicAppDetailsSectionStylerClasses.
+PlaySection`, else `playSectionClasses.Container`, both looked up through
+`resolveClassModule` (whole class names only). So the hero is never
+covered, and Play keeps the page's first focus.
+
+The old anchor stays as the fallback: a copy in `InnerContainer` right before
+the overview panel, which renders **nothing** while the copy under Play is
+mounted (`PlacementRegistry` in `src/gamePageAnchor.ts`). When no copy under
+Play mounts within 600 ms (an unknown or stale class, a Steam build that
+draws the play section one level deeper, a failure in that patch), it shows
+as a **single line** that never expands: A on it opens the game's full Forge
+page instead. The console says once which case it hit (*no play section
+class on this Steam build* / *no play section in the overview panel*).
+
+**Not verified on a TV yet**: nobody has looked inside the overview panel's
+render on this Steam build (the plugins that add to the game page all put
+their element before the panel). If the play section is drawn one level
+deeper than that render, every page gets the one-line fallback above Play;
+the console line says so.
 
 `InnerContainer` is found by its class from `appDetailsClasses`, looked up
 through `src/gamePageAnchor.ts`: the named `@decky/ui` export, else
 `findClassModule`, else `findVar` (only in `@decky/ui` 5). The loader supplies
 `@decky/ui`: 4.x under Decky 3.3.1, 5.x under Decky 4.0, whose Steam client
 renamed nearly all classes and whose class names are pinned per Steam build.
-When the class is missing or stale, the section goes into whichever children
-array holds the overview panel. No overview panel, no section.
+When the class is missing or stale, the fallback goes into whichever
+children array holds the overview panel. No overview panel, no section.
 
-It shows, for a game the plugin manages: how many mods are on, how many
-have an update, up to six mods (updates first, then the ones that are on)
-with a switch each, **Open** / **Update** to go to the mod's page in the
-plugin, **Add mods** (the plugin's store for that game), **Show all** and
-**My Mods**. Pages opened from here go back to the game page on B, not to
-the Quick Access Menu (`pushFromGamePage` in `src/Tabs.tsx`).
+### What it shows
+
+**Collapsed (the default)**: one row, 56 px tall, gunmetal with a thin
+crimson bar on the left (`ROW_HEIGHT`, `statusChips`, `compactButtons` and
+`savesHint` in `src/forgeRules.ts`):
+
+- **Mods** and one or two status chips: *Locked · Ricochet* (crimson text),
+  *Lock off* (crimson, the override is on), *Updates 2* (amber),
+  *Restore offered* (amber), *3 enabled* (steel), *All 4 off*, *Not modded*,
+  *Not set up* (hint);
+- the last save backup as hint text (*Saves backed up 2 h ago*, *No save
+  backup yet*, an amber *Save backup failed*), only with Ludusavi;
+- at most two buttons, most relevant first: **Restore mods...** (the crash
+  offer), **Undo restore**, then the way to the game's full page (**Mods...**:
+  My Mods, or the store when nothing is installed; **Set up...** in the
+  any-game mode; **Why?** for a locked game Forge does not manage), then
+  **Restore saves...** when a backup exists.
+
+**Expanded** (A on the row; A again folds it): one line per subject, each a
+label, a single line of text cut with an ellipsis, and its buttons
+(`detailLines`): the anti-cheat lock (**Switch N off**, **Why?**) or the
+override (**Lock mods again**, **Why?**), the crash offer (**Restore...**,
+**Not now**, **Why?**), **Undo restore**, the mods (count, **Add mods**,
+**My Mods** or **All N...**, then up to six mods - updates first, then the
+ones that are on - each a switch plus **Open** / **Update**), saves
+(**Restore saves...**), Upscaling and Load order. Long explanations are
+behind **Why?**, in a small modal. Text is 16 px (the title 18 px, buttons
+15 px, hints and chips 14 px at 1080p), in line with Steam's game-page meta
+text, and nothing on the page wraps.
+
+Pages opened from here go back to the game page on B, not to the Quick
+Access Menu (`pushFromGamePage` in `src/Tabs.tsx`).
 
 For a game the plugin does not manage it shows nothing, unless the
 experimental any-game mode is on, in which case it offers to set the game
@@ -71,13 +124,15 @@ The page belongs to Steam, so every failure leaves it as Steam drew it:
 - when the overview panel is not found (soundtracks, tools, a Steam update
   that moved things) nothing is inserted;
 - the section never takes focus. Play keeps the page's first focus; the
-  section is one press up from it, and works with the D-pad and A alone;
+  row is one press down from it (one press up in the one-line fallback),
+  works with the D-pad and A alone, and leaves B to Steam;
 - the route patch is removed when the plugin unloads.
 
 ## Anti-cheat lock
 
 Games with an anti-cheat that runs on the player's PC are locked: the
-section explains why, offers to switch any installed mods **off**, and every
+section says so (*Locked · Ricochet*; the explanation is behind **Why?**),
+offers to switch any installed mods **off**, and every
 backend call that puts mod files into the game or switches mods **on** is
 refused with `{"ok": false, "anticheat_locked": true, "error": ...}`. That
 covers `install_mod`, collection installs, frameworks, prefix tools, mod
@@ -115,8 +170,10 @@ with the lock message.
 Where the verdict comes from, in order:
 
 1. **Per-game override.** Off by default, offered for **every** locked
-   game, online-only ones included, and it is **one press**: no dialog.
-   The risk is on the button and in the locked text instead:
+   game, online-only ones included. On the game page it is only in the
+   lock's **Why?** modal (`LockWhyModal`, `lockModalActions`), never on the
+   row or the expanded lines; there, and in the QAM, it is **one press**:
+   no further dialog. The risk is on the button and in the locked text:
    - games with an offline or anti-cheat-off mode (`OFFLINE_CAPABLE`: Elden
      Ring, Nightreign, Dark Souls III, Armored Core VI, GTA V, Halo MCC) read
      *"Allow mods anyway - play modded offline only"*;
@@ -176,8 +233,8 @@ At every game start the plugin records the set of mods that are on
 A failure only counts when the mods that were on differ from the last known
 good set (otherwise going back changes nothing). Two failures in a row
 after a mod change make the offer: **one** notification ("Restore last
-working mods?", which opens the game page), and a box in the game page's
-Mods section until it is answered.
+working mods?", which opens the game page), and **Restore mods...** on the
+game page's Mods row (with a *Restore offered* chip) until it is answered.
 
 Restoring switches mods installed since the good run **off** and mods that
 were on then back **on**, through `install.ts` like every other switch.
@@ -381,11 +438,12 @@ will report the cloud as out of step the next time it runs.
 
 ### Game page and Settings
 
-With Ludusavi installed, the Mods section shows **Last save backup:
-12 min ago** (or *No save backup yet*), an amber *Save backup failed* when
-the latest attempt did not work, and **Restore saves...**. Both also show on
-anti-cheat locked games: a backup only reads the game, and a restore puts
-saves back, not mod files.
+With Ludusavi installed, the Mods row shows *Saves backed up 12 min ago* (or
+*No save backup yet*) as hint text, an amber *Save backup failed* when the
+latest attempt did not work, and **Restore saves...** once a backup exists;
+the expanded view has a Saves line with **Restore saves...** whenever
+Ludusavi knows the game. Both also show on anti-cheat locked games: a backup
+only reads the game, and a restore puts saves back, not mod files.
 
 **Restore saves...** lists Ludusavi's backups of the game, newest first, and
 restores one only after a confirmation. The backend refuses without that
@@ -406,7 +464,7 @@ folder, and that the restore list matches Ludusavi's own.
 
 ## Upscaling (OptiScaler)
 
-An entry in the game page's Mods section, **Upscaling (OptiScaler)**, that
+A line in the game page's Mods section (expanded view), **Upscaling**, that
 puts [OptiScaler](https://github.com/optiscaler/OptiScaler) into one game:
 it takes the upscaler a game already offers (DLSS, FSR 2/3 or XeSS) and
 runs another one in its place. Shown wherever the section is (managed games,
@@ -510,8 +568,8 @@ first name not present in the exe's folder wins. A ReShade DLL Forge put
 there is never replaced; nor is a file that already has a `.nexusbak`
 beside it (another mod's backup would be lost: the install is refused).
 When all three are taken, the first one that is neither is replaced. The
-game page offers **Use winmm.dll instead** (and so on round) for games that
-do not load the current one.
+game page offers **Use winmm.dll instead** (and so on round, under
+**More...** on the Upscaling line) for games that do not load the current one.
 
 **Backups**: any game file the install replaces (a `dxgi.dll`, the game's
 own `libxess.dll` or `amd_fidelityfx_dx12.dll`, an older `OptiScaler.ini`)
@@ -548,6 +606,8 @@ ini and uses `ffx` names when that is what it documents
 (`optiscaler.upscaler_family`). `[Menu] DisableSplash=true` hides
 OptiScaler's startup splash, its "press Insert" hint; the overlay itself
 stays on Insert. **Upscaler...** on the game page rewrites only the ini.
+The rarer actions (**Use winmm.dll instead** and so on, **Remove**) are under
+**More...** on that line; a refused game's reason is behind **Why?**.
 
 ### Failure safety
 
@@ -556,8 +616,8 @@ OptiScaler in (any game, managed or not) to the backend. Until the first
 clean run after an install or update, a Windows Error Reporting crash report
 for the exe (`forge_guard.wer_crashed`, the crash guard's check) or a run
 under 60 seconds marks OptiScaler **suspect**: one toast (opens the game
-page) and a crimson box with **Remove OptiScaler** (one press) and **Keep
-it** (stops watching). A clean run ends the watch.
+page) and, on the Upscaling line, **Remove OptiScaler** (one press) and
+**Keep it** (stops watching). A clean run ends the watch.
 
 ### Not verified on the PC yet
 
@@ -574,11 +634,11 @@ reports the GPU name; and that a game crash shows the removal offer.
 For **Skyrim Special Edition, Fallout 4, Starfield and Oblivion
 Remastered** only (Steam app ids 489830, 377160, 1716740, 2623190, or
 their Nexus domains). Every other game shows nothing new. The game page's
-Mods section gets one **Load order** line: how many plugins are on, the
-current profile, problems in crimson and warnings in amber, where the
-rules came from, and three buttons: **Load order** (the panel), **Sort
-with LOOT rules** and **Profiles**. On an anti-cheat locked game only the
-panel is offered, and the backend refuses its writes anyway.
+Mods section gets one **Load order** line in its expanded view: how many
+plugins are on, the current profile, problems in crimson and warnings in
+amber, and three buttons: **Load order...** (the panel, which also says
+where the rules came from), **Sort** (with LOOT rules) and **Profiles...**.
+On an anti-cheat locked game only the panel is offered, and the backend refuses its writes anyway.
 
 ### The files, per game
 

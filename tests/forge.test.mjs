@@ -7,6 +7,18 @@ import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 
 import {
+  CARD_ACTION_LABELS,
+  CARD_MAX_BUTTONS,
+  CARD_TEXT,
+  ROW_HEIGHT,
+  compactButtons,
+  detailLines,
+  lockLineActions,
+  lockModalActions,
+  lockSummary,
+  rowPress,
+  savesHint,
+  statusChips,
   FailureBudget,
   FORGE_BLACK,
   FORGE_CRIMSON,
@@ -213,12 +225,21 @@ test("the section never takes focus from Play", () => {
   assert.ok(!/\.focus\(\)/.test(src));
 });
 
-test("mods are switched through install.ts, and the bypass is one press with its risk as the label", () => {
+test("mods are switched through install.ts, and the bypass is one press in the lock's Why? modal", () => {
   const src = readCode("GameModsSection.tsx");
   assert.match(src, /import \{ toggleMod \} from "\.\/install"/);
-  assert.match(src, /onClick=\{allowAnyway\}>\s*\{overrideLabel\(ac\)\}/);
-  const allow = src.slice(src.indexOf("const allowAnyway"), src.indexOf("const relock"));
-  assert.ok(!/showModal|ConfirmModal/.test(allow), "no dialog in front of the bypass");
+  // The override lives in LockWhyModal and nowhere else on the game page.
+  const start = src.indexOf("function LockWhyModal(");
+  const end = src.indexOf("\nasync function applyChanges", start);
+  assert.ok(start > 0 && end > start, "LockWhyModal is where the override lives");
+  const modal = src.slice(start, end);
+  const outside = src.slice(0, start) + src.slice(end);
+  assert.match(modal, /allowModsAnyway\(appId\)/);
+  assert.match(modal, /\{overrideLabel\(ac\)\}/, "the risk is on the button");
+  assert.match(modal, /lockModalActions\(ac\)/);
+  assert.ok(!/ConfirmModal/.test(modal), "one press inside the modal, no second dialog");
+  assert.ok(!/allowModsAnyway/.test(outside.replace(/import \{ allowModsAnyway,/, "import {")), "no override outside the modal");
+  assert.ok(!/overrideLabel\(/.test(outside), "the override's label appears only in the modal");
   assert.match(src, /Lock mods again/);
   const qam = readCode("ForgeLock.tsx");
   assert.match(qam, /\{overrideLabel\(v\)\}/);
@@ -389,4 +410,130 @@ test("profiles: refused while the game runs, summary names what happened", () =>
   const bad = profileSwitchSummary("Full modlist", plan, ["A: locked"], false);
   assert.equal(bad.title, "Profile Full modlist, with problems");
   assert.match(bad.body, /The load order was not written/);
+});
+
+// ---- compact game page card ------------------------------------------------------
+
+const verdict = (o = {}) => ({ detected: false, locked: false, products: [], override_on: false, override_allowed: false, ...o });
+const card = (o = {}) => ({
+  mode: "mods",
+  managed: true,
+  anticheat: verdict(),
+  mods: [],
+  updates: 0,
+  offer: false,
+  undo: false,
+  savesFound: false,
+  lastBackupAt: 0,
+  ...o,
+});
+const cod = card({
+  mode: "locked",
+  managed: false,
+  mods: [],
+  anticheat: verdict({ detected: true, locked: true, products: ["Ricochet"], override_allowed: true }),
+  savesFound: true,
+});
+const NOW = 1_800_000_000;
+const mods = (on, off) => [
+  ...Array.from({ length: on }, (_, i) => ({ folder: `on${i}`, enabled: true })),
+  ...Array.from({ length: off }, (_, i) => ({ folder: `off${i}`, enabled: false })),
+];
+
+test("collapsed: one 56 px row, text in Steam's meta sizes, at most two buttons", () => {
+  assert.equal(ROW_HEIGHT, 56);
+  assert.equal(CARD_MAX_BUTTONS, 2);
+  for (const [k, v] of Object.entries(CARD_TEXT)) assert.ok(v >= 14 && v <= 18, `${k} ${v}px`);
+  assert.ok(CARD_TEXT.body >= 16, "body text matches Steam's meta text");
+});
+
+test("collapsed: the status chip says locked, updates, count or not modded", () => {
+  assert.deepEqual(statusChips(cod), [{ text: "Locked · Ricochet", tone: "crimson" }]);
+  assert.deepEqual(statusChips(card({ mods: mods(3, 1) })), [{ text: "3 enabled", tone: "steel" }]);
+  assert.deepEqual(statusChips(card({ mods: mods(3, 0), updates: 2 })), [
+    { text: "Updates 2", tone: "amber" },
+    { text: "3 enabled", tone: "steel" },
+  ]);
+  assert.deepEqual(statusChips(card({ mods: [] })), [{ text: "Not modded", tone: "hint" }]);
+  assert.deepEqual(statusChips(card({ mods: undefined })), [{ text: "Reading...", tone: "hint" }]);
+  assert.deepEqual(statusChips(card({ mods: mods(0, 4) })), [{ text: "All 4 off", tone: "hint" }]);
+  assert.deepEqual(statusChips(card({ mode: "setup", managed: false })), [{ text: "Not set up", tone: "hint" }]);
+  const lockOff = card({ anticheat: verdict({ detected: true, override_on: true }), mods: mods(1, 0) });
+  assert.equal(statusChips(lockOff)[0].text, "Lock off");
+  assert.equal(statusChips(lockOff)[0].tone, "crimson");
+  // Never more than two chips, whatever is going on.
+  assert.ok(statusChips(card({ anticheat: verdict({ detected: true, override_on: true }), offer: true, updates: 5, mods: mods(2, 0) })).length <= 2);
+});
+
+test("collapsed: the save backup is a short hint, silent without Ludusavi", () => {
+  assert.equal(savesHint(false, 0, NOW), null);
+  assert.equal(savesHint(true, 0, NOW), "No save backup yet");
+  assert.equal(savesHint(true, NOW - 2 * 3600, NOW), "Saves backed up 2 h ago");
+});
+
+test("collapsed: the most relevant two buttons, Mods... first for a managed game", () => {
+  assert.deepEqual(compactButtons(card({ mods: mods(2, 0) })), ["mods"]);
+  assert.deepEqual(compactButtons(card({ savesFound: true, lastBackupAt: NOW - 60 })), ["mods", "restore-saves"]);
+  // No backup yet: no Restore saves... on the row.
+  assert.deepEqual(compactButtons(card({ savesFound: true, lastBackupAt: 0 })), ["mods"]);
+  // The crash offer outranks everything.
+  assert.deepEqual(compactButtons(card({ offer: true, savesFound: true, lastBackupAt: NOW })), ["restore-mods", "mods"]);
+  assert.deepEqual(compactButtons(card({ undo: true, savesFound: true, lastBackupAt: NOW })), ["undo-restore", "mods"]);
+  assert.deepEqual(compactButtons(card({ mode: "setup", managed: false })), ["setup"]);
+  // Call of Duty: not managed, locked, no backup yet.
+  assert.deepEqual(compactButtons(cod), ["why"]);
+  assert.deepEqual(compactButtons({ ...cod, lastBackupAt: NOW }), ["why", "restore-saves"]);
+  for (const c of [cod, card({ offer: true, undo: true, savesFound: true, lastBackupAt: NOW })]) {
+    assert.ok(compactButtons(c).length <= CARD_MAX_BUTTONS);
+  }
+  assert.equal(CARD_ACTION_LABELS.mods, "Mods...");
+  assert.equal(CARD_ACTION_LABELS["restore-saves"], "Restore saves...");
+});
+
+test("A on the row expands under Play; the one-line fallback above never grows", () => {
+  assert.equal(rowPress("below"), "toggle");
+  assert.equal(rowPress("above"), "open");
+  const src = readCode("GameModsSection.tsx");
+  assert.match(src, /const open = press === "toggle" && expanded;/);
+  assert.match(src, /\{open && \(/, "details render only when expanded under Play");
+  assert.match(src, /useState\(false\)/, "collapsed by default");
+});
+
+test("expanded: details are one line each, OptiScaler and Load order live there", () => {
+  assert.deepEqual(detailLines(cod), ["lock", "saves", "upscaling", "loadorder"]);
+  assert.deepEqual(detailLines(card({ mods: mods(1, 0), savesFound: true })), ["mods", "saves", "upscaling", "loadorder"]);
+  assert.deepEqual(
+    detailLines(card({ offer: true, undo: true, anticheat: verdict({ detected: true, override_on: true }) })),
+    ["override", "offer", "undo", "mods", "upscaling", "loadorder"]
+  );
+  assert.deepEqual(detailLines(card({ mode: "setup", managed: false })), ["upscaling", "loadorder", "setup"]);
+  assert.equal(lockSummary({ products: ["Ricochet"] }), "Ricochet: installing or switching mods on is off");
+  // No paragraph on the page: every text span is one line with an ellipsis.
+  const src = read("GameModsSection.tsx");
+  const css = src.slice(src.indexOf("const CSS = `"), src.indexOf("`;", src.indexOf("const CSS = `")));
+  assert.match(css, /\.\$\{TEXT\} \{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
+  assert.ok(!/flexWrap: "wrap"/.test(src), "rows never wrap");
+  assert.ok(!/lockBody\(ac\)/.test(src.slice(0, src.indexOf("function LockWhyModal("))), "the long lock text is only in the modal");
+});
+
+test("the anti-cheat override is reachable only through the Why? modal", () => {
+  const every = [
+    cod,
+    { ...cod, managed: true, mods: mods(2, 0), lastBackupAt: NOW },
+    card({ anticheat: verdict({ detected: true, override_on: true, override_allowed: true }), offer: true, undo: true }),
+  ];
+  for (const c of every) {
+    assert.ok(!compactButtons(c).includes("allow-anyway"));
+    assert.ok(!detailLines(c).includes("allow-anyway"));
+  }
+  for (const o of [
+    { locked: true, managed: true, enabledCount: 3, overrideOn: false },
+    { locked: false, managed: true, enabledCount: 0, overrideOn: true },
+  ]) {
+    assert.ok(!lockLineActions(o).includes("allow-anyway"));
+    assert.ok(lockLineActions(o).includes("why"), "the lock line leads to the modal");
+  }
+  assert.deepEqual(lockModalActions({ locked: true, override_allowed: true, override_on: false }), ["allow-anyway"]);
+  assert.deepEqual(lockModalActions({ locked: true, override_allowed: false, override_on: false }), []);
+  assert.deepEqual(lockModalActions({ locked: false, override_allowed: true, override_on: true }), ["lock-again"]);
 });

@@ -72,3 +72,102 @@ export function resolveClassModule(ui: any, name: string, keys: string[]): Recor
   }
   return undefined;
 }
+
+// ---- Below the Play bar ----------------------------------------------------
+// InnerContainer holds Steam's header (hero) and the overview panel, and the
+// overview panel draws the Play bar, the stats and the tabs itself. So the
+// section can only sit under Play from inside that panel's own render: the
+// patch follows the panel's component one level further and puts the section
+// right after the play section there. When that render has no play section
+// (an unknown class, a Steam build that draws it one level deeper), the
+// section falls back to a single line above the panel.
+
+/** True when the element carries one of `names` as a whole class. */
+export function hasClass(node: any, names: string[]): boolean {
+  const cls = node?.props?.className;
+  if (typeof cls !== "string" || !cls) return false;
+  const tokens = cls.split(/\s+/);
+  return names.some((name) => tokens.includes(name));
+}
+
+export interface Slot {
+  children: any[];
+  /** Where to splice: directly after the play section. */
+  index: number;
+}
+
+/** The children array holding Steam's play section, and the index right after
+ * it. `classNames` are the play section's classes as the loader maps them
+ * (empty or missing ones are ignored). Undefined when nothing matches. */
+export function findPlaySectionSlot(tree: any, find: TreeFinder, classNames: (string | undefined)[]): Slot | undefined {
+  const names = classNames.filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (!names.length || !tree) return undefined;
+  const holds = (x: any) => Array.isArray(x?.props?.children) && x.props.children.some((c: any) => hasClass(c, names));
+  const parent = find(tree, holds);
+  if (!parent) return undefined;
+  const children: any[] = parent.props.children;
+  const at = children.findIndex((c: any) => hasClass(c, names));
+  return at < 0 ? undefined : { children, index: at + 1 };
+}
+
+/** Puts `element` after the play section unless an element with `key` is
+ * already in that array. Returns where it went, or -1 when nothing was done. */
+export function insertAfterPlay(tree: any, find: TreeFinder, classNames: (string | undefined)[], element: any, key: string): number {
+  const slot = findPlaySectionSlot(tree, find, classNames);
+  if (!slot) return -1;
+  if (slot.children.some((c: any) => c?.key === key)) return -1;
+  slot.children.splice(slot.index, 0, element);
+  return slot.index;
+}
+
+/** Which copies of the section are on screen. The one below Play registers
+ * itself while mounted; the one-line copy above the panel shows only when no
+ * copy below Play is mounted for that game, and only after a short grace
+ * period, so a page where both anchors work never flashes the line above. */
+export const ABOVE_GRACE_MS = 600;
+
+export function aboveFallbackShown(belowMounted: boolean, graceElapsed: boolean): boolean {
+  return !belowMounted && graceElapsed;
+}
+
+export class PlacementRegistry {
+  private mounted = new Map<number, number>();
+  private listeners = new Set<() => void>();
+
+  /** Registers a copy below Play; call the returned function on unmount. */
+  mountBelow(appId: number): () => void {
+    this.mounted.set(appId, (this.mounted.get(appId) ?? 0) + 1);
+    this.emit();
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const n = (this.mounted.get(appId) ?? 1) - 1;
+      if (n > 0) this.mounted.set(appId, n);
+      else this.mounted.delete(appId);
+      this.emit();
+    };
+  }
+
+  hasBelow(appId: number): boolean {
+    return (this.mounted.get(appId) ?? 0) > 0;
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  }
+
+  private emit(): void {
+    for (const fn of [...this.listeners]) {
+      try {
+        fn();
+      } catch {
+        // one listener's failure must not stop the others
+      }
+    }
+  }
+}
+
+/** The one registry the game page uses (GameModsSection reads and writes it). */
+export const placements = new PlacementRegistry();

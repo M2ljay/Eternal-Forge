@@ -1,10 +1,17 @@
-// Forge's Mods section on Steam's own game page (/library/app/:appid):
-// the game's installed mods with their switches and updates, Add mods, the
-// anti-cheat lock, and the offer to go back after a crash.
+// Forge's Mods section on Steam's own game page (/library/app/:appid).
 //
-// Injected by gamePagePatch.tsx inside an error boundary. Nothing here
-// takes focus on its own: Play keeps the page's first focus, and the
-// section is reached by pressing up from it.
+// Collapsed it is one row under the Play bar: "Mods", a status chip or two,
+// the last save backup as a hint, and at most two buttons. A on the row
+// opens the details under it (the anti-cheat lock, the offer to go back
+// after a crash, the mods with their switches, saves, Upscaling and Load
+// order), each one line; long explanations sit behind "Why?" in a small
+// modal. The anti-cheat override is only in the lock's "Why?" modal.
+//
+// Injected by gamePagePatch.tsx inside an error boundary, twice: under Play
+// ("below") and as a one-line fallback above the overview panel ("above"),
+// which renders nothing while the copy under Play is mounted. Nothing here
+// takes focus on its own: Play keeps the page's first focus, and the row is
+// one press down from it.
 import {
   ButtonItem,
   ConfirmModal,
@@ -16,7 +23,8 @@ import {
   showModal,
 } from "@decky/ui";
 import { toaster } from "@decky/api";
-import { useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 
 import {
   ForgeGuardSummary,
@@ -45,27 +53,41 @@ import {
 } from "./api";
 import {
   AntiCheatVerdict,
-  FORGE_BLACK,
+  CARD_ACTION_LABELS,
+  CARD_TEXT,
+  CardAction,
+  CardChip,
+  CardInput,
+  CardPlacement,
   FORGE_CRIMSON,
   FORGE_GUNMETAL,
   FORGE_STEEL,
+  ROW_HEIGHT,
   RestorePlan,
+  compactButtons,
   countLabel,
+  detailLines,
   loadOrderSupported,
-  masterlistLine,
-  sortOutcome,
-  warningSummary,
   lockBody,
   lockHeadline,
+  lockLineActions,
+  lockModalActions,
+  lockSummary,
   modSet,
   offerBody,
   optiscalerLine,
   overrideLabel,
+  rowPress,
   rowsToShow,
   saveBackupLine,
+  savesHint,
   sectionMode,
+  sortOutcome,
+  statusChips,
   undoOutcome,
+  warningSummary,
 } from "./forgeRules";
+import { ABOVE_GRACE_MS, aboveFallbackShown, placements } from "./gamePageAnchor";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
 import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } from "./games";
@@ -84,21 +106,43 @@ const BROWSE_ROUTE = "/nexus-mods";
 const DETAIL_ROUTE = "/nexus-mods/mod";
 const MANAGER_ROUTE = "/nexus-mods/manager";
 
+const CARD = "forge-card";
+const MAIN = "forge-row-main";
 const BTN = "forge-btn";
 const ROW = "forge-row";
-// Focus is a crimson edge and a lighter surface, never a glow.
+const TEXT = "forge-text";
+// Focus is a crimson edge and a lighter surface, never a glow. Text never
+// wraps: one line, cut with an ellipsis.
 const CSS = `
-.${BTN}, .${ROW} {
-  background: ${FORGE_GUNMETAL} !important;
+.${CARD} {
+  margin: 8px 2.8vw 4px;
+  background: ${FORGE_GUNMETAL};
+  border-left: 3px solid ${FORGE_CRIMSON};
+  border-radius: 6px;
+  color: ${FORGE_STEEL};
+  font-size: ${CARD_TEXT.body}px;
+  line-height: 1.3;
+}
+.${TEXT} { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.${BTN}, .${ROW}, .${MAIN} {
   color: ${FORGE_STEEL} !important;
   border: 2px solid transparent !important;
   border-radius: 6px !important;
   box-shadow: none !important;
   min-width: 0 !important;
 }
-.${BTN} { padding: 6px 14px !important; font-size: 13px !important; white-space: nowrap; }
+.${BTN}, .${ROW} { background: ${GUNMETAL_RAISED} !important; }
+.${MAIN} { background: transparent !important; }
+.${BTN} {
+  height: 36px !important;
+  padding: 0 14px !important;
+  font-size: ${CARD_TEXT.button}px !important;
+  line-height: 1 !important;
+  white-space: nowrap;
+}
 .${BTN}.gpfocus, .${BTN}.gpfocuswithin, .${BTN}:hover,
-.${ROW}.gpfocus, .${ROW}.gpfocuswithin, .${ROW}:hover {
+.${ROW}.gpfocus, .${ROW}.gpfocuswithin, .${ROW}:hover,
+.${MAIN}.gpfocus, .${MAIN}.gpfocuswithin, .${MAIN}:hover {
   border-color: ${FORGE_CRIMSON} !important;
   background: ${GUNMETAL_RAISED} !important;
   color: ${WHITE} !important;
@@ -112,19 +156,28 @@ interface Status {
   guard: ForgeGuardSummary;
 }
 
-function Chip({ children, crimson }: { children: React.ReactNode; crimson?: boolean }) {
+const TONE_COLOR: Record<CardChip["tone"], string> = {
+  crimson: CRIMSON_TEXT,
+  steel: FORGE_STEEL,
+  amber: AMBER,
+  hint: STEEL_MUTED,
+};
+
+function Chip({ chip }: { chip: CardChip }) {
   return (
     <span
+      className={TEXT}
       style={{
-        fontSize: "12px",
-        padding: "2px 8px",
-        borderRadius: "10px",
-        background: crimson ? FORGE_CRIMSON : FORGE_GUNMETAL,
-        color: crimson ? WHITE : FORGE_STEEL,
-        whiteSpace: "nowrap",
+        fontSize: `${CARD_TEXT.hint}px`,
+        fontWeight: chip.tone === "crimson" ? 700 : 600,
+        padding: "3px 10px",
+        borderRadius: "12px",
+        background: GUNMETAL_RAISED,
+        color: TONE_COLOR[chip.tone],
+        flex: "0 1 auto",
       }}
     >
-      {children}
+      {chip.text}
     </span>
   );
 }
@@ -136,7 +189,7 @@ function Button({
   disabled,
 }: {
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
   primary?: boolean;
   disabled?: boolean;
 }) {
@@ -149,6 +202,107 @@ function Button({
     >
       {children}
     </DialogButton>
+  );
+}
+
+/** One line of the details: a label, a one-line text, then its buttons. */
+function Line({
+  label,
+  text,
+  color,
+  children,
+}: {
+  label: string;
+  text?: ReactNode;
+  color?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Focusable flow-children="row" style={{ display: "flex", alignItems: "center", gap: "8px", minHeight: "40px" }}>
+      <span style={{ color: WHITE, fontWeight: 600, flex: "0 0 auto", minWidth: "96px" }}>{label}</span>
+      <span className={TEXT} style={{ color: color ?? FORGE_STEEL, flex: "1 1 auto" }}>
+        {text}
+      </span>
+      {children}
+    </Focusable>
+  );
+}
+
+/** A small modal for what does not fit on one line. */
+function WhyModal({
+  title,
+  body,
+  children,
+  closeModal,
+}: {
+  title: string;
+  body: ReactNode;
+  children?: ReactNode;
+  closeModal?: () => void;
+}) {
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <div style={{ fontSize: `${CARD_TEXT.body}px`, lineHeight: 1.45, marginBottom: "12px" }}>{body}</div>
+      {children}
+      <ButtonItem layout="below" onClick={() => closeModal?.()}>
+        Close
+      </ButtonItem>
+    </ModalRoot>
+  );
+}
+
+export function showWhy(title: string, body: ReactNode): void {
+  showModal(<WhyModal title={title} body={body} />);
+}
+
+/** The lock's explanation, and the ONLY place the override is offered. One
+ * press here, its risk on the button (see ForgeLock.tsx); the backend still
+ * reads the stored flag on every install and switch. */
+function LockWhyModal({
+  appId,
+  ac,
+  onChanged,
+  closeModal,
+}: {
+  appId: number;
+  ac: AntiCheatVerdict;
+  onChanged: () => void;
+  closeModal?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const press = async (fn: () => Promise<boolean>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+      closeModal?.();
+      notifyGameStateChanged();
+      onChanged();
+    }
+  };
+  const body = (
+    <>
+      <div>{lockBody(ac)}</div>
+      {ac.offline_note && <div style={{ marginTop: "8px", color: STEEL_MUTED }}>{ac.offline_note}</div>}
+    </>
+  );
+  return (
+    <WhyModal title={ac.override_on ? overrideOnLabel(ac) : lockHeadline(ac)} body={body} closeModal={closeModal}>
+      {lockModalActions(ac).map((a) =>
+        a === "allow-anyway" ? (
+          <ButtonItem key={a} layout="below" disabled={busy} onClick={() => void press(() => allowModsAnyway(appId))}>
+            {overrideLabel(ac)}
+          </ButtonItem>
+        ) : (
+          <ButtonItem key={a} layout="below" disabled={busy} onClick={() => void press(() => lockModsAgain(appId))}>
+            Lock mods again
+          </ButtonItem>
+        )
+      )}
+    </WhyModal>
   );
 }
 
@@ -166,7 +320,34 @@ async function applyChanges(
   return failed;
 }
 
-export function GameModsSection({ appId }: { appId: number }) {
+export function GameModsSection({ appId, placement }: { appId: number; placement: CardPlacement }) {
+  return placement === "below" ? <BelowPlay appId={appId} /> : <AbovePlay appId={appId} />;
+}
+
+/** Under Play: registers itself so the line above stays empty. */
+function BelowPlay({ appId }: { appId: number }) {
+  useEffect(() => placements.mountBelow(appId), [appId]);
+  return <ModsCard appId={appId} placement="below" />;
+}
+
+/** Above the overview panel: only when the copy under Play is not mounted,
+ * after a short grace period, and then a single line that never grows. */
+function AbovePlay({ appId }: { appId: number }) {
+  const [, rerender] = useState(0);
+  const [grace, setGrace] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setGrace(true), ABOVE_GRACE_MS);
+    const unsub = placements.subscribe(() => rerender((n) => n + 1));
+    return () => {
+      clearTimeout(timer);
+      unsub();
+    };
+  }, [appId]);
+  if (!aboveFallbackShown(placements.hasBelow(appId), grace)) return null;
+  return <ModsCard appId={appId} placement="above" />;
+}
+
+function ModsCard({ appId, placement }: { appId: number; placement: CardPlacement }) {
   const game = getSupportedGame(appId);
   const [status, setStatus] = useState<Status | undefined>();
   const [mods, setMods] = useState<InstalledMod[] | undefined>();
@@ -228,6 +409,21 @@ export function GameModsSection({ appId }: { appId: number }) {
   const guard = status.guard;
   const list = mods ?? [];
   const enabledCount = list.filter((m) => m.enabled).length;
+  const locked = mode === "locked";
+  const now = Date.now() / 1000;
+  const savesFound = Boolean(saves?.found);
+  const lastBackupAt = saves?.game?.last_backup_at ?? 0;
+  const card: CardInput = {
+    mode,
+    managed: Boolean(game),
+    anticheat: ac,
+    mods: game ? mods : [],
+    updates: updates.size,
+    offer: Boolean(guard.offer),
+    undo: Boolean(guard.undo),
+    savesFound,
+    lastBackupAt,
+  };
 
   const run = async (fn: () => Promise<void>) => {
     if (busy) return;
@@ -253,6 +449,9 @@ export function GameModsSection({ appId }: { appId: number }) {
     setBrowseGame(game);
     pushFromGamePage(MANAGER_ROUTE);
   };
+  // "Mods...": the game's full Forge page, My Mods when it has any.
+  const openFull = () => (list.length > 0 ? openManager() : openStore());
+  const openSetup = () => Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky);
   const openMod = (mod: InstalledMod) =>
     void run(async () => {
       if (!game || !mod.mod_id) return;
@@ -329,12 +528,6 @@ export function GameModsSection({ appId }: { appId: number }) {
       toaster.toast({ title: outcome.title, body: outcome.body });
     });
 
-  // One press: the label carries the risk (see ForgeLock.tsx).
-  const allowAnyway = () =>
-    void run(async () => {
-      await allowModsAnyway(appId);
-    });
-
   const relock = () =>
     void run(async () => {
       await lockModsAgain(appId);
@@ -345,185 +538,296 @@ export function GameModsSection({ appId }: { appId: number }) {
       await openRestoreSaves(appId, game?.displayName ?? "this game", () => refresh(false));
     });
 
-  const shown = expanded ? list : rowsToShow(list, updates);
-  const locked = mode === "locked";
-  // Saves: only with Ludusavi installed, and for locked games too (a
-  // backup only reads the game).
-  const saveLine = mode === "mods" || locked ? saveBackupLine(Boolean(saves?.found), saves?.game, Date.now() / 1000) : null;
+  const lockWhy = () =>
+    showModal(<LockWhyModal appId={appId} ac={ac} onChanged={() => refresh(false)} />);
+
+  const doAction = (a: CardAction) => {
+    switch (a) {
+      case "restore-mods":
+        return offerRestore();
+      case "undo-restore":
+        return undoRestore();
+      case "mods":
+        return openFull();
+      case "setup":
+        return openSetup();
+      case "why":
+        return lockWhy();
+      case "restore-saves":
+        return restoreSaves();
+    }
+  };
+
+  const chips = statusChips(card);
+  const actions = compactButtons(card);
+  const hint = savesHint(savesFound, lastBackupAt, now);
+  const saveLine = saveBackupLine(savesFound, saves?.game, now);
+  const press = rowPress(placement);
+  // The line above the panel never grows: A goes where "Mods..." (or
+  // "Set up...", or the lock's "Why?") would.
+  const onRow =
+    press === "toggle"
+      ? () => setExpanded((e) => !e)
+      : () => (game ? openFull() : locked ? lockWhy() : openSetup());
+  const open = press === "toggle" && expanded;
 
   return (
-    <Focusable
-      flow-children="column"
-      style={{
-        margin: "12px 2.8vw 4px",
-        padding: "12px 16px",
-        background: FORGE_BLACK,
-        border: `1px solid ${FORGE_GUNMETAL}`,
-        borderRadius: "8px",
-        color: FORGE_STEEL,
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-      }}
-    >
+    <Focusable className={CARD} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
       <style>{CSS}</style>
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-        <div style={{ width: "4px", height: "18px", background: FORGE_CRIMSON, borderRadius: "2px" }} />
-        <div style={{ fontSize: "16px", fontWeight: 700, color: WHITE, letterSpacing: "0.04em" }}>MODS</div>
-        {mode === "mods" && <Chip>{mods ? countLabel(list) : "Reading..."}</Chip>}
-        {mode === "mods" && updates.size > 0 && (
-          <Chip crimson>
-            {updates.size} update{updates.size === 1 ? "" : "s"}
-          </Chip>
-        )}
-        {ac.detected && ac.override_on && <Chip crimson>{overrideOnLabel(ac)}</Chip>}
-      </div>
-
-      {locked && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <div style={{ color: FORGE_CRIMSON, fontWeight: 700 }}>{lockHeadline(ac)}</div>
-          <div style={{ fontSize: "13px", lineHeight: 1.45 }}>{lockBody(ac)}</div>
-        </div>
-      )}
-
-      {guard.offer && game && !locked && (
-        <div
+      <Focusable
+        flow-children="row"
+        style={{ display: "flex", alignItems: "center", gap: "8px", height: `${ROW_HEIGHT}px`, padding: "0 10px 0 4px" }}
+      >
+        <DialogButton
+          className={MAIN}
+          onClick={onRow}
           style={{
-            border: `2px solid ${FORGE_CRIMSON}`,
-            borderRadius: "6px",
-            padding: "10px 12px",
-            background: FORGE_GUNMETAL,
+            flex: "1 1 auto",
             display: "flex",
-            flexDirection: "column",
-            gap: "8px",
+            alignItems: "center",
+            gap: "12px",
+            height: `${ROW_HEIGHT - 8}px`,
+            padding: "0 12px",
+            textAlign: "left",
+            overflow: "hidden",
           }}
         >
-          <div style={{ color: WHITE, fontWeight: 700 }}>Restore last working mods?</div>
-          <div style={{ fontSize: "13px" }}>
-            {game.displayName} closed early twice since its mods changed. Going back only switches mods
-            on and off; nothing is deleted.
-          </div>
-          <Focusable flow-children="row" style={{ display: "flex", gap: "8px" }}>
-            <Button primary disabled={busy} onClick={offerRestore}>
-              Restore...
-            </Button>
-            <Button disabled={busy} onClick={() => void run(async () => void (await forgeGuardDismiss(appId)))}>
-              Not now
-            </Button>
-          </Focusable>
-        </div>
-      )}
+          <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE, flex: "0 0 auto" }}>Mods</span>
+          {chips.map((c) => (
+            <Chip key={c.text} chip={c} />
+          ))}
+          {hint && (
+            <span className={TEXT} style={{ fontSize: `${CARD_TEXT.hint}px`, color: STEEL_MUTED, flex: "0 1 auto" }}>
+              {hint}
+              {saveLine?.failed && <span style={{ color: AMBER }}> · {saveLine.failed}</span>}
+            </span>
+          )}
+          <span style={{ flex: "1 1 auto" }} />
+          {press === "toggle" && (
+            <span style={{ display: "flex", color: STEEL_MUTED, flex: "0 0 auto" }}>
+              {open ? <FaChevronUp /> : <FaChevronDown />}
+            </span>
+          )}
+        </DialogButton>
+        {actions.map((a) => (
+          <Button key={a} disabled={busy} onClick={() => doAction(a)}>
+            {CARD_ACTION_LABELS[a]}
+          </Button>
+        ))}
+      </Focusable>
 
-      {mode === "mods" && list.length > 0 && (
-        <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          {shown.map((m) => {
-            const hasUpdate = updates.has(m.folder);
-            const canSwitch = m.togglable !== false;
-            return (
-              <Focusable key={m.folder} flow-children="row" style={{ display: "flex", gap: "8px" }}>
-                <DialogButton
-                  className={ROW}
-                  disabled={busy || !canSwitch}
-                  onClick={() => toggle(m)}
-                  style={{ flex: "1 1 auto", display: "flex", alignItems: "center", gap: "10px", padding: "6px 12px", textAlign: "left" }}
-                >
-                  <span
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      background: m.enabled ? FORGE_CRIMSON : "transparent",
-                      border: `2px solid ${m.enabled ? FORGE_CRIMSON : FORGE_STEEL}`,
-                    }}
+      {open && (
+        <Focusable
+          flow-children="column"
+          style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "0 14px 12px 16px" }}
+        >
+          {detailLines(card).map((kind) => {
+            switch (kind) {
+              case "lock":
+                return (
+                  <Line key={kind} label="Anti-cheat" text={lockSummary(ac)} color={CRIMSON_TEXT}>
+                    {lockLineActions({ locked, managed: Boolean(game), enabledCount, overrideOn: false }).map((a) =>
+                      a === "switch-off" ? (
+                        <Button key={a} primary disabled={busy} onClick={allOff}>
+                          Switch {enabledCount} off
+                        </Button>
+                      ) : a === "why" ? (
+                        <Button key={a} onClick={lockWhy}>
+                          Why?
+                        </Button>
+                      ) : null
+                    )}
+                  </Line>
+                );
+              case "override":
+                return (
+                  <Line key={kind} label="Anti-cheat" text={overrideOnLabel(ac)} color={CRIMSON_TEXT}>
+                    {lockLineActions({ locked: false, managed: Boolean(game), enabledCount, overrideOn: true }).map((a) =>
+                      a === "lock-again" ? (
+                        <Button key={a} disabled={busy} onClick={relock}>
+                          Lock mods again
+                        </Button>
+                      ) : a === "why" ? (
+                        <Button key={a} onClick={lockWhy}>
+                          Why?
+                        </Button>
+                      ) : null
+                    )}
+                  </Line>
+                );
+              case "offer":
+                return (
+                  <Line key={kind} label="Crashes" text="Closed early twice since its mods changed" color={AMBER}>
+                    <Button primary disabled={busy} onClick={offerRestore}>
+                      Restore...
+                    </Button>
+                    <Button disabled={busy} onClick={() => void run(async () => void (await forgeGuardDismiss(appId)))}>
+                      Not now
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        showWhy(
+                          "Restore last working mods?",
+                          `${game?.displayName ?? "This game"} closed early twice since its mods changed. ` +
+                            "Going back only switches mods on and off; nothing is deleted."
+                        )
+                      }
+                    >
+                      Why?
+                    </Button>
+                  </Line>
+                );
+              case "undo":
+                return (
+                  <Line key={kind} label="Crashes" text="Last working mods restored">
+                    <Button disabled={busy} onClick={undoRestore}>
+                      Undo restore
+                    </Button>
+                  </Line>
+                );
+              case "mods":
+                return (
+                  <ModList
+                    key={kind}
+                    list={list}
+                    loaded={Boolean(mods)}
+                    updates={updates}
+                    busy={busy}
+                    locked={locked}
+                    onToggle={toggle}
+                    onOpen={openMod}
+                    onStore={openStore}
+                    onManager={openManager}
                   />
-                  <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: WHITE }}>
-                    {m.name ?? m.folder}
-                  </span>
-                  {m.version && <span style={{ fontSize: "12px", opacity: 0.8 }}>{m.version}</span>}
-                  {hasUpdate && <Chip crimson>Update</Chip>}
-                  <span style={{ fontSize: "12px", minWidth: "28px", textAlign: "right" }}>
-                    {m.togglable === false ? "always on" : m.enabled ? "On" : "Off"}
-                  </span>
-                </DialogButton>
-                {m.mod_id ? (
-                  <Button disabled={busy} onClick={() => openMod(m)}>
-                    {hasUpdate ? "Update" : "Open"}
-                  </Button>
-                ) : null}
-              </Focusable>
-            );
+                );
+              case "saves":
+                return saveLine ? (
+                  <Line
+                    key={kind}
+                    label="Saves"
+                    text={
+                      <>
+                        {saveLine.text}
+                        {saveLine.failed && <span style={{ color: AMBER }}> · {saveLine.failed}</span>}
+                      </>
+                    }
+                  >
+                    <Button disabled={busy} onClick={restoreSaves}>
+                      Restore saves...
+                    </Button>
+                  </Line>
+                ) : null;
+              case "upscaling":
+                return <UpscalingEntry key={kind} appId={appId} game={game} />;
+              case "loadorder":
+                return <LoadOrderEntry key={kind} appId={appId} game={game} locked={locked} />;
+              case "setup":
+                return (
+                  <Line key={kind} label="Setup" text="Mods are not set up for this game yet">
+                    <Button onClick={openSetup}>Set up...</Button>
+                  </Line>
+                );
+            }
           })}
         </Focusable>
       )}
+    </Focusable>
+  );
+}
 
-      {saveLine && (
-        <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap", fontSize: "12px" }}>
-          <span style={{ color: STEEL_MUTED }}>{saveLine.text}</span>
-          {saveLine.failed && <span style={{ color: AMBER }}>{saveLine.failed}</span>}
-        </div>
-      )}
-
-      <UpscalingEntry appId={appId} game={game} />
-
-      <LoadOrderEntry appId={appId} game={game} locked={locked} />
-
-      {mode === "setup" && !locked && (
-        <div style={{ fontSize: "13px" }}>
-          Mods are not set up for this game yet. Open the Quick Access Menu, Forge, to set it up.
-        </div>
-      )}
-
-      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        {mode === "mods" && !locked && (
-          <Button primary disabled={busy} onClick={openStore}>
+/** The details' mods: the count with Add mods and My Mods, then up to
+ * GAME_PAGE_ROWS rows (updates first, then the ones that are on), each a
+ * switch plus Open / Update. The rest are on My Mods. */
+function ModList({
+  list,
+  loaded,
+  updates,
+  busy,
+  locked,
+  onToggle,
+  onOpen,
+  onStore,
+  onManager,
+}: {
+  list: InstalledMod[];
+  loaded: boolean;
+  updates: Set<string>;
+  busy: boolean;
+  locked: boolean;
+  onToggle: (m: InstalledMod) => void;
+  onOpen: (m: InstalledMod) => void;
+  onStore: () => void;
+  onManager: () => void;
+}) {
+  const shown = rowsToShow(list, updates);
+  return (
+    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <Line label="Mods" text={loaded ? countLabel(list) : "Reading..."}>
+        {!locked && (
+          <Button primary disabled={busy} onClick={onStore}>
             Add mods
           </Button>
         )}
-        {mode === "mods" && list.length > shown.length && (
-          <Button onClick={() => setExpanded(true)}>Show all {list.length}</Button>
+        {list.length > 0 && (
+          <Button onClick={onManager}>{list.length > shown.length ? `All ${list.length}...` : "My Mods"}</Button>
         )}
-        {mode === "mods" && expanded && list.length > rowsToShow(list, updates).length && (
-          <Button onClick={() => setExpanded(false)}>Show fewer</Button>
-        )}
-        {mode === "mods" && list.length > 0 && <Button onClick={openManager}>My Mods</Button>}
-        {saveLine && (
-          <Button disabled={busy} onClick={restoreSaves}>
-            Restore saves...
-          </Button>
-        )}
-        {guard.undo && game && (
-          <Button disabled={busy} onClick={undoRestore}>
-            Undo restore
-          </Button>
-        )}
-        {locked && game && enabledCount > 0 && (
-          <Button primary disabled={busy} onClick={allOff}>
-            Switch {enabledCount} mod{enabledCount === 1 ? "" : "s"} off
-          </Button>
-        )}
-        {locked && ac.override_allowed && (
-          <Button disabled={busy} onClick={allowAnyway}>
-            {overrideLabel(ac)}
-          </Button>
-        )}
-        {ac.detected && ac.override_on && (
-          <Button disabled={busy} onClick={relock}>
-            Lock mods again
-          </Button>
-        )}
-        {mode === "setup" && !locked && (
-          <Button onClick={() => Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky)}>Set up mods</Button>
-        )}
-      </Focusable>
+      </Line>
+      {shown.map((m) => {
+        const hasUpdate = updates.has(m.folder);
+        const canSwitch = m.togglable !== false;
+        return (
+          <Focusable key={m.folder} flow-children="row" style={{ display: "flex", gap: "8px" }}>
+            <DialogButton
+              className={ROW}
+              disabled={busy || !canSwitch}
+              onClick={() => onToggle(m)}
+              style={{
+                flex: "1 1 auto",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                height: "40px",
+                padding: "0 12px",
+                textAlign: "left",
+                fontSize: `${CARD_TEXT.body}px`,
+              }}
+            >
+              <span
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: m.enabled ? FORGE_CRIMSON : "transparent",
+                  border: `2px solid ${m.enabled ? FORGE_CRIMSON : FORGE_STEEL}`,
+                }}
+              />
+              <span className={TEXT} style={{ flex: "1 1 auto", color: WHITE }}>
+                {m.name ?? m.folder}
+              </span>
+              {m.version && <span style={{ fontSize: `${CARD_TEXT.hint}px`, color: STEEL_MUTED }}>{m.version}</span>}
+              {hasUpdate && <Chip chip={{ text: "Update", tone: "amber" }} />}
+              <span style={{ fontSize: `${CARD_TEXT.hint}px`, minWidth: "28px", textAlign: "right" }}>
+                {m.togglable === false ? "always on" : m.enabled ? "On" : "Off"}
+              </span>
+            </DialogButton>
+            {m.mod_id ? (
+              <Button disabled={busy} onClick={() => onOpen(m)}>
+                {hasUpdate ? "Update" : "Open"}
+              </Button>
+            ) : null}
+          </Focusable>
+        );
+      })}
     </Focusable>
   );
 }
 
 // ---- Upscaling (OptiScaler) ---------------------------------------------------
-// One entry in the section, for any game the section shows. Install, update,
-// switch upscaler, try another proxy name, remove. Refused games show the
-// crimson line and nothing else: there is no override for DLL injection.
+// One line in the details, for any game the section shows. Install, update,
+// switch upscaler; the rarer actions (another proxy name, remove) are in
+// "More...". Refused games show the crimson line and "Why?": there is no
+// override for DLL injection.
 
 function UpscalerModal({
   title,
@@ -651,84 +955,108 @@ function UpscalingEntry({ appId, game }: { appId: number; game?: SupportedGame }
     );
   const remove = () => void act(() => forgeOptiScalerRemove(appId), "Removed; the game's own files are back.");
   const update = () => void act(() => install(inst.upscaler || st.upscalers.default), "Updated.");
+  const nextName = NEXT_PROXY[inst.proxy ?? ""] ?? "dxgi.dll";
   const otherName = () =>
-    void act(
-      () => install(inst.upscaler || st.upscalers.default, NEXT_PROXY[inst.proxy ?? ""] ?? "dxgi.dll"),
-      "Reinstalled under another name."
-    );
+    void act(() => install(inst.upscaler || st.upscalers.default, nextName), "Reinstalled under another name.");
   const keep = () => void act(async () => ({ ...(await forgeOptiScalerDismiss(appId)) }), "Kept.");
+  const more = () =>
+    showModal(
+      <MoreModal
+        title="OptiScaler"
+        body={`${line.text}. If the game ignores it, try another file name; Remove puts the game's own files back.`}
+        actions={[
+          { label: `Use ${nextName} instead`, run: otherName },
+          { label: "Remove", run: remove },
+        ]}
+      />
+    );
 
   const color = line.tone === "refused" || line.tone === "suspect" ? CRIMSON_TEXT : line.tone === "installed" ? GREEN : STEEL_MUTED;
   return (
-    <Focusable
-      flow-children="column"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        padding: "8px 12px",
-        background: FORGE_GUNMETAL,
-        borderRadius: "6px",
-        border: line.tone === "suspect" ? `2px solid ${FORGE_CRIMSON}` : "2px solid transparent",
-      }}
-    >
-      <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ color: WHITE, fontWeight: 700, fontSize: "13px" }}>Upscaling (OptiScaler)</span>
-        <span style={{ color, fontSize: "12px", fontWeight: line.tone === "refused" ? 700 : 400 }}>{line.text}</span>
-      </div>
+    <Line label="Upscaling" text={line.text} color={color}>
       {line.tone === "refused" && st.refusal?.detail && (
-        <div style={{ fontSize: "12px", color: STEEL_MUTED }}>{st.refusal.detail}</div>
+        <Button onClick={() => showWhy("Upscaling (OptiScaler)", st.refusal?.detail ?? "")}>Why?</Button>
       )}
       {line.tone === "suspect" && (
-        <div style={{ fontSize: "12px" }}>Removing it puts the game's own files back. Nothing else changes.</div>
+        <Button primary disabled={busy} onClick={remove}>
+          Remove OptiScaler
+        </Button>
       )}
-      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        {line.tone === "suspect" && (
-          <Button primary disabled={busy} onClick={remove}>
-            Remove OptiScaler
-          </Button>
-        )}
-        {line.tone === "suspect" && (
-          <Button disabled={busy} onClick={keep}>
-            Keep it
-          </Button>
-        )}
-        {line.tone === "off" && (
-          <Button disabled={busy} onClick={pickAndInstall}>
-            Install...
-          </Button>
-        )}
-        {line.tone === "installed" && st.update_available && (
-          <Button primary disabled={busy} onClick={update}>
-            Update to {st.latest}
-          </Button>
-        )}
-        {line.tone === "installed" && (
-          <Button disabled={busy} onClick={pickUpscaler}>
-            Upscaler...
-          </Button>
-        )}
-        {line.tone === "installed" && (
-          <Button disabled={busy} onClick={otherName}>
-            Use {NEXT_PROXY[inst.proxy ?? ""] ?? "dxgi.dll"} instead
-          </Button>
-        )}
-        {inst.installed && line.tone !== "suspect" && (
-          <Button disabled={busy} onClick={remove}>
-            Remove
-          </Button>
-        )}
-      </Focusable>
-    </Focusable>
+      {line.tone === "suspect" && (
+        <Button disabled={busy} onClick={keep}>
+          Keep it
+        </Button>
+      )}
+      {line.tone === "suspect" && (
+        <Button onClick={() => showWhy("OptiScaler", "Removing it puts the game's own files back. Nothing else changes.")}>
+          Why?
+        </Button>
+      )}
+      {line.tone === "off" && (
+        <Button disabled={busy} onClick={pickAndInstall}>
+          Install...
+        </Button>
+      )}
+      {line.tone === "installed" && st.update_available && (
+        <Button primary disabled={busy} onClick={update}>
+          Update to {st.latest}
+        </Button>
+      )}
+      {line.tone === "installed" && (
+        <Button disabled={busy} onClick={pickUpscaler}>
+          Upscaler...
+        </Button>
+      )}
+      {line.tone === "installed" && (
+        <Button disabled={busy} onClick={more}>
+          More...
+        </Button>
+      )}
+      {line.tone === "refused" && inst.installed && (
+        <Button disabled={busy} onClick={remove}>
+          Remove
+        </Button>
+      )}
+    </Line>
+  );
+}
+
+/** A small modal with a line of explanation and a few rarer actions. */
+function MoreModal({
+  title,
+  body,
+  actions,
+  closeModal,
+}: {
+  title: string;
+  body: string;
+  actions: { label: string; run: () => void }[];
+  closeModal?: () => void;
+}) {
+  return (
+    <WhyModal title={title} body={body} closeModal={closeModal}>
+      {actions.map((a) => (
+        <ButtonItem
+          key={a.label}
+          layout="below"
+          onClick={() => {
+            closeModal?.();
+            a.run();
+          }}
+        >
+          {a.label}
+        </ButtonItem>
+      ))}
+    </WhyModal>
   );
 }
 
 // ---- Load order (LOOT rules) and profiles -------------------------------------
 // Skyrim SE, Fallout 4, Starfield and Oblivion Remastered only. One line with
-// the counts, problems and the current profile; the plugin list itself is the
-// Load order panel (a page, opened from here; B comes back). Sorting and
-// profile switches are refused by the backend while the game runs, and on a
-// locked game the writers are not offered.
+// the counts, problems and the current profile; the plugin list and where the
+// rules come from are on the Load order page (opened from here; B comes back).
+// Sorting and profile switches are refused by the backend while the game
+// runs, and on a locked game the writers are not offered.
 
 function steamName(appId: number, fallback: string): string {
   try {
@@ -778,32 +1106,27 @@ function LoadOrderEntry({ appId, game, locked }: { appId: number; game?: Support
       refresh();
     }
   };
+  const text = (
+    <>
+      {st.counts?.active ?? 0} of {st.counts?.plugins ?? 0} on
+      {st.current_profile ? ` · ${st.current_profile}` : ""}
+      {" · "}
+      <span style={{ color: sum.tone === "error" ? CRIMSON_TEXT : sum.tone === "warn" ? AMBER : GREEN }}>{sum.text}</span>
+    </>
+  );
   return (
-    <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap", fontSize: "13px" }}>
-        <span style={{ color: WHITE, fontWeight: 600 }}>Load order</span>
-        <span style={{ color: STEEL_MUTED }}>
-          {st.counts?.active ?? 0} of {st.counts?.plugins ?? 0} plugins on
-        </span>
-        {st.current_profile && <Chip>Profile: {st.current_profile}</Chip>}
-        <span style={{ color: sum.tone === "error" ? CRIMSON_TEXT : sum.tone === "warn" ? AMBER : GREEN }}>
-          {sum.text}
-        </span>
-      </div>
-      <div style={{ fontSize: "12px", color: STEEL_MUTED }}>{masterlistLine(st.masterlist, Date.now() / 1000)}</div>
-      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        <Button onClick={() => openForgeLoadOrder(scope)}>Load order</Button>
-        {!locked && (
-          <Button disabled={busy} onClick={() => void sort()}>
-            Sort with LOOT rules
-          </Button>
-        )}
-        {!locked && (
-          <Button disabled={busy} onClick={() => openProfiles(scope, st, refresh)}>
-            {st.current_profile ? `Profiles (${st.current_profile})` : "Profiles"}
-          </Button>
-        )}
-      </Focusable>
-    </Focusable>
+    <Line label="Load order" text={text}>
+      <Button onClick={() => openForgeLoadOrder(scope)}>Load order...</Button>
+      {!locked && (
+        <Button disabled={busy} onClick={() => void sort()}>
+          Sort
+        </Button>
+      )}
+      {!locked && (
+        <Button disabled={busy} onClick={() => openProfiles(scope, st, refresh)}>
+          Profiles...
+        </Button>
+      )}
+    </Line>
   );
 }
