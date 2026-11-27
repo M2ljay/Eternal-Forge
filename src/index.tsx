@@ -111,6 +111,7 @@ import {
   setBg3ModuleCap,
   buildReport,
   getPluginUpdate,
+  hideLoaderConsole,
 } from "./api";
 import { getVrReleases } from "./api";
 import { applyUpdateHold } from "./holdUpdates";
@@ -496,9 +497,18 @@ function ResetGameRow({
         // Put back anything a modding tool rewrote, from the backup the
         // tool made. Without this a reset left the game exe patched and
         // Step 3 ticked, so the setup could not honestly be redone.
-        (game.prefixTools ?? [])
-          .map((t) => t.restoreOnReset)
-          .filter((p): p is [string, string] => Boolean(p)),
+        [
+          ...(game.prefixTools ?? [])
+            .map((t) => t.restoreOnReset)
+            .filter((p): p is [string, string] => Boolean(p)),
+          // Same idea for a loader that overwrote a game file rather than
+          // adding one of its own: Shadow of War's dll loader replaces
+          // bink2w64.dll, and without this reset left the patched copy in
+          // place with no way back short of verifying 100GB.
+          ...[game.framework, ...(game.extraFrameworks ?? [])]
+            .flatMap((fw) => fw?.backupFiles ?? [])
+            .map((f): [string, string] => [`${f}.decky-nexus.bak`, f]),
+        ],
         game.modWriteDirs ?? []
       );
       if (result.ok && result.use_steam_client) {
@@ -980,7 +990,10 @@ function CurrentGameSection() {
             // Script extenders are built per game binary: the exe's own
             // version picks the file, so a downgraded Skyrim gets the SKSE
             // that actually runs on it instead of the newest.
-            game.processName ?? ""
+            game.processName ?? "",
+            // Back up whatever this loader is about to write over, so a
+            // reset has something to put back.
+            game.framework.backupFiles ?? []
           );
       // Some games need ini blocks before mods load at all (e.g. FO4's
       // archive invalidation) - apply them as part of framework setup.
@@ -1109,7 +1122,8 @@ function CurrentGameSection() {
           game.modsSubdir,
           game.appId,
           game.launcherXmlSubpath ?? "",
-          game.processName ?? ""
+          game.processName ?? "",
+          fw.backupFiles ?? []
         );
         if (!result.ok) {
           failed++;
@@ -1596,7 +1610,7 @@ function CurrentGameSection() {
                   label={`Step ${fwSteps.install}`}
                   layout="below"
                   disabled={frameworkBusy || !frameworkInstallable(game.framework)}
-                  description={`Most ${game.displayName} mods require ${game.framework.name}. Downloads from Nexus Mods (author gets the credit).${
+                  description={`${game.framework.stepNote ?? `Most ${game.displayName} mods require ${game.framework.name}.`} Downloads from Nexus Mods (author gets the credit).${
                     game.framework.warning ? ` ⚠ ${game.framework.warning}` : ""
                   }`}
                   onClick={onInstallFramework}
@@ -4851,6 +4865,13 @@ export default definePlugin(() => {
         );
       }
       return;
+    }
+    // A loader that opens a console leaves the game invisible behind it
+    // under gamescope. Hung off the same notification and for the same
+    // reason as the notice below: the panel is not open when someone
+    // presses Play in the library.
+    if (game.loaderConsole) {
+      hideLoaderConsole(game.loaderConsole.titlePrefix, 120).catch(() => {});
     }
     getInstalledCount(game.nexusDomain).then((r) => {
       const wait = launchWaitNotice(r.ok ? r.mods ?? 0 : 0);

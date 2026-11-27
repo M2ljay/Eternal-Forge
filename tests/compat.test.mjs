@@ -589,6 +589,48 @@ test("RDR2: no construction badge, but the Story-Mode-only note stays", () => {
   assert.match(idx, /game\.gameNote && \(/, "the panel renders it");
 });
 
+// KCD2, 2026-10-25: Step 1 said "Most Kingdom Come: Deliverance II mods
+// require LuaDB" beside 70 mods running without it.
+test("KCD2's Step 1 does not claim most mods need LuaDB", () => {
+  const games = readFileSync("src/games.ts", "utf8");
+  const kcd2 = games.slice(games.indexOf("appId: 1771300"), games.indexOf("appId: 1623730"));
+  assert.match(kcd2, /stepNote:\s*\n?\s*"Only some mods need LuaDB/);
+  const index = readFileSync("src/index.tsx", "utf8");
+  assert.match(index, /game\.framework\.stepNote \?\? `Most \$\{game\.displayName\} mods require/);
+});
+
+// PR #48 follow-up: a proxy-dll mod's override is applied, merged into
+// what the player had, at the one place every install passes.
+test("a proxy-dll mod's launch override is merged in on install", () => {
+  const install = readFileSync("src/install.ts", "utf8");
+  assert.match(install, /result\.launch_overrides/);
+  assert.match(install, /addLaunchOptions\(\s*game\.appId,\s*`WINEDLLOVERRIDES="\$\{result\.launch_overrides\}" %command%`/);
+  assert.doesNotMatch(install, /setLaunchOptions/);
+});
+
+// Issue #46: "click on the mod author's username from a mod page to see
+// their other mods".
+test("the author on a mod page opens that author's mods in the store", () => {
+  const detail = readFileSync("src/ModDetailPage.tsx", "utf8");
+  assert.match(detail, /setBrowseAuthor\(\{\s*id: Number\(uploader\.memberId\)/);
+  // Forge: through pushOurPage, so the tab stack's depth stays right and B
+  // from the list comes back to the mod page.
+  assert.match(detail, /pushOurPage\("\/nexus-mods"\)/);
+  const browse = readFileSync("src/BrowsePage.tsx", "utf8");
+  assert.match(browse, /takeBrowseAuthor\(\)/);
+  assert.match(browse, /author\?\.id \?\? 0\s*\)/, "the author reaches get_mods");
+  assert.match(browse, /&& !author;/, "an author list is never the home rows");
+  assert.match(browse, /Show all mods/);
+  // Michael, 2026-10-25: after the author list, B and the filter could not
+  // get back out. The filter shows the author and B clears it.
+  assert.match(browse, /selectedOption=\{author \? AUTHOR_FILTER : filter\}/);
+  assert.match(browse, /setAuthor\(undefined\);\s*setFilter\(opt\.data\)/);
+  const onCancel = browse.slice(browse.indexOf("onCancel={() => {"));
+  assert.match(onCancel.slice(0, 700), /setAuthor\(undefined\)/, "B leaves the author list");
+  const api = readFileSync("src/api.ts", "utf8");
+  assert.match(api, /uploader_id\?: number\s*\]/);
+});
+
 // Henry From Skalitz (KCD2), 2026-10-10: LuaDB was skipped as "could not
 // tell where" before it became KCD2's loader, and that old skip both hid it
 // from the page's count and kept claiming it could not be placed.

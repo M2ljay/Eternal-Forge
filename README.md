@@ -7,6 +7,11 @@ Windows (Steam Big Picture) support. The rest of this README is upstream's,
 with this fork's additions in the "Fork" section at the end. The licence is
 upstream's (see [License](#license)).
 
+Upstream base: **v1.21.40** (the part of the version before `-anygame`).
+On Windows, upstream's Proton-only steps are skipped: no `WINEDLLOVERRIDES`
+are written into launch options (ReShade, proxy-dll mods, loaders), and the
+gamescope loader-console fix does nothing.
+
 Decky lists it as **Forge**. It still installs into the plugin folder
 `Nexus Mods`, because Decky keeps a plugin's settings (including the Nexus API
 key), data and logs under its folder name, so updating from a build called
@@ -42,7 +47,7 @@ Browse, download, install, and enable/disable [Nexus Mods](https://www.nexusmods
 
 ## Supported games
 
-Twenty-three games. Every one unmarked below was installed, modded and played
+Twenty-five games. Every one unmarked below was installed, modded and played
 on real hardware before it shipped. That is what supported means here: not
 that the code has a config entry for it, but that someone finished a
 session with mods running.
@@ -54,22 +59,24 @@ session with mods running.
 5. Fallout: New Vegas
 6. Helldivers 2
 7. Kingdom Come: Deliverance
-8. Mass Effect Legendary Edition
-9. Mount & Blade II: Bannerlord
-10. NieR:Automata
-11. Palworld
-12. Red Dead Redemption 2
-13. Resident Evil 4
-14. Skyrim Special Edition
-15. Slay the Spire 2
-16. STAR WARS Battlefront II (2017)
-17. Stardew Valley
-18. Starfield \*
-19. Subnautica
-20. Subnautica 2
-21. Subnautica: Below Zero
-22. The Witcher 3
-23. Valheim
+8. Kingdom Come: Deliverance II
+9. Mass Effect Legendary Edition
+10. Middle-earth: Shadow of Mordor \*
+11. Mount & Blade II: Bannerlord
+12. NieR:Automata
+13. Palworld
+14. Red Dead Redemption 2
+15. Resident Evil 4
+16. Skyrim Special Edition
+17. Slay the Spire 2
+18. STAR WARS Battlefront II (2017)
+19. Stardew Valley
+20. Starfield \*
+21. Subnautica
+22. Subnautica 2
+23. Subnautica: Below Zero
+24. The Witcher 3
+25. Valheim
 
 \* Community added game. Not tested by author.
 
@@ -80,7 +87,7 @@ plugin; treat anything you do with them as untested.
 
 - Fallout 3
 - Hollow Knight: Silksong
-- Kingdom Come: Deliverance II (marked under construction in the plugin)
+- Middle-earth: Shadow of War
 
 ### Requested, not started
 
@@ -91,8 +98,6 @@ appear in the plugin until they do.
 - Dragon's Dogma 2
 - Final Fantasy XII: The Zodiac Age
 - Horizon Forbidden West
-- Middle-earth: Shadow of Mordor
-- Middle-earth: Shadow of War
 - Skyrim VR
 - The Blood of Dawnwalker
 - GTA V

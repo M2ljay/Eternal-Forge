@@ -18,8 +18,9 @@ import {
   gbUpdateTarget,
   isGameBananaId,
 } from "./api";
-import { SupportedGame, modeParams, stalenessExemptModIds } from "./games";
+import { IS_WINDOWS, SupportedGame, modeParams, stalenessExemptModIds } from "./games";
 import { nameDownload } from "./state";
+import { addLaunchOptions } from "./steam";
 
 /** Download AND extract a pinned file so the installer only has to
  * commit it. Extraction is the CPU-bound half of an install and shares
@@ -167,8 +168,22 @@ export function installModWith(
     game.hd2Layout ?? false,
     game.reshade?.subdir ?? "",
     game.processName ?? "",
-    game.palSchema?.modsSubdir ?? ""
-  );
+    game.palSchema?.modsSubdir ?? "",
+    game.monolithArchiveExt ?? ""
+  ).then((result) => {
+    // A proxy-dll mod does nothing under Proton until its dll is
+    // overridden. Applied here, where every install path passes, and
+    // merged so whatever the player already had stays. Not on Windows:
+    // the game loads the dll by itself there, and Windows Steam cannot run
+    // an env-var prefix (the backend sends none there either).
+    if (result.ok && result.launch_overrides && !IS_WINDOWS) {
+      addLaunchOptions(
+        game.appId,
+        `WINEDLLOVERRIDES="${result.launch_overrides}" %command%`
+      );
+    }
+    return result;
+  });
 }
 
 /** Install the other REQUIRED files of a mod whose page splits it in two.

@@ -401,6 +401,9 @@ ALLOWED_UNGATED = {
     # Downloads into Forge's own cache: nothing reaches the game until a
     # gated install.
     "download only": {"prefetch_mod_file", "prepare_mod_file"},
+    # Unmaps a mod loader's console window under gamescope (a no-op on
+    # Windows); no files, no mods.
+    "window only": {"hide_loader_console"},
     # Mod tools fetched into Forge's own folder; using one for a game goes
     # through set_framework_launch_options / install_framework, both gated.
     "tool into Forge's folder": {"install_me3", "install_frosty_toolkit"},
@@ -788,3 +791,26 @@ class ModdedBackendTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsSkipsProtonOnlyStepsTests(unittest.TestCase):
+    """Upstream's Proton/gamescope steps (v1.21.37) stay off on Windows:
+    Windows loads a proxy dll from the game folder by itself, Windows Steam
+    cannot run an env-var prefix in launch options, and a loader console
+    hides nothing on a Windows desktop."""
+
+    def test_the_loader_console_watch_is_a_no_op_on_windows(self):
+        with mock.patch.object(main.sys, "platform", "win32"), \
+                mock.patch.object(main, "_unmap_windows_by_prefix") as unmap:
+            result = asyncio.run(main.Plugin().hide_loader_console("SoWPL", 5))
+        self.assertEqual(result, {"ok": True, "hidden": 0})
+        unmap.assert_not_called()
+
+    def test_no_launch_override_is_sent_on_windows(self):
+        import inspect
+        src = inspect.getsource(main.Plugin._install_mod_inner)
+        i = src.index('proxies = extras.get("proxy_dlls")')
+        self.assertIn('if proxies and sys.platform != "win32":', src[i:i + 400])
+        with open(os.path.join(os.path.dirname(os.path.abspath(main.__file__)),
+                               "src", "install.ts"), encoding="utf-8") as fh:
+            self.assertIn("result.launch_overrides && !IS_WINDOWS", fh.read())

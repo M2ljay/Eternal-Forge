@@ -62,8 +62,10 @@ import {
   nameDownload,
   setSelectedMod,
   markManagerReturn,
+  setBrowseAuthor,
+  setBrowseGame,
 } from "./state";
-import { isGameRunning, restartGame, setLaunchOptions } from "./steam";
+import { addLaunchOptions, isGameRunning, restartGame } from "./steam";
 import {
   ACTION_BUTTON,
   ACTION_COLUMN,
@@ -74,6 +76,7 @@ import {
   PRIMARY_BUTTON_CLASS,
   PRIMARY_BUTTON_CSS,
   BUSY_BUTTON_CLASS,
+  BLUE_BUTTON_CLASS,
 } from "./theme";
 import { PageBackdrop, SectionHeading, StatChip, WarningBox } from "./chrome";
 import { DownloadsButton } from "./DownloadsButton";
@@ -541,13 +544,22 @@ export function ModDetailPage() {
         return;
       }
       if (result.ok && result.reshade && game.reshade) {
-        // Injector installed beside the exe. Proton loads its builtin
-        // dxgi unless told otherwise, so the override is applied for the
-        // user rather than described to them - and the warning (anti-cheat
-        // risk, author's own words) stays on the page, not in a toast.
-        // Windows loads the dxgi beside the exe by itself: no options.
-        if (game.reshade.launchOptionsTemplate) {
-          setLaunchOptions(game.appId, game.reshade.launchOptionsTemplate);
+        // Only when the package brought the injector. Proton loads its
+        // builtin dxgi unless told otherwise, so for a real ReShade the
+        // override is applied for the user rather than described to them -
+        // but a preset-only package has no injector to point at, and
+        // setting one would switch off whatever ReShade is already there.
+        // The warning (anti-cheat risk, author's own words) stays on the
+        // page, not in a toast.
+        //
+        // Added, not assigned: the line may carry a frame generator or a
+        // wrapper script, and a preset is not worth losing those.
+        // Windows loads the dxgi beside the exe by itself: the template is
+        // removed there (adaptForWindows), so no options.
+        if (result.injector) {
+          if (game.reshade.launchOptionsTemplate) {
+            addLaunchOptions(game.appId, game.reshade.launchOptionsTemplate);
+          }
         }
         setInstalledFileIds((prev) => new Set(prev).add(file.file_id));
         await afterInstall(file);
@@ -555,7 +567,11 @@ export function ModDetailPage() {
         setStale(result.warning);
         toaster.toast({
           title: `${mod.name} installed`,
-          body: "ReShade launch options set - see the note on this page",
+          body: !result.injector
+            ? "Preset installed - see the note on this page"
+            : game.reshade.launchOptionsTemplate
+              ? "ReShade launch options set - see the note on this page"
+              : "ReShade installed - see the note on this page",
         });
         return;
       }
@@ -831,9 +847,36 @@ export function ModDetailPage() {
           >
             {mod.name}
           </h2>
-          <div style={{ opacity: 0.75, fontSize: "13.5px", marginBottom: "8px" }}>
-            by {mod.author}
-          </div>
+          {/* The author's other mods for this game, in the store (#46). Plain
+              text until the uploader's member id has loaded. */}
+          {uploader?.memberId ? (
+            <Focusable style={{ marginBottom: "8px" }}>
+              <DialogButton
+                className={BLUE_BUTTON_CLASS}
+                style={{
+                  width: "auto",
+                  minWidth: 0,
+                  padding: "2px 10px",
+                  fontSize: "13.5px",
+                }}
+                onClick={() => {
+                  setBrowseGame(game);
+                  setBrowseAuthor({
+                    id: Number(uploader.memberId),
+                    name: uploader.name ?? mod.author,
+                  });
+                  // Through pushOurPage, so B from the list comes back here.
+                  pushOurPage("/nexus-mods");
+                }}
+              >
+                by {mod.author} · more from this author
+              </DialogButton>
+            </Focusable>
+          ) : (
+            <div style={{ opacity: 0.75, fontSize: "13.5px", marginBottom: "8px" }}>
+              by {mod.author}
+            </div>
+          )}
           {/* Warned on the mod's OWN page, not only on the collection that
               ships it - a user can arrive here from a search and would
               otherwise install something that stops the game starting with

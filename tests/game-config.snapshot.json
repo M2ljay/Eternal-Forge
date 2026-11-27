@@ -47,6 +47,26 @@
     ]
   },
   {
+    "appId": "241930",
+    "displayName": "Shadow of Mordor",
+    "nexusDomain": "middleearthshadowofmordor",
+    "installDirName": "ShadowOfMordor",
+    "modsSubdir": "x64/plugins",
+    "pluginsTxtSubpath": null,
+    "pluginsTxtStyle": null,
+    "installMode": null,
+    "frameworkName": null,
+    "launchOptionsTemplate": "WINEDLLOVERRIDES=\"d3d11=n,b\" %command%",
+    "prefixTools": [],
+    "manualTools": 0,
+    "hasLauncherBypass": false,
+    "hasSetupInis": false,
+    "hasLogAdapter": false,
+    "hasOwnLauncher": false,
+    "longWaitAtMods": null,
+    "cleanupPrefixes": []
+  },
+  {
     "appId": "261550",
     "displayName": "Mount & Blade II: Bannerlord",
     "nexusDomain": "mountandblade2bannerlord",
@@ -115,6 +135,32 @@
     "hasOwnLauncher": false,
     "longWaitAtMods": null,
     "cleanupPrefixes": []
+  },
+  {
+    "appId": "356190",
+    "displayName": "Shadow of War",
+    "nexusDomain": "middleearthshadowofwar",
+    "installDirName": "ShadowOfWar",
+    "modsSubdir": "x64/plugins",
+    "pluginsTxtSubpath": null,
+    "pluginsTxtStyle": null,
+    "installMode": null,
+    "frameworkName": "Shadow of War DLL Loader",
+    "launchOptionsTemplate": "WINEDLLOVERRIDES=\"dxgi=n,b\" %command%",
+    "prefixTools": [
+      "99",
+      "49"
+    ],
+    "manualTools": 0,
+    "hasLauncherBypass": false,
+    "hasSetupInis": false,
+    "hasLogAdapter": false,
+    "hasOwnLauncher": false,
+    "longWaitAtMods": null,
+    "cleanupPrefixes": [
+      "\"x64/ShadowOfWarDllLoader.dll\", \"x64/plugins\"",
+      "\"x64/plugins/ShadowOfWarPacketLoader.dll\", \"x64/plugins/PacketLoader\","
+    ]
   },
   {
     "appId": "377160",

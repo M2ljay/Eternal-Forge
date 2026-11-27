@@ -127,8 +127,16 @@ export interface InstallResult {
   needs_choice?: boolean;
   merge_allowed?: boolean;
   /** The install was a ReShade package: injector/preset files beside the
-   * exe. The caller applies the game's reshade launch options. */
+   * exe. */
   reshade?: boolean;
+  /** ...and it brought the injector itself, rather than being a preset for
+   * one already installed. Only then are the game's reshade launch options
+   * applied - an override for a dll the package does not contain switches
+   * on nothing and switches off whatever the player had. */
+  injector?: boolean;
+  /** WINEDLLOVERRIDES entries ("dinput8=n,b") a proxy-dll mod needs under
+   * Proton. Merged into the game's launch options, never assigned. */
+  launch_overrides?: string;
   options?: string[];
   /** Display names for `options`, same order. The value handed back is still
    * the option itself, so only what the user reads changes. */
@@ -303,7 +311,9 @@ export const getMods = callable<
     category?: string,
     /** Keep only mods updated within N days; -1 = since the game's own
      * last update (the filter that matters on live-service games). */
-    updated_within_days?: number
+    updated_within_days?: number,
+    /** Only this author's mods (their Nexus member id; issue #46). */
+    uploader_id?: number
   ],
   ModsResult
 >("get_mods");
@@ -456,7 +466,11 @@ export const installMod = callable<
      * equal choices, and the wrong one kills the game at boot. */
     process_name?: string,
     /** PalSchema's mods dir (Palworld): json-schema mods route here. */
-    palschema_subdir?: string
+    palschema_subdir?: string,
+    /** Monolith's Middle-earth games: the engine's archive extension,
+     * which also switches on routing by what the download holds rather
+     * than by a single mods folder. "" for every other game. */
+    monolith_ext?: string
   ],
   InstallResult
 >("install_mod");
@@ -745,6 +759,13 @@ export const checkFrameworkUpdate = callable<
   }
 >("check_framework_update");
 
+/** Watch for a mod loader's console window and unmap it, so gamescope
+ * presents the game instead. Returns once one is hidden or it times out. */
+export const hideLoaderConsole = callable<
+  [title_prefix: string, timeout_sec: number],
+  { ok: boolean; hidden?: number }
+>("hide_loader_console");
+
 export const installFramework = callable<
   [
     game_domain: string,
@@ -765,7 +786,11 @@ export const installFramework = callable<
     /** The game's exe (e.g. SkyrimSE.exe): script extenders publish one
      * build per game binary, and the right one for a deliberately
      * downgraded game sits in OLD_VERSION. Empty skips the matching. */
-    process_name: string
+    process_name: string,
+    /** Game files this loader overwrites - copied once to
+     * <path>.decky-nexus.bak before it lands, so reset has something to
+     * put back. Shadow of War's loader replaces the game's bink2w64.dll. */
+    backup_files?: string[]
   ],
   {
     ok: boolean;
