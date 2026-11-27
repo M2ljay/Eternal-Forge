@@ -123,6 +123,7 @@ import {
   registerManagedGames,
   startForgeBackground,
 } from "./forge";
+import { loadOptiScalerGames, optiscalerGameEvent } from "./optiscaler";
 import type { PluginUpdate } from "./pluginUpdate";
 import { IntegrityNotice } from "./safeUpdate";
 import {
@@ -4787,6 +4788,7 @@ export default definePlugin(() => {
   // crash guard's game-start bookkeeping.
   registerGamePagePatch();
   const stopForge = startForgeBackground();
+  loadOptiScalerGames();
 
   // Feed the QAM Downloads section from anywhere in the UI.
   const progressListener = addEventListener<[p: InstallProgress]>(
@@ -4818,6 +4820,8 @@ export default definePlugin(() => {
     }
   ).GameSessions?.RegisterForAppLifetimeNotifications?.((e) => {
     const game = getSupportedGame(e.unAppID);
+    // OptiScaler can be in any game, managed or not: its own run watch.
+    optiscalerGameEvent(e.unAppID, e.bRunning, game?.displayName);
     if (!game) return;
     // Forge's way back after a crash: the mod set at start, the run's
     // length at exit.

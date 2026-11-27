@@ -13,6 +13,8 @@ import {
   FORGE_GUNMETAL,
   FORGE_STEEL,
   GAME_PAGE_ROWS,
+  OPTISCALER_REFUSED,
+  optiscalerLine,
   PATCH_FAILURE_LIMIT,
   SAVE_BACKUP_HINT,
   appsWithUpdates,
@@ -299,4 +301,30 @@ test("a failed backup is a small note, never a stop", () => {
   assert.equal(SAVE_BACKUP_HINT, "Install Ludusavi to back up saves before mod changes");
   assert.equal(skipWindowLabel(0), "Back up before every mod change");
   assert.equal(skipWindowLabel(30), "At most one backup per game every 30 min");
+});
+
+// ---- OptiScaler entry ---------------------------------------------------------
+
+test("optiscaler: a refused game shows the crimson line whatever is installed", () => {
+  const off = { installed: false };
+  assert.deepEqual(optiscalerLine({ allowed: false, installed: off }), {
+    tone: "refused",
+    text: "Not allowed: anti-cheat (DLL injection)",
+  });
+  assert.equal(OPTISCALER_REFUSED, "Not allowed: anti-cheat (DLL injection)");
+  const inst = { installed: true, upscaler_label: "FSR 4", proxy: "dxgi.dll", version: "v0.9.5" };
+  assert.equal(optiscalerLine({ allowed: false, installed: inst }).tone, "refused");
+});
+
+test("optiscaler: installed, update and suspect lines", () => {
+  const inst = { installed: true, upscaler_label: "FSR 4", proxy: "dxgi.dll", version: "v0.9.5" };
+  assert.deepEqual(optiscalerLine({ allowed: true, installed: inst }), {
+    tone: "installed",
+    text: "FSR 4 - as dxgi.dll - v0.9.5",
+  });
+  assert.match(optiscalerLine({ allowed: true, installed: inst, update_available: true, latest: "v0.9.6" }).text, /update: v0\.9\.6/);
+  const crashed = optiscalerLine({ allowed: true, installed: { ...inst, suspect: { kind: "crash" } } });
+  assert.equal(crashed.tone, "suspect");
+  assert.match(crashed.text, /crashed/);
+  assert.equal(optiscalerLine({ allowed: true, installed: { installed: false } }).tone, "off");
 });

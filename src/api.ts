@@ -3024,3 +3024,88 @@ export const forgeSaveRestore = callable<
   [app_id: number, game_name: string, backup_id: string, confirmed: boolean],
   { ok: boolean; error?: string; backup_failed?: boolean; title?: string }
 >("forge_save_restore");
+
+// ---- Forge: OptiScaler per game ----------------------------------------------
+
+export type Upscaler = "fsr4" | "fsr31" | "xess" | "dlss";
+
+export interface OptiScalerRefusal {
+  ok: false;
+  not_allowed: true;
+  reason: "anticheat" | "competitive" | "game_unknown";
+  error: string;
+  detail: string;
+}
+
+export interface OptiScalerInstalled {
+  installed: boolean;
+  version?: string;
+  upscaler?: Upscaler | "";
+  upscaler_label?: string;
+  proxy?: string;
+  exe?: string;
+  installed_at?: number;
+  hash_how?: string;
+  verified?: boolean;
+  suspect?: { at: number; kind: "crash" | "quick" } | null;
+  backups?: number;
+}
+
+export interface OptiScalerStatus {
+  ok: boolean;
+  allowed: boolean;
+  refusal: OptiScalerRefusal | null;
+  installed: OptiScalerInstalled;
+  gpu: { vendor: string; rdna4: boolean; names: string[] };
+  upscalers: { choices: Upscaler[]; default: Upscaler; labels: Record<string, string> };
+  license: string;
+  releases_page: string;
+  latest: string;
+  latest_error?: string;
+  update_available?: boolean;
+}
+
+export interface OptiScalerResult extends Partial<OptiScalerInstalled> {
+  ok: boolean;
+  error?: string;
+  detail?: string;
+  not_allowed?: boolean;
+  hash_changed?: boolean;
+  replaced?: string[];
+  kept?: string[];
+  not_restored?: string[];
+  save_backup?: { ran: boolean; ok: boolean; error: string };
+}
+
+/** check reaches GitHub for the latest release; without it, local only. */
+export const forgeOptiScalerStatus = callable<
+  [app_id: number, game_domain: string, install_dir: string, check: boolean],
+  OptiScalerStatus
+>("forge_optiscaler_status");
+
+/** Install, update or reinstall. Refused with "Not allowed: anti-cheat (DLL
+ * injection)" for any anti-cheat or online-competitive game, no override.
+ * accept_new_hash: only after the user confirmed a changed download. */
+export const forgeOptiScalerInstall = callable<
+  [app_id: number, upscaler: string, game_domain: string, install_dir: string, exe_hint: string, proxy: string, accept_new_hash: boolean],
+  OptiScalerResult
+>("forge_optiscaler_install");
+
+export const forgeOptiScalerSetUpscaler = callable<[app_id: number, upscaler: string], OptiScalerResult>(
+  "forge_optiscaler_set_upscaler"
+);
+
+export const forgeOptiScalerRemove = callable<[app_id: number], OptiScalerResult>("forge_optiscaler_remove");
+
+export const forgeOptiScalerInstalled = callable<[], { ok: boolean; app_ids: number[] }>(
+  "forge_optiscaler_installed"
+);
+
+export const forgeOptiScalerLaunch = callable<[app_id: number], { ok: boolean }>("forge_optiscaler_launch");
+
+export const forgeOptiScalerExit = callable<
+  [app_id: number],
+  { ok: boolean; event?: string; notify?: boolean }
+>("forge_optiscaler_exit");
+
+export const forgeOptiScalerDismiss = callable<[app_id: number], { ok: boolean }>("forge_optiscaler_dismiss");

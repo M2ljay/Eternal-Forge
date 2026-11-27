@@ -313,3 +313,42 @@ export function skipWindowLabel(minutes: number): string {
   if (minutes <= 0) return "Back up before every mod change";
   return `At most one backup per game every ${minutes} min`;
 }
+
+// ---- OptiScaler (game page "Upscaling" entry) --------------------------------
+
+/** Shown in crimson, with no override, for every game OptiScaler is refused
+ * for. Must match py_modules/optiscaler.py REFUSED_TEXT. */
+export const OPTISCALER_REFUSED = "Not allowed: anti-cheat (DLL injection)";
+
+export interface OptiScalerLineInput {
+  allowed: boolean;
+  installed: { installed: boolean; upscaler_label?: string; proxy?: string; version?: string;
+    suspect?: { kind: string } | null };
+  update_available?: boolean;
+  latest?: string;
+}
+
+/** The entry's one line and its tone: "refused" (crimson, no buttons but
+ * Remove if it is somehow in), "suspect" (crimson box, one-press removal),
+ * "installed", or "off". */
+export function optiscalerLine(s: OptiScalerLineInput): { tone: "refused" | "suspect" | "installed" | "off"; text: string } {
+  const inst = s.installed;
+  if (!s.allowed) return { tone: "refused", text: OPTISCALER_REFUSED };
+  if (inst.installed && inst.suspect) {
+    return {
+      tone: "suspect",
+      text:
+        inst.suspect.kind === "crash"
+          ? "The game crashed after OptiScaler was added."
+          : "The game closed within a minute after OptiScaler was added.",
+    };
+  }
+  if (inst.installed) {
+    const parts = [inst.upscaler_label || "Upscaler", `as ${inst.proxy}`];
+    if (inst.version) parts.push(inst.version);
+    let text = parts.join(" - ");
+    if (s.update_available && s.latest) text += ` (update: ${s.latest})`;
+    return { tone: "installed", text };
+  }
+  return { tone: "off", text: "Not installed. Swaps the game's upscaler for FSR 4, FSR 3.1, XeSS or DLSS." };
+}

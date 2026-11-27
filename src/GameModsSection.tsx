@@ -6,9 +6,11 @@
 // takes focus on its own: Play keeps the page's first focus, and the
 // section is reached by pressing up from it.
 import {
+  ButtonItem,
   ConfirmModal,
   DialogButton,
   Focusable,
+  ModalRoot,
   Navigation,
   QuickAccessTab,
   showModal,
@@ -19,8 +21,15 @@ import { useEffect, useRef, useState } from "react";
 import {
   ForgeGuardSummary,
   InstalledMod,
+  OptiScalerResult,
+  OptiScalerStatus,
   SaveBackupStatus,
   forgeGameStatus,
+  forgeOptiScalerDismiss,
+  forgeOptiScalerInstall,
+  forgeOptiScalerRemove,
+  forgeOptiScalerSetUpscaler,
+  forgeOptiScalerStatus,
   forgeSaveBackupStatus,
   forgeGuardDismiss,
   forgeGuardPlan,
@@ -43,6 +52,7 @@ import {
   lockHeadline,
   modSet,
   offerBody,
+  optiscalerLine,
   overrideLabel,
   rowsToShow,
   saveBackupLine,
@@ -56,7 +66,8 @@ import { toggleMod } from "./install";
 import { notifyGameStateChanged, setBrowseGame, setDetailOrigin, setSelectedMod, subscribeGameState } from "./state";
 import { pushFromGamePage } from "./Tabs";
 import { backupBeforeChange, openRestoreSaves, subscribeSaveBackups } from "./SaveBackup";
-import { AMBER, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
+import { AMBER, CRIMSON_TEXT, GREEN, GUNMETAL_RAISED, STEEL_MUTED, WHITE } from "./palette";
+import { noteOptiScaler, subscribeOptiScaler } from "./optiscaler";
 
 // Our own routes (registered in index.tsx).
 const BROWSE_ROUTE = "/nexus-mods";
@@ -443,6 +454,8 @@ export function GameModsSection({ appId }: { appId: number }) {
         </div>
       )}
 
+      <UpscalingEntry appId={appId} game={game} />
+
       {mode === "setup" && !locked && (
         <div style={{ fontSize: "13px" }}>
           Mods are not set up for this game yet. Open the Quick Access Menu, Forge, to set it up.
@@ -489,6 +502,209 @@ export function GameModsSection({ appId }: { appId: number }) {
         )}
         {mode === "setup" && !locked && (
           <Button onClick={() => Navigation.OpenQuickAccessMenu(QuickAccessTab.Decky)}>Set up mods</Button>
+        )}
+      </Focusable>
+    </Focusable>
+  );
+}
+
+// ---- Upscaling (OptiScaler) ---------------------------------------------------
+// One entry in the section, for any game the section shows. Install, update,
+// switch upscaler, try another proxy name, remove. Refused games show the
+// crimson line and nothing else: there is no override for DLL injection.
+
+function UpscalerModal({
+  title,
+  status,
+  current,
+  onPick,
+  closeModal,
+}: {
+  title: string;
+  status: OptiScalerStatus;
+  current?: string;
+  onPick: (u: string) => void;
+  closeModal?: () => void;
+}) {
+  const gpu = status.gpu.names.length ? status.gpu.names.join(", ") : "not detected";
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <div style={{ fontSize: "13px", marginBottom: "8px", color: STEEL_MUTED }}>
+        Graphics card: {gpu}. OptiScaler ({status.license}) is downloaded from its official GitHub release.
+        The game must already offer DLSS, FSR 2/3 or XeSS for OptiScaler to swap it. Forge backs your saves up
+        first when Ludusavi is installed.
+      </div>
+      {status.upscalers.choices.map((u) => (
+        <ButtonItem
+          key={u}
+          layout="below"
+          description={u === status.upscalers.default ? "Recommended for this PC" : undefined}
+          onClick={() => {
+            closeModal?.();
+            onPick(u);
+          }}
+        >
+          {status.upscalers.labels[u] ?? u}
+          {u === current ? " (current)" : ""}
+        </ButtonItem>
+      ))}
+    </ModalRoot>
+  );
+}
+
+const NEXT_PROXY: Record<string, string> = { "dxgi.dll": "winmm.dll", "winmm.dll": "version.dll", "version.dll": "dxgi.dll" };
+
+function UpscalingEntry({ appId, game }: { appId: number; game?: SupportedGame }) {
+  const [st, setSt] = useState<OptiScalerStatus | undefined>();
+  const [busy, setBusy] = useState(false);
+  const seq = useRef(0);
+  const domain = game?.nexusDomain ?? "";
+  const installDir = game?.installDirName ?? "";
+
+  const load = (check: boolean) => {
+    const mine = ++seq.current;
+    forgeOptiScalerStatus(appId, domain, installDir, check)
+      .then((r) => {
+        if (mine !== seq.current || !r?.ok) return;
+        setSt(r);
+        noteOptiScaler(appId, r.installed.installed);
+        // Installed: one look for a newer release, then local only.
+        if (!check && r.installed.installed && r.allowed) load(true);
+      })
+      .catch(() => undefined);
+  };
+
+  useEffect(() => {
+    load(false);
+    const unsub = subscribeOptiScaler((id) => id === appId && load(false));
+    return () => {
+      seq.current++;
+      unsub();
+    };
+  }, [appId]);
+
+  if (!st) return null;
+  const line = optiscalerLine(st);
+  const inst = st.installed;
+
+  const act = async (fn: () => Promise<OptiScalerResult>, done: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fn();
+      if (r.hash_changed) {
+        showModal(
+          <ConfirmModal
+            strTitle="OptiScaler download changed"
+            strDescription={`${r.error ?? ""} Forge pinned the first copy it installed; this one differs.`}
+            strOKButtonText="Install anyway"
+            strCancelButtonText="Cancel"
+            onOK={() => void act(() => install(inst.upscaler || st.upscalers.default, "", true), done)}
+          />
+        );
+      } else if (!r.ok) {
+        toaster.toast({ title: r.not_allowed ? r.error ?? "Not allowed" : "OptiScaler", body: r.detail ?? r.error ?? "" });
+      } else {
+        const saveNote = r.save_backup?.ran && !r.save_backup.ok ? " Save backup failed; the install went ahead." : "";
+        toaster.toast({ title: "OptiScaler", body: done + saveNote });
+      }
+    } catch (e) {
+      toaster.toast({ title: "OptiScaler", body: String(e) });
+    } finally {
+      setBusy(false);
+      load(false);
+    }
+  };
+
+  const install = (upscaler: string, proxy = "", accept = false) =>
+    forgeOptiScalerInstall(appId, upscaler, domain, installDir, game?.processName ?? "", proxy, accept);
+
+  const pickAndInstall = () =>
+    showModal(
+      <UpscalerModal
+        title="Install OptiScaler"
+        status={st}
+        onPick={(u) => void act(() => install(u), "Installed. Pick the game's DLSS / FSR / XeSS option in its settings.")}
+      />
+    );
+  const pickUpscaler = () =>
+    showModal(
+      <UpscalerModal
+        title="Upscaler"
+        status={st}
+        current={inst.upscaler || ""}
+        onPick={(u) => void act(() => forgeOptiScalerSetUpscaler(appId, u), "Upscaler changed.")}
+      />
+    );
+  const remove = () => void act(() => forgeOptiScalerRemove(appId), "Removed; the game's own files are back.");
+  const update = () => void act(() => install(inst.upscaler || st.upscalers.default), "Updated.");
+  const otherName = () =>
+    void act(
+      () => install(inst.upscaler || st.upscalers.default, NEXT_PROXY[inst.proxy ?? ""] ?? "dxgi.dll"),
+      "Reinstalled under another name."
+    );
+  const keep = () => void act(async () => ({ ...(await forgeOptiScalerDismiss(appId)) }), "Kept.");
+
+  const color = line.tone === "refused" || line.tone === "suspect" ? CRIMSON_TEXT : line.tone === "installed" ? GREEN : STEEL_MUTED;
+  return (
+    <Focusable
+      flow-children="column"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        padding: "8px 12px",
+        background: FORGE_GUNMETAL,
+        borderRadius: "6px",
+        border: line.tone === "suspect" ? `2px solid ${FORGE_CRIMSON}` : "2px solid transparent",
+      }}
+    >
+      <div style={{ display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ color: WHITE, fontWeight: 700, fontSize: "13px" }}>Upscaling (OptiScaler)</span>
+        <span style={{ color, fontSize: "12px", fontWeight: line.tone === "refused" ? 700 : 400 }}>{line.text}</span>
+      </div>
+      {line.tone === "refused" && st.refusal?.detail && (
+        <div style={{ fontSize: "12px", color: STEEL_MUTED }}>{st.refusal.detail}</div>
+      )}
+      {line.tone === "suspect" && (
+        <div style={{ fontSize: "12px" }}>Removing it puts the game's own files back. Nothing else changes.</div>
+      )}
+      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {line.tone === "suspect" && (
+          <Button primary disabled={busy} onClick={remove}>
+            Remove OptiScaler
+          </Button>
+        )}
+        {line.tone === "suspect" && (
+          <Button disabled={busy} onClick={keep}>
+            Keep it
+          </Button>
+        )}
+        {line.tone === "off" && (
+          <Button disabled={busy} onClick={pickAndInstall}>
+            Install...
+          </Button>
+        )}
+        {line.tone === "installed" && st.update_available && (
+          <Button primary disabled={busy} onClick={update}>
+            Update to {st.latest}
+          </Button>
+        )}
+        {line.tone === "installed" && (
+          <Button disabled={busy} onClick={pickUpscaler}>
+            Upscaler...
+          </Button>
+        )}
+        {line.tone === "installed" && (
+          <Button disabled={busy} onClick={otherName}>
+            Use {NEXT_PROXY[inst.proxy ?? ""] ?? "dxgi.dll"} instead
+          </Button>
+        )}
+        {inst.installed && line.tone !== "suspect" && (
+          <Button disabled={busy} onClick={remove}>
+            Remove
+          </Button>
         )}
       </Focusable>
     </Focusable>

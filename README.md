@@ -465,6 +465,19 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   which restores only after a confirmation and a fresh backup of the
   current saves. Without Ludusavi, Settings shows one line and nothing else
   changes.
+- **Upscaling (OptiScaler).** An entry in the game page's Mods section that
+  installs [OptiScaler](https://github.com/optiscaler/OptiScaler) (GPL-3.0)
+  for that one game: FSR 4 on an RDNA 4 Radeon, otherwise FSR 3.1, XeSS, or
+  DLSS passed through on NVIDIA. It is downloaded from OptiScaler's official
+  GitHub release when you install (never shipped with Forge), checked
+  against GitHub's SHA-256 digest, and put next to the game's exe as
+  `dxgi.dll` (or `winmm.dll` / `version.dll`); any file it replaces is set
+  aside and put back on removal. No launch options. Saves are backed up
+  first (Ludusavi), and if the game crashes or closes within a minute on
+  the next runs, the game page offers one-press removal. **Refused, with no
+  override**, for every anti-cheat game (including ones you allowed mods
+  for) and for online-competitive games: *Not allowed: anti-cheat (DLL
+  injection)*.
 
 These can be turned off in Settings, under **Game page**. Turning off the
 Modded collection leaves it as it is; **Remove Modded collection** deletes

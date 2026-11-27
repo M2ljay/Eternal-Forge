@@ -346,6 +346,7 @@ ALLOWED_UNGATED = {
         "check_game_file", "check_plugin_masters", "check_updates", "crash_bisect_status",
         "crash_since", "experimental_folder_options", "export_mod_setup", "find_collection",
         "find_experimental_game", "forge_game_status", "forge_guard_plan", "forge_modded_state",
+        "forge_optiscaler_installed", "forge_optiscaler_status",
         "forge_save_backup_list", "forge_save_backup_status", "forge_update_dots", "gb_get_game", "gb_get_mod", "gb_list_mods", "gb_search_games",
         "gb_update_target", "get_auth_status", "get_blamed_folders", "get_collection",
         "get_collection_attention", "get_collection_extras", "get_collection_manifest",
@@ -377,7 +378,7 @@ ALLOWED_UNGATED = {
         "delete_mod_setup", "remove_experimental_framework", "remove_experimental_game",
         "remove_merge_support", "remove_reshade", "remove_vr_repo", "reset_frosty",
         "reset_game_modding", "uninstall_all_mods", "uninstall_collection", "uninstall_frosty_mod",
-        "uninstall_mod", "clear_space_item", "forget_vr_setup",
+        "uninstall_mod", "clear_space_item", "forget_vr_setup", "forge_optiscaler_remove",
     },
     # Plugin state, records and settings: nothing reaches a game's files.
     "bookkeeping": {
@@ -388,6 +389,8 @@ ALLOWED_UNGATED = {
         "forge_register_games", "forge_set_anticheat_override", "forge_set_modded_collection",
         # Ludusavi copies the saves into its own backup folder.
         "forge_save_backup", "forge_save_backup_settings",
+        # OptiScaler's run watch: times in forge.json, no files.
+        "forge_optiscaler_dismiss", "forge_optiscaler_exit", "forge_optiscaler_launch",
         "gb_link_game", "gb_unlink_game", "mark_launch_options_set", "mark_vr_releases_seen",
         "note_update_hold", "record_collection_installed", "refresh_content_gate",
         "register_collection", "release_update_hold", "save_experimental_game", "save_mod_setup",

@@ -1,9 +1,10 @@
 # Forge on the game page
 
 Five features that live on Steam's own library pages rather than in the
-Quick Access Menu, plus save backups through Ludusavi before mod changes. Built on Windows (Decky Loader in Steam Big Picture,
-started by Core), and nothing in them is Windows-only except the crash
-report check.
+Quick Access Menu, plus save backups through Ludusavi before mod changes
+and per-game OptiScaler. Built on Windows (Decky Loader in Steam Big
+Picture, started by Core), and nothing in them is Windows-only except the
+crash report check and OptiScaler's GPU lookup.
 
 | Piece | Frontend | Backend |
 |---|---|---|
@@ -13,10 +14,12 @@ report check.
 | Update dots on tiles | `src/forge.ts` (one stylesheet) | `forge_update_dots`, cache filled by `check_updates` too |
 | Steam collection "Modded" | `src/moddedSync.ts`, rules in `src/moddedCollection.ts` | `forge_note_modded`, `forge_modded_state`, `forge_set_modded_collection`, the `forge_mods_changed` event |
 | Save backups (Ludusavi, optional) | `src/SaveBackup.tsx`, the section's save line | `py_modules/save_backup.py`, `forge_save_*`, `_wrap_save_backups` in `main.py`, the `forge_save_backup` event |
+| Upscaling (OptiScaler) | `UpscalingEntry` in `src/GameModsSection.tsx`, run watch in `src/optiscaler.ts` | `py_modules/optiscaler.py`, `forge_optiscaler_*` and `_wrap_optiscaler_refusal` in `main.py` |
 
 Pure rules are in `src/forgeRules.ts` (tested by `tests/forge.test.mjs`),
 `src/moddedCollection.ts` (tested by `tests/moddedCollection.test.mjs`)
-and `py_modules/forge_guard.py` (tested by `tests/test_forge.py`). The
+`py_modules/forge_guard.py` (tested by `tests/test_forge.py`) and
+`py_modules/optiscaler.py` (tested by `tests/test_optiscaler.py`). The
 save backups are tested by `tests/test_save_backup.py` against a fake
 `ludusavi` that answers like the real one's `--api` mode.
 
@@ -397,3 +400,168 @@ JSON fields come from Ludusavi's documentation and source (v0.31.0), and the
 tests run against a fake that answers the same way. Check on the PC that a
 Steam game's title is found by its id, that a backup appears in Ludusavi's
 folder, and that the restore list matches Ludusavi's own.
+
+## Upscaling (OptiScaler)
+
+An entry in the game page's Mods section, **Upscaling (OptiScaler)**, that
+puts [OptiScaler](https://github.com/optiscaler/OptiScaler) into one game:
+it takes the upscaler a game already offers (DLSS, FSR 2/3 or XeSS) and
+runs another one in its place. Shown wherever the section is (managed games,
+the any-game setup offer, locked games).
+
+### Licence and source
+
+- OptiScaler is **GPL-3.0** (its `LICENSE`, checked 2026-11-26 at upstream
+  `a1e0e19`). Forge is BSD-3-Clause / MIT, so Forge **never ships or vendors
+  OptiScaler**: the user's own PC downloads the official release at install
+  time, the same way a user would by hand. Nothing in
+  `py_modules/optiscaler.py` is taken from OptiScaler's code or from Clarity
+  (GPL-3.0, Windows-native, AMD-only, used as reference only); the module is
+  written from OptiScaler's public docs: the wiki's *Manual Installation*
+  page and the `OptiScaler.ini` shipped with a release.
+- Source of the download: `https://api.github.com/repos/optiscaler/OptiScaler/releases/latest`
+  (the newest non-pre-release release; pre-releases and nightlies are never
+  offered). Only an asset whose URL starts with
+  `https://github.com/optiscaler/OptiScaler/releases/download/` is accepted.
+- Asset: the first asset named `OptiScaler*.7z` (else `*.zip`), skipping
+  debug / symbols / source builds. Releases publish a 7z such as
+  `Optiscaler_0.9.0-final.20260401._AF.7z` (v0.9.0, as named in Decky-Framegen's
+  release notes); latest tags at the time of writing are `v0.9.4` (July) and
+  `v0.9.5` (2026-11-15). The exact asset list of v0.9.5 could not be read
+  from here (GitHub's API was not reachable from the build machine), so the
+  name match is deliberately loose. Unpacked with Forge's usual extractors
+  (`_extract_sync`: 7-Zip / bsdtar).
+
+### Hash
+
+GitHub's API gives every release asset a `digest` (`sha256:<hex>`). When it
+is there the download must match it, or it is deleted and nothing is
+installed (`digest_mismatch`; accepting a change never overrides a published
+digest). When it is not, the first hash Forge sees for that release asset
+(`<tag>/<asset name>`) is pinned in `forge.json` (`optiscaler.pins`); the
+same asset with a different hash later is refused with a warning, and the
+game page asks *Install anyway?* before retrying with `accept_new_hash`
+(re-pinned). The archive is kept in `runtime/optiscaler/<tag>/` (newest
+release only), so reinstalling under another name or upscaler does not
+download again; it is re-hashed every time.
+
+### Anti-cheat: refused, no override
+
+OptiScaler is a DLL loaded into the game's process; to an anti-cheat that is
+injection. `optiscaler.refusal` refuses, with the crimson
+**Not allowed: anti-cheat (DLL injection)** and no override button:
+
+- every game the anti-cheat lock detects (the list, `EXTRA_GAMES`, and the
+  anti-cheat files in the game folder), **including games where the user
+  turned on "Allow mods anyway"**: the override is read as "detected", not
+  "unlocked";
+- the lock's `ONLINE_ONLY` games, and `optiscaler.COMPETITIVE` (Dota 2,
+  Deadlock, Team Fortress 2, Counter-Strike, Counter-Strike: Source): ranked
+  online VAC games the mod list leaves out on purpose. VAC bans injected
+  DLLs (AMD's Anti-Lag+ got Counter-Strike 2 players banned in October 2023);
+- a game Forge cannot identify (fails closed).
+
+`forge_optiscaler_install` and `forge_optiscaler_set_upscaler` are also in
+`_FORGE_GATED` (so `StructuralGateTests` and the Modded events see them), but
+`_wrap_optiscaler_refusal` puts OptiScaler's own check outside the ordinary
+lock so a locked game gets the OptiScaler wording. The refusal comes before
+any download, backup or file work. Removal is never refused.
+
+### Install
+
+In order, each step able to stop it with nothing touched:
+
+1. the refusal above;
+2. the game folder (registered games, then Steam's app manifest) and its exe:
+   the plugin's `processName` when the game is managed, else an Unreal
+   `*-Win64-Shipping.exe`, else the biggest exe that is not a launcher, crash
+   handler, installer or tool, outside `Engine/` and redistributable folders
+   (`optiscaler.pick_exe`); the exe is remembered in the record;
+3. *Close the game first* if it is running;
+4. **DirectX check** from the exe's import table (`reloaded_ii.pe_info`):
+   refused for a 32-bit exe or one that imports only DirectX 8/9 or OpenGL;
+   `d3d12` / `d3d11` / `vulkan-1` are recorded; an exe that imports none
+   (d3d12 loaded at run time, common in Unreal) is allowed;
+5. **GPU check**: `Win32_VideoController` names and PnP ids through
+   PowerShell (`CREATE_NO_WINDOW`, 20 s, cached a day). FSR 4 is offered only
+   for RDNA 4 (Radeon RX 9000 / AI PRO R9000, PCI ids 7550/7551/7590), DLSS
+   only on NVIDIA; FSR 3.1 and XeSS always. Default: FSR 4 on RDNA 4, DLSS on
+   NVIDIA, XeSS on Arc, else FSR 3.1;
+6. download and hash (above), unpack;
+7. a **Ludusavi backup** of the saves (`_saves_backup`, the same switch and
+   skip window as mod installs; a failed backup never stops the install). It
+   is taken here, not by `_wrap_save_backups`, so a refused or failed check
+   backs nothing up;
+8. the files: a previous OptiScaler install of the game is taken out first
+   (update, other upscaler, other name), then every file of the release goes
+   next to the exe, `OptiScaler.dll` renamed to the proxy name, except the
+   shipped `OptiScaler.ini` (Forge writes its own), `setup_windows.bat`,
+   `setup_linux.sh`, the remove scripts and the "extract all files" readme.
+   All or nothing: a failure part way removes what was copied and puts the
+   originals back.
+
+**Proxy name** (`optiscaler.choose_proxy`): `dxgi.dll`, `winmm.dll`,
+`version.dll` in that order (dxgi is OptiScaler's preferred name; the wiki
+also lists d3d12, dbghelp, wininet, winhttp and `.asi`, not offered). The
+first name not present in the exe's folder wins. A ReShade DLL Forge put
+there is never replaced; nor is a file that already has a `.nexusbak`
+beside it (another mod's backup would be lost: the install is refused).
+When all three are taken, the first one that is neither is replaced. The
+game page offers **Use winmm.dll instead** (and so on round) for games that
+do not load the current one.
+
+**Backups**: any game file the install replaces (a `dxgi.dll`, the game's
+own `libxess.dll` or `amd_fidelityfx_dx12.dll`, an older `OptiScaler.ini`)
+is set aside as `<file>.nexusbak`, the files-mode backup every Forge
+install uses, and listed in the record. The record lives in `forge.json`
+under `optiscaler.games.<app id>`: every file with its SHA-256, the backups,
+the folders created, the exe, the proxy, upscaler, version, asset, hash and
+how it was checked.
+
+**Remove** deletes each file only while it still has the hash Forge
+recorded (a file another mod replaced since is left and named), puts every
+`.nexusbak` back where the path is free (`_restore_backups`), and removes the
+folders it created if empty. When something had to be left, the record keeps
+just that, so Remove can be pressed again. The round-trip test compares the
+whole game folder, byte for byte, before install and after removal.
+
+### OptiScaler.ini
+
+A minimal file, CRLF, only the keys Forge sets; every other key takes
+OptiScaler's default (`auto`):
+
+| Choice | `[Upscalers]` Dx11 / Dx12 / Vulkan | `[FSR] UpscalerIndex` |
+|---|---|---|
+| FSR 4 | `fsr31_12` / `fsr31` / `fsr31_12` | `0` (FSR 4) |
+| FSR 3.1 | `fsr31` / `fsr31` / `fsr31` | `1` (FSR 3.1) |
+| XeSS | `xess_12` / `xess` / `xess` | - |
+| DLSS | `dlss` / `dlss` / `dlss` | - |
+
+All three APIs are written because Forge cannot always tell which one a
+game uses. The names are those of the v0.9.x releases (`fsr31`,
+`fsr31_12`). OptiScaler's development branch renamed them `ffx` / `ffx_12`;
+Forge reads the comment above `Dx12Upscaler=` in the release's own shipped
+ini and uses `ffx` names when that is what it documents
+(`optiscaler.upscaler_family`). `[Menu] DisableSplash=true` hides
+OptiScaler's startup splash, its "press Insert" hint; the overlay itself
+stays on Insert. **Upscaler...** on the game page rewrites only the ini.
+
+### Failure safety
+
+`src/optiscaler.ts` sends the start and exit of every run of a game with
+OptiScaler in (any game, managed or not) to the backend. Until the first
+clean run after an install or update, a Windows Error Reporting crash report
+for the exe (`forge_guard.wer_crashed`, the crash guard's check) or a run
+under 60 seconds marks OptiScaler **suspect**: one toast (opens the game
+page) and a crimson box with **Remove OptiScaler** (one press) and **Keep
+it** (stops watching). A clean run ends the watch.
+
+### Not verified on the PC yet
+
+Everything here ran against fake files, a fake release and a fake extractor
+on Linux. On the PC, check: that the real v0.9.5 asset is picked and its
+GitHub digest matches; that the 7z unpacks with the bundled extractor; that
+the game loads OptiScaler under `dxgi.dll` (Insert opens its menu even with
+the splash hidden); that the minimal ini is honoured (the FSR 4 watermark,
+`Fsr4EnableWatermark=true` added by hand, confirms FSR 4); that PowerShell
+reports the GPU name; and that a game crash shows the removal offer.

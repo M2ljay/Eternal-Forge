@@ -39601,8 +39601,616 @@ Plugin.forge_save_backup_list = _forge_save_backup_list
 Plugin.forge_save_restore = _forge_save_restore
 
 
+# ---- Forge: OptiScaler per game (FSR 4 / FSR 3.1 / XeSS / DLSS swapping) -----
+# The game page's "Upscaling (OptiScaler)" entry. OptiScaler (GPL-3.0) is
+# downloaded from its official GitHub release at install time and never
+# shipped with Forge; the archive is checked against GitHub's SHA-256 digest
+# for the asset, or pinned on first install when GitHub gives none. It goes
+# next to the game's exe as a proxy DLL (dxgi / winmm / version.dll): no
+# launch option. Every file it replaces is set aside as .nexusbak and listed
+# in its record, like every files-mode install, and put back on removal.
+# Refused, with no override, for every game the anti-cheat lock knows and for
+# online-competitive games: it is DLL injection. Rules: py_modules/optiscaler.py.
+import optiscaler  # noqa: E402
+
+OPTI_CACHE = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "optiscaler")
+_OPTI_LOCK = threading.Lock()
+_OPTI_RELEASE = {"at": 0.0, "release": None, "error": ""}
+_OPTI_RELEASE_TTL = 6 * 3600
+_OPTI_GPU = {"at": 0.0, "info": None}
+_OPTI_GPU_TTL = 24 * 3600
+# Biggest exe whose import table is read for the DirectX check. Bigger ones
+# are "unknown" (allowed) rather than read whole into memory.
+_OPTI_EXE_READ_MAX = 512 << 20
+_OPTI_WALK_DEPTH = 4
+_OPTI_WALK_MAX = 20000
+
+
+def _opti_fetch_release() -> dict:
+    """The latest (non-pre-release) release of the official repository,
+    from GitHub's API. Assets carry a `digest` ("sha256:...")."""
+    import urllib.request
+    req = urllib.request.Request(optiscaler.LATEST_URL, headers={
+        "User-Agent": "Forge-decky-nexus", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    return data if isinstance(data, dict) else {}
+
+
+def _opti_download(url: str, dest: str) -> str:
+    """Stream url to dest; returns the file's SHA-256 (hex)."""
+    import urllib.request
+    if not url.startswith(optiscaler.DOWNLOAD_PREFIX):
+        raise ValueError("not an official OptiScaler release download")
+    req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_UA})
+    h = hashlib.sha256()
+    tmp = dest + ".part"
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with urllib.request.urlopen(req, timeout=120, context=SSL_CONTEXT) as resp, open(tmp, "wb") as f:
+        while True:
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+            f.write(chunk)
+    os.replace(tmp, dest)
+    return h.hexdigest()
+
+
+def _opti_gpu_rows() -> list:
+    """Win32_VideoController names and PnP ids. [] off Windows or on error."""
+    import subprocess
+    if sys.platform != "win32":
+        return []
+    cmd = ("Get-CimInstance Win32_VideoController | Select-Object Name,PNPDeviceID "
+           "| ConvertTo-Json -Compress")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                             capture_output=True, timeout=20, env=_host_env(), **_NO_WINDOW).stdout
+        data = json.loads(out.decode("utf-8", "replace") or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    rows = data if isinstance(data, list) else [data]
+    return [{"name": r.get("Name") or "", "pnp": r.get("PNPDeviceID") or ""}
+            for r in rows if isinstance(r, dict)]
+
+
+# Replaced by the tests.
+_OPTI_FETCH = _opti_fetch_release
+_OPTI_DOWNLOAD = _opti_download
+_OPTI_GPU_ROWS = _opti_gpu_rows
+_OPTI_EXTRACT = lambda archive, dest: _extract_sync(archive, dest)  # noqa: E731
+
+
+def _opti_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _opti_state(st: dict) -> dict:
+    o = st.get("optiscaler")
+    if not isinstance(o, dict):
+        o = st["optiscaler"] = {}
+    for key in ("games", "pins"):
+        if not isinstance(o.get(key), dict):
+            o[key] = {}
+    return o
+
+
+def _opti_record(app_id: int) -> dict:
+    rec = _opti_state(_forge_state())["games"].get(str(int(app_id or 0)))
+    return rec if isinstance(rec, dict) else {}
+
+
+def _opti_set_record(app_id: int, rec) -> None:
+    with _FORGE_LOCK:
+        st = _forge_state()
+        games = _opti_state(st)["games"]
+        if rec:
+            games[str(int(app_id))] = rec
+        else:
+            games.pop(str(int(app_id)), None)
+        _forge_write(FORGE_STATE, st)
+
+
+def _opti_refusal(app_id: int, game_domain: str = "", install_dir: str = ""):
+    """None when OptiScaler may go into the game, else the refusal. Fails
+    closed. Ignores the per-game "Allow mods anyway" override on purpose."""
+    try:
+        st = _forge_state()
+        app = _forge_resolve_app(st, int(app_id or 0), game_domain or "", install_dir or "")
+        if not app:
+            return optiscaler.refusal({}, 0)
+        try:
+            v = _forge_verdict(app, game_domain or "", install_dir or "", st=st)
+        except Exception as e:  # noqa: BLE001 - the list alone still decides
+            decky.logger.warning(f"forge: optiscaler anti-cheat check for {app} failed: {e}")
+            v = forge_guard.verdict(app, forge_guard.load_catalog(FORGE_CATALOG), {},
+                                    st.get("overrides") or {})
+        return optiscaler.refusal(v, app, forge_guard.ONLINE_ONLY)
+    except Exception as e:  # noqa: BLE001 - an error refuses, never allows
+        decky.logger.warning(f"forge: optiscaler check errored: {e}")
+        return optiscaler.refusal({}, 0)
+
+
+def _opti_gpu() -> dict:
+    now = time.time()
+    if _OPTI_GPU["info"] is None or now - _OPTI_GPU["at"] >= _OPTI_GPU_TTL:
+        try:
+            _OPTI_GPU["info"] = optiscaler.gpu_info(_OPTI_GPU_ROWS())
+        except Exception as e:  # noqa: BLE001 - unknown GPU is an answer
+            decky.logger.info(f"forge: GPU lookup failed: {e}")
+            _OPTI_GPU["info"] = optiscaler.gpu_info([])
+        _OPTI_GPU["at"] = now
+    return _OPTI_GPU["info"]
+
+
+def _opti_release(refresh: bool = False) -> dict:
+    """The latest release (cached six hours). Raises when it cannot be read."""
+    now = time.time()
+    if refresh or _OPTI_RELEASE["release"] is None or now - _OPTI_RELEASE["at"] >= _OPTI_RELEASE_TTL:
+        _OPTI_RELEASE["release"] = _OPTI_FETCH()
+        _OPTI_RELEASE["at"] = now
+    return _OPTI_RELEASE["release"]
+
+
+def _opti_exes(game_dir: str) -> list:
+    """[(rel, size)] of the exes under the game folder, a few levels deep."""
+    out, seen = [], 0
+    root_depth = game_dir.rstrip(os.sep).count(os.sep)
+    for cur, dirs, names in os.walk(game_dir):
+        depth = cur.rstrip(os.sep).count(os.sep) - root_depth
+        if depth >= _OPTI_WALK_DEPTH:
+            dirs[:] = []
+        seen += len(names) + len(dirs)
+        if seen > _OPTI_WALK_MAX:
+            break
+        for n in names:
+            if n.lower().endswith(".exe"):
+                p = os.path.join(cur, n)
+                try:
+                    size = os.path.getsize(p)
+                except OSError:
+                    continue
+                out.append((os.path.relpath(p, game_dir).replace(os.sep, "/"), size))
+    return out
+
+
+def _opti_locate(app_id: int, game_domain: str = "", install_dir: str = "", exe_hint: str = "") -> dict:
+    """{game_dir, exe} (exe relative to game_dir) or {ok: False, error}."""
+    st = _forge_state()
+    app = _forge_resolve_app(st, app_id, game_domain, install_dir)
+    game_dir = _forge_game_dir(st, app, game_domain, install_dir)
+    if not game_dir:
+        return {"ok": False, "error": "Forge couldn't find this game's folder."}
+    rec = _opti_record(app)
+    if rec.get("exe") and os.path.isfile(os.path.join(game_dir, *rec["exe"].split("/"))):
+        return {"ok": True, "app_id": app, "game_dir": game_dir, "exe": rec["exe"]}
+    exe = optiscaler.pick_exe(_opti_exes(game_dir), exe_hint or "")
+    if not exe:
+        return {"ok": False, "error": "Forge couldn't tell which file is the game's exe."}
+    return {"ok": True, "app_id": app, "game_dir": game_dir, "exe": exe}
+
+
+def _opti_api_check(exe_path: str) -> dict:
+    try:
+        if os.path.getsize(exe_path) > _OPTI_EXE_READ_MAX:
+            return optiscaler.graphics_apis(True, [])
+        with open(exe_path, "rb") as f:
+            is64, imports = reloaded_ii.pe_info(f.read())
+    except OSError:
+        return optiscaler.graphics_apis(True, [])
+    return optiscaler.graphics_apis(is64, imports)
+
+
+def _opti_prepare(loc: dict, upscaler: str, accept_new_hash: bool) -> dict:
+    """Checks, download, hash, unpack. {ok, scratch, files, asset, ...} or a
+    refusal. Nothing in the game folder is touched here."""
+    exe_path = os.path.join(loc["game_dir"], *loc["exe"].split("/"))
+    api = _opti_api_check(exe_path)
+    if not api.get("ok"):
+        return {"ok": False, "error": api.get("error"), "api": api}
+    gpu = _opti_gpu()
+    offer = optiscaler.upscaler_choices(gpu)
+    upscaler = upscaler or offer["default"]
+    if upscaler not in offer["choices"]:
+        if upscaler == "fsr4":
+            msg = "FSR 4 needs an RDNA 4 Radeon (RX 9000 series), and Forge didn't find one."
+        elif upscaler == "dlss":
+            msg = "DLSS needs an NVIDIA RTX card, and Forge didn't find one."
+        else:
+            msg = f"Unknown upscaler {upscaler!r}."
+        return {"ok": False, "error": msg}
+    try:
+        release = _opti_release()
+    except Exception as e:  # noqa: BLE001 - offline, rate-limited, GitHub down
+        return {"ok": False, "error": f"Couldn't read OptiScaler's latest release from GitHub: {e}"}
+    asset = optiscaler.pick_asset(release)
+    if not asset:
+        return {"ok": False, "error": "OptiScaler's latest release has no archive Forge recognises. "
+                                      f"See {optiscaler.RELEASES_PAGE}."}
+    tag_dir = os.path.join(OPTI_CACHE, _safe_name(asset["tag"] or "latest"))
+    archive = os.path.join(tag_dir, asset["name"])
+    try:
+        sha = _opti_sha256(archive) if os.path.isfile(archive) else ""
+        if not sha or (asset["sha256"] and sha != asset["sha256"]):
+            sha = _OPTI_DOWNLOAD(asset["url"], archive)
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": f"Couldn't download OptiScaler: {e}"}
+    with _FORGE_LOCK:
+        st = _forge_state()
+        pins = _opti_state(st)["pins"]
+        check = optiscaler.check_hash(pins, asset, sha, bool(accept_new_hash))
+        if check["ok"] and check.get("pin"):
+            pins[check["key"]] = check["pin"]
+            _forge_write(FORGE_STATE, st)
+    if not check["ok"]:
+        if check["how"] == "digest_mismatch":
+            try:
+                os.remove(archive)
+            except OSError:
+                pass
+        decky.logger.warning(f"forge: optiscaler {asset['name']} hash check: {check['how']}")
+        return dict(check, ok=False, sha256=sha)
+    # Only the newest release is kept in the cache.
+    try:
+        for n in os.listdir(OPTI_CACHE):
+            p = os.path.join(OPTI_CACHE, n)
+            if os.path.isdir(p) and p != tag_dir and not n.startswith("unpacked"):
+                _force_rmtree(p)
+    except OSError:
+        pass
+    scratch = os.path.join(OPTI_CACHE, "unpacked")
+    _force_rmtree(scratch)
+    if not _OPTI_EXTRACT(archive, scratch):
+        _force_rmtree(scratch)
+        return {"ok": False, "error": "Couldn't unpack the OptiScaler archive (7-Zip or bsdtar is needed)."}
+    files = []
+    for cur, _dirs, names in os.walk(scratch):
+        for n in names:
+            files.append(os.path.relpath(os.path.join(cur, n), scratch).replace(os.sep, "/"))
+    root = optiscaler.archive_root(files)
+    if root is None:
+        _force_rmtree(scratch)
+        return {"ok": False, "error": "The OptiScaler archive has no OptiScaler.dll."}
+    shipped = ""
+    try:
+        with open(os.path.join(scratch, *optiscaler.rel_join(root, optiscaler.INI_NAME).split("/")),
+                  encoding="utf-8", errors="replace") as f:
+            shipped = f.read()
+    except OSError:
+        pass
+    return {"ok": True, "scratch": scratch, "files": files, "asset": asset, "sha256": sha,
+            "hash_how": check["how"], "upscaler": upscaler, "api": api, "gpu": gpu,
+            "family": optiscaler.upscaler_family(shipped)}
+
+
+def _opti_remove_files(rec: dict) -> dict:
+    """Take an install out: delete the files Forge put in (only while they
+    are still the bytes it put there), put every set-aside original back,
+    remove the folders it created. {removed, kept, restored, not_restored}."""
+    base = rec.get("base") or ""
+    removed, kept = [], []
+    if not base or not os.path.isabs(base) or not os.path.isdir(base):
+        # Never resolve recorded names against the loader's working folder.
+        names = [str((f or {}).get("rel") or "") for f in rec.get("files") or []]
+        return {"removed": [], "kept": names, "restored": [], "not_restored": list(rec.get("backups") or [])}
+    for f in rec.get("files") or []:
+        rel = str((f or {}).get("rel") or "")
+        if not rel or not _safe_rel_path(rel):
+            continue
+        p = os.path.join(base, *rel.split("/"))
+        if not os.path.lexists(p):
+            continue
+        try:
+            same = not f.get("sha256") or _opti_sha256(p) == f["sha256"]
+        except OSError:
+            same = False
+        if not same:
+            kept.append(rel)
+            continue
+        try:
+            os.remove(p)
+            removed.append(rel)
+        except OSError:
+            kept.append(rel)
+    backups = [b for b in rec.get("backups") or [] if _safe_rel_path(b)]
+    _restore_backups(base, backups)
+    restored = [b for b in backups if not os.path.exists(os.path.join(base, *b.split("/")) + ".nexusbak")]
+    not_restored = [b for b in backups if b not in restored]
+    for d in sorted(rec.get("dirs") or [], key=len, reverse=True):
+        if _safe_rel_path(d):
+            try:
+                os.rmdir(os.path.join(base, *d.split("/")))
+            except OSError:
+                pass
+    return {"removed": removed, "kept": kept, "restored": restored, "not_restored": not_restored}
+
+
+def _opti_reshade_dlls(base: str) -> list:
+    """Names of ReShade DLLs Forge put in this folder (never replaced)."""
+    out = []
+    for rec in (_load_settings().get("reshade") or {}).values():
+        if not isinstance(rec, dict) or not rec.get("dll"):
+            continue
+        root = _game_dir(rec.get("install_dir") or "")
+        p = os.path.join(root, *str(rec["dll"]).split("/"))
+        if optiscaler.norm(os.path.dirname(p)) == optiscaler.norm(base):
+            out.append(os.path.basename(p).lower())
+    return out
+
+
+def _opti_place(app_id: int, loc: dict, prep: dict, proxy_req: str) -> dict:
+    """Into the game folder: the previous install (if any) out first, then
+    every release file next to the exe, originals set aside as .nexusbak.
+    All or nothing: a failure part way puts everything back."""
+    game_dir, exe_rel = loc["game_dir"], loc["exe"]
+    exe_dir = "/".join(exe_rel.split("/")[:-1])
+    base = os.path.join(game_dir, *exe_dir.split("/")) if exe_dir else game_dir
+    prev = _opti_record(app_id)
+    if prev:
+        out = _opti_remove_files(prev)
+        if out["kept"] or out["not_restored"]:
+            _opti_set_record(app_id, dict(prev, files=[f for f in prev.get("files") or []
+                                                         if f.get("rel") in out["kept"]],
+                                          backups=out["not_restored"]))
+            return {"ok": False, "error": "The previous OptiScaler files could not all be taken out "
+                                          f"({', '.join((out['kept'] + out['not_restored'])[:4])}). "
+                                          "Close the game and try again."}
+        _opti_set_record(app_id, None)
+        proxy_req = proxy_req or prev.get("proxy") or ""
+    try:
+        present = [n.lower() for n in os.listdir(base)]
+    except OSError as e:
+        return {"ok": False, "error": f"Couldn't read the game folder: {e}"}
+    backed = [n[:-len(".nexusbak")] for n in present if n.endswith(".nexusbak")]
+    pick = optiscaler.choose_proxy(present, _opti_reshade_dlls(base), backed, proxy_req)
+    if pick.get("error"):
+        return {"ok": False, "error": pick["error"]}
+    proxy = pick["name"]
+    plan = optiscaler.plan_files(prep["files"], proxy)
+    ini_text = optiscaler.render_ini(prep["upscaler"], prep["family"], prep["asset"].get("tag", ""))
+    plan_dst = {d.lower() for _s, d in plan} | {optiscaler.INI_NAME.lower()}
+    # Refuse before touching anything when a file to replace already has
+    # someone else's backup beside it: that backup would be lost.
+    for dst in sorted(plan_dst):
+        p = os.path.join(base, *dst.split("/"))
+        if os.path.exists(p) and os.path.exists(p + ".nexusbak"):
+            return {"ok": False, "error": f"{dst} already has a backup from another mod, so Forge "
+                                          "left the game alone."}
+    files, backups, dirs = [], [], []
+
+    def put(dst: str, write) -> None:
+        p = os.path.join(base, *dst.split("/"))
+        parent = os.path.dirname(p)
+        missing = []
+        while not os.path.isdir(parent):
+            missing.append(parent)
+            parent = os.path.dirname(parent)
+        for d in reversed(missing):
+            os.mkdir(d)
+            dirs.append(os.path.relpath(d, base).replace(os.sep, "/"))
+        if os.path.lexists(p):
+            os.replace(p, p + ".nexusbak")
+            backups.append(dst)
+        write(p)
+        files.append({"rel": dst, "sha256": _opti_sha256(p)})
+
+    try:
+        for src, dst in plan:
+            put(dst, lambda p, src=src: shutil.copyfile(os.path.join(prep["scratch"], *src.split("/")), p))
+
+        def write_ini(p):
+            with open(p, "w", encoding="utf-8", newline="") as f:
+                f.write(ini_text)
+        put(optiscaler.INI_NAME, write_ini)
+    except OSError as e:
+        _opti_remove_files({"base": base, "files": files, "backups": backups, "dirs": dirs})
+        return {"ok": False, "error": f"Couldn't copy OptiScaler into the game folder: {e}. "
+                                      "Nothing was left behind."}
+    finally:
+        _force_rmtree(prep["scratch"])
+    rec = {"files": files, "backups": backups, "dirs": dirs, "base": base, "exe": exe_rel,
+           "proxy": proxy, "upscaler": prep["upscaler"], "family": prep["family"],
+           "version": prep["asset"].get("tag", ""), "asset": prep["asset"].get("name", ""),
+           "sha256": prep["sha256"], "hash_how": prep["hash_how"], "installed_at": int(time.time()),
+           "apis": prep["api"].get("apis") or []}
+    _opti_set_record(app_id, rec)
+    decky.logger.info(f"forge: optiscaler {rec['version']} into {app_id} as {proxy} "
+                      f"({len(files)} files, {len(backups)} set aside, {rec['upscaler']}, {rec['hash_how']})")
+    return {"ok": True, **optiscaler.summary(rec), "replaced": backups,
+            "hash_how": prep["hash_how"], "apis": rec["apis"]}
+
+
+async def _forge_optiscaler_status(self, app_id: int, game_domain: str = "", install_dir: str = "",
+                                   check: bool = False) -> dict:
+    """The game page entry: allowed or why not, what is installed, the
+    upscalers this PC can use, and (with check) whether a newer release is
+    out. check is the only path that reaches GitHub."""
+    app_id = int(app_id or 0)
+    refusal = await asyncio.to_thread(_opti_refusal, app_id, game_domain or "", install_dir or "")
+    rec = _opti_record(app_id)
+    gpu = await asyncio.to_thread(_opti_gpu)
+    out = {"ok": True, "allowed": refusal is None, "refusal": refusal,
+           "installed": optiscaler.summary(rec), "gpu": gpu,
+           "upscalers": optiscaler.upscaler_choices(gpu), "license": optiscaler.LICENSE,
+           "releases_page": optiscaler.RELEASES_PAGE, "latest": ""}
+    if check:
+        try:
+            asset = optiscaler.pick_asset(await asyncio.to_thread(_opti_release))
+            out["latest"] = (asset or {}).get("tag", "")
+        except Exception as e:  # noqa: BLE001 - offline is fine here
+            out["latest_error"] = str(e)
+    if rec and out["latest"]:
+        out["update_available"] = (optiscaler.version_of(out["latest"])
+                                   > optiscaler.version_of(rec.get("version") or ""))
+    return out
+
+
+async def _forge_optiscaler_install(self, app_id: int, upscaler: str = "", game_domain: str = "",
+                                    install_dir: str = "", exe_hint: str = "", proxy: str = "",
+                                    accept_new_hash: bool = False) -> dict:
+    """Install, update or reinstall (another upscaler or proxy name)
+    OptiScaler for one game. Order: the strict anti-cheat refusal, the game
+    and its exe, the DirectX and GPU checks, the download and its hash, a
+    Ludusavi backup of the saves, then the files."""
+    app_id = int(app_id or 0)
+    refusal = await asyncio.to_thread(_opti_refusal, app_id, game_domain or "", install_dir or "")
+    if refusal is not None:
+        decky.logger.info(f"forge: optiscaler refused for {app_id} ({refusal.get('reason')})")
+        return refusal
+    if not _OPTI_LOCK.acquire(blocking=False):
+        return {"ok": False, "error": "OptiScaler is already being installed or removed."}
+    try:
+        loc = await asyncio.to_thread(_opti_locate, app_id, game_domain or "", install_dir or "",
+                                      exe_hint or "")
+        if not loc.get("ok"):
+            return loc
+        app_id = loc["app_id"]
+        if await _process_running(os.path.basename(loc["exe"])):
+            return {"ok": False, "error": "Close the game first."}
+        prep = await asyncio.to_thread(_opti_prepare, loc, str(upscaler or ""), bool(accept_new_hash))
+        if not prep.get("ok"):
+            return prep
+        backup = await _saves_backup(app_id, "", "before OptiScaler")
+        try:
+            result = await asyncio.to_thread(_opti_place, app_id, loc, prep, str(proxy or "").lower())
+        finally:
+            _force_rmtree(prep.get("scratch") or "")
+        result["save_backup"] = {"ran": bool(backup.get("ran")), "ok": bool(backup.get("ok")),
+                                 "error": str(backup.get("error") or "")}
+        return result
+    finally:
+        _OPTI_LOCK.release()
+
+
+async def _forge_optiscaler_set_upscaler(self, app_id: int, upscaler: str) -> dict:
+    """Rewrite OptiScaler.ini for another upscaler; no download."""
+    app_id = int(app_id or 0)
+    refusal = await asyncio.to_thread(_opti_refusal, app_id)
+    if refusal is not None:
+        return refusal
+    rec = _opti_record(app_id)
+    if not rec:
+        return {"ok": False, "error": "OptiScaler isn't installed for this game."}
+    offer = optiscaler.upscaler_choices(await asyncio.to_thread(_opti_gpu))
+    if upscaler not in offer["choices"]:
+        return {"ok": False, "error": f"{optiscaler.UPSCALERS.get(upscaler, upscaler)} isn't available on this PC."}
+    text = optiscaler.render_ini(upscaler, rec.get("family") or "fsr31", rec.get("version") or "")
+    p = os.path.join(rec["base"], optiscaler.INI_NAME)
+    try:
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        sha = _opti_sha256(p)
+    except OSError as e:
+        return {"ok": False, "error": f"Couldn't write OptiScaler.ini: {e}"}
+    files = [dict(f, sha256=sha) if f.get("rel") == optiscaler.INI_NAME else f for f in rec.get("files") or []]
+    _opti_set_record(app_id, dict(rec, files=files, upscaler=upscaler))
+    return {"ok": True, **optiscaler.summary(dict(rec, files=files, upscaler=upscaler))}
+
+
+async def _forge_optiscaler_remove(self, app_id: int) -> dict:
+    """Take OptiScaler out and put back every file it replaced. Never
+    refused by the anti-cheat lock (the safe direction)."""
+    app_id = int(app_id or 0)
+    rec = _opti_record(app_id)
+    if not rec:
+        return {"ok": True, "removed": [], "note": "OptiScaler wasn't installed for this game."}
+    if await _process_running(os.path.basename(rec.get("exe") or "")):
+        return {"ok": False, "error": "Close the game first."}
+    if not _OPTI_LOCK.acquire(blocking=False):
+        return {"ok": False, "error": "OptiScaler is already being installed or removed."}
+    try:
+        out = await asyncio.to_thread(_opti_remove_files, rec)
+        if out["kept"] or out["not_restored"]:
+            # Keep what is left on record so a retry can finish it.
+            _opti_set_record(app_id, dict(rec, files=[f for f in rec.get("files") or []
+                                                        if f.get("rel") in out["kept"]],
+                                          backups=out["not_restored"]))
+            decky.logger.warning(f"forge: optiscaler removal for {app_id} left {out}")
+            return {"ok": False, **out,
+                    "error": "Some files were changed by something else since Forge put them in, or are "
+                             f"in use, so they were left: {', '.join((out['kept'] + out['not_restored'])[:4])}."}
+        _opti_set_record(app_id, None)
+        decky.logger.info(f"forge: optiscaler removed from {app_id}: {len(out['removed'])} files, "
+                          f"{len(out['restored'])} originals back")
+        return {"ok": True, **out}
+    finally:
+        _OPTI_LOCK.release()
+
+
+async def _forge_optiscaler_installed(self) -> dict:
+    """App ids with OptiScaler in, for the start/exit watch."""
+    games = _opti_state(_forge_state())["games"]
+    return {"ok": True, "app_ids": sorted(int(k) for k, v in games.items()
+                                          if isinstance(v, dict) and v.get("files") and k.isdigit())}
+
+
+async def _forge_optiscaler_launch(self, app_id: int) -> dict:
+    app_id = int(app_id or 0)
+    rec = _opti_record(app_id)
+    if rec:
+        _opti_set_record(app_id, optiscaler.on_launch(rec, time.time()))
+    return {"ok": True}
+
+
+async def _forge_optiscaler_exit(self, app_id: int) -> dict:
+    """The game stopped: until the first clean run after OptiScaler went
+    in, a Windows crash report or a run under 60 s makes it suspect."""
+    app_id = int(app_id or 0)
+    rec = _opti_record(app_id)
+    if not rec:
+        return {"ok": True, "event": ""}
+    now = time.time()
+
+    def run():
+        started = float(rec.get("session_started") or 0)
+        crash = ""
+        if started and not rec.get("verified"):
+            crash = forge_guard.wer_crashed([os.path.basename(rec.get("exe") or "")], started, now,
+                                            _forge_wer_roots())
+        new, event = optiscaler.on_exit(rec, now, bool(crash))
+        _opti_set_record(app_id, new)
+        return event, crash
+
+    event, crash = await asyncio.to_thread(run)
+    if event:
+        decky.logger.info(f"forge: {app_id} exited with OptiScaler ({event}{', WER ' + crash if crash else ''})")
+    return {"ok": True, "event": event, "notify": event == "suspect"}
+
+
+async def _forge_optiscaler_dismiss(self, app_id: int) -> dict:
+    """"Keep it": the suspicion is dropped and the next run is not watched."""
+    app_id = int(app_id or 0)
+    rec = _opti_record(app_id)
+    if rec:
+        _opti_set_record(app_id, dict({k: v for k, v in rec.items() if k != "suspect"}, verified=True))
+    return {"ok": True}
+
+
+Plugin.forge_optiscaler_status = _forge_optiscaler_status
+Plugin.forge_optiscaler_install = _forge_optiscaler_install
+Plugin.forge_optiscaler_set_upscaler = _forge_optiscaler_set_upscaler
+Plugin.forge_optiscaler_remove = _forge_optiscaler_remove
+Plugin.forge_optiscaler_installed = _forge_optiscaler_installed
+Plugin.forge_optiscaler_launch = _forge_optiscaler_launch
+Plugin.forge_optiscaler_exit = _forge_optiscaler_exit
+Plugin.forge_optiscaler_dismiss = _forge_optiscaler_dismiss
+# Also behind the ordinary mod gate (so the structural test and the Modded
+# collection events see them); the stricter OptiScaler refusal runs inside.
+_FORGE_GATED["forge_optiscaler_install"] = None
+_FORGE_GATED["forge_optiscaler_set_upscaler"] = None
+# They take their own save backup, after the strict refusal and the checks.
+_FORGE_OWN_BACKUP = {"forge_optiscaler_install", "forge_optiscaler_set_upscaler"}
+
+
 def _wrap_save_backups() -> None:
     for name, switch in _FORGE_GATED.items():
+        if name in _FORGE_OWN_BACKUP:
+            continue
         original = getattr(Plugin, name, None)
         if original is None:
             continue
@@ -39669,6 +40277,37 @@ def _wrap_anticheat_lock() -> None:
 _wrap_anticheat_lock()
 
 
+def _wrap_optiscaler_refusal() -> None:
+    """OptiScaler's own refusal outside the ordinary lock, so a locked game
+    gets "Not allowed: anti-cheat (DLL injection)" rather than the mod-lock
+    text, and an overridden one is still refused."""
+    for name in ("forge_optiscaler_install", "forge_optiscaler_set_upscaler"):
+        original = getattr(Plugin, name)
+        sig = inspect.signature(original)
+
+        def make(original, sig):
+            @functools.wraps(original)
+            async def wrapper(self, *args, **kwargs):
+                try:
+                    bound = sig.bind_partial(self, *args, **kwargs).arguments
+                except TypeError:
+                    bound = {}
+                refusal = await asyncio.to_thread(
+                    _opti_refusal, bound.get("app_id") or 0, str(bound.get("game_domain") or ""),
+                    str(bound.get("install_dir") or ""))
+                if refusal is not None:
+                    decky.logger.info(f"forge: optiscaler refused for {bound.get('app_id')} "
+                                      f"({refusal.get('reason')})")
+                    return refusal
+                return await original(self, *args, **kwargs)
+            return wrapper
+
+        setattr(Plugin, name, make(original, sig))
+
+
+_wrap_optiscaler_refusal()
+
+
 # ---- Forge: tell the frontend when a game's mods may have changed ------------
 # The Modded collection follows which games have a mod on. Every call that can
 # put a mod in, switch one, or take one out ends with a "forge_mods_changed"
@@ -39693,6 +40332,7 @@ _FORGE_MOD_CHANGES = tuple(n for n in _FORGE_GATED if n not in (
     "disable_failing_mods",
     "disable_plugins",
     "disable_blocked_plugins",
+    "forge_optiscaler_remove",
 )
 
 
