@@ -87,7 +87,7 @@ import {
   undoOutcome,
   warningSummary,
 } from "./forgeRules";
-import { ABOVE_GRACE_MS, aboveFallbackShown, placements } from "./gamePageAnchor";
+import { ABOVE_GRACE_MS, aboveFallbackShown, placementLog, placements } from "./gamePageAnchor";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
 import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } from "./games";
@@ -324,9 +324,20 @@ export function GameModsSection({ appId, placement }: { appId: number; placement
   return placement === "below" ? <BelowPlay appId={appId} /> : <AbovePlay appId={appId} />;
 }
 
-/** Under Play: registers itself so the line above stays empty. */
+/** Under Play: registers itself so the line above stays empty. Should Steam
+ * draw the play section twice, only the first copy mounted is shown. */
 function BelowPlay({ appId }: { appId: number }) {
-  useEffect(() => placements.mountBelow(appId), [appId]);
+  const [token] = useState(() => ({}));
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const unsub = placements.subscribe(() => rerender((n) => n + 1));
+    const release = placements.mountBelow(appId, token);
+    return () => {
+      release();
+      unsub();
+    };
+  }, [appId, token]);
+  if (!placements.isFirstBelow(appId, token)) return null;
   return <ModsCard appId={appId} placement="below" />;
 }
 
@@ -344,6 +355,7 @@ function AbovePlay({ appId }: { appId: number }) {
     };
   }, [appId]);
   if (!aboveFallbackShown(placements.hasBelow(appId), grace)) return null;
+  placementLog.noteFallback();
   return <ModsCard appId={appId} placement="above" />;
 }
 

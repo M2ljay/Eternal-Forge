@@ -10,12 +10,20 @@ import { readFileSync } from "node:fs";
 
 import {
   ABOVE_GRACE_MS,
+  MAX_CARRIERS,
+  PLAY_SEARCH_DEPTH,
+  PlacementLog,
   PlacementRegistry,
   aboveFallbackShown,
+  collectorOwnsPanel,
   findInsertionChildren,
   findPlaySectionSlot,
+  gameCarriers,
   hasClass,
   insertAfterPlay,
+  isFollowable,
+  locatePlaySection,
+  outlineTree,
   overviewIndex,
   resolveClassModule,
 } from "../.test-build/gamePageAnchor.js";
@@ -155,16 +163,207 @@ test("the line above shows only when nothing is mounted under Play, after the gr
   assert.equal(calls, 4);
 });
 
-test("the patch puts the section under Play and keeps the old anchor only as the one-line fallback", () => {
+test("the patch follows the panel down to Play and keeps the old anchor only as the one-line fallback", () => {
   const src = readFileSync(new URL("../src/gamePagePatch.tsx", import.meta.url), "utf8");
-  assert.match(src, /insertAfterPlay\(\s*ret,/);
+  assert.match(src, /locatePlaySection\(ret, findInReactTree, names\)/);
   assert.match(src, /<GameModsSection appId=\{appId\} placement="below" \/>/);
   assert.match(src, /<GameModsSection appId=\{appId\} placement="above" \/>/);
-  assert.match(src, /belowPlay\(\[\], children\[at\]\)/, "follows the overview panel found by its props");
+  assert.match(src, /follow\(1, children\[at\]\.props\.children\)/, "follows the overview panel found by its props");
+  assert.match(src, /gameCarriers\(ret\)\) follow\(level \+ 1, carrier\)/, "and the components it hands the game to");
   assert.match(src, /findInsertionChildren\(ret, findInReactTree, innerContainer\(\)\)/, "Decky 3/4 InnerContainer lookup kept");
   assert.match(src, /"basicAppDetailsSectionStylerClasses", \["PlaySection"/);
   assert.match(src, /"playSectionClasses", \["PlayBarDetailLabel", "Container"\]/);
+  assert.match(src, /collectorOwnsPanel\(children\)/, "Collector-drawn ROM pages are left alone");
+  assert.match(src, /placementLog\.note\(/, "the path used is logged once");
   const section = readFileSync(new URL("../src/GameModsSection.tsx", import.meta.url), "utf8");
-  assert.match(section, /useEffect\(\(\) => placements\.mountBelow\(appId\), \[appId\]\)/);
+  assert.match(section, /placements\.mountBelow\(appId, token\)/);
+  assert.match(section, /placements\.isFirstBelow\(appId, token\)/);
   assert.match(section, /aboveFallbackShown\(placements\.hasBelow\(appId\), grace\)/);
+  assert.match(section, /placementLog\.noteFallback\(\)/);
+});
+
+// ---- Trees shaped like The Collector's TV evidence -------------------------
+// [FE] gameDetailPatch: replacing AppDetailsOverviewPanel at index 2 with RomM
+// wrapper (cls=_1_cYNJSvS6IXs9vLTEYjy5): InnerContainer's third child is the
+// overview panel's wrapper, with a class, holding the panel element whose props
+// carry overview + details + bFastRender. The panel's component draws Play and
+// the tabs through an inner component (`se`), so Play is one level deeper.
+
+const PANEL_CLS = "_1_cYNJSvS6IXs9vLTEYjy5";
+const PLAY = "PlaySection_x1";
+const overview = { appid: 489830, app_type: 1 };
+const details = { strDisplayName: "Skyrim" };
+
+function Panel() {}
+function Inner() {}
+function PlayBar() {}
+function Tabs() {}
+const memoTabs = { $$typeof: Symbol.for("react.memo"), type: Tabs };
+const provider = { $$typeof: Symbol.for("react.provider"), _context: {} };
+
+function collectorShapedPage() {
+  const panelElement = { type: Panel, props: { overview, details, bFastRender: false } };
+  const wrapper = { type: "div", key: null, props: { className: PANEL_CLS, children: panelElement } };
+  const children = [
+    { type: "div", props: { className: "Header_q" } },
+    { type: "div", props: { className: "Spacer_q" } },
+    wrapper,
+  ];
+  const tree = { props: { children: { type: "div", props: { className: "InnerContainer_abc", children } } } };
+  return { children, tree, panelElement };
+}
+
+// What each component renders (level 1 = the panel).
+function renderOf(element) {
+  if (element.type === Panel) {
+    return { type: provider, props: { value: {}, children: { type: Inner, props: { overview, details } } } };
+  }
+  if (element.type === Inner) {
+    return {
+      type: "div",
+      props: {
+        className: "AppDetailsRoot_q",
+        children: [
+          { type: "div", key: "play", props: { className: `x ${PLAY}`, children: { type: PlayBar, props: { overview } } } },
+          { type: memoTabs, key: "tabs", props: { overview, details } },
+        ],
+      },
+    };
+  }
+  return null;
+}
+
+// The patch's walk, without React: place under Play, else follow the carriers.
+function descend(element, names, level = 1, log = []) {
+  if (level > PLAY_SEARCH_DEPTH) return { log };
+  const ret = renderOf(element);
+  log.push(level);
+  const match = locatePlaySection(ret, find, names);
+  if (match) return { level, match, ret, log };
+  for (const carrier of gameCarriers(ret)) {
+    const found = descend(carrier, names, level + 1, log);
+    if (found.match) return found;
+  }
+  return { log };
+}
+
+test("Collector-shaped tree: the overview panel is found at index 2, by its props, with its class", () => {
+  const { children, tree } = collectorShapedPage();
+  assert.equal(overviewIndex(children), 2);
+  assert.equal(children[2].props.className, PANEL_CLS);
+  assert.equal(findInsertionChildren(tree, find, "InnerContainer_abc"), children, "Decky 3.3.1: by class");
+  assert.equal(findInsertionChildren(tree, find, "stale"), children, "Decky 4.0: by the panel");
+});
+
+test("Collector-shaped tree: Play is not in the panel's own render, it is found one component down", () => {
+  const { panelElement } = collectorShapedPage();
+  assert.equal(locatePlaySection(renderOf(panelElement), find, [PLAY]), undefined, "the level the old patch looked at");
+  const { level, match, ret } = descend(panelElement, [PLAY, "PlayContainer_q"]);
+  assert.equal(level, 2);
+  assert.equal(match.kind, "slot");
+  const section = { type: "forge", key: "forge-mods-below-play" };
+  match.slot.children.splice(match.slot.index, 0, section);
+  assert.deepEqual(ret.props.children.map((c) => c.key), ["play", "forge-mods-below-play", "tabs"], "after Play, before the tabs");
+});
+
+test("Decky 4.0: only the second play class is known, still found one level down", () => {
+  const { panelElement } = collectorShapedPage();
+  const { level } = descend(panelElement, ["stale", PLAY]);
+  assert.equal(level, 2);
+});
+
+test("no known play class: the walk stops within the depth limit and the line above takes over", () => {
+  const { panelElement } = collectorShapedPage();
+  const { match, log } = descend(panelElement, ["stale", undefined]);
+  assert.equal(match, undefined);
+  assert.ok(Math.max(...log) <= PLAY_SEARCH_DEPTH);
+});
+
+test("a component whose own root is the play section: matched as the root (drawn beside it)", () => {
+  const root = { type: "div", props: { className: `${PLAY} sticky`, children: [] } };
+  assert.deepEqual(locatePlaySection(root, find, [PLAY]), { kind: "root" });
+});
+
+test("the outer play class wins over an inner one", () => {
+  const inner = { type: "div", props: { className: "PlayContainer_q" } };
+  const outer = { type: "div", props: { className: PLAY, children: [inner] } };
+  const tree = { type: "div", props: { children: [outer, { type: "div", props: { className: "tabs" } }] } };
+  const match = locatePlaySection(tree, find, [PLAY, "PlayContainer_q"]);
+  assert.equal(match.slot.children, tree.props.children);
+  assert.equal(match.slot.index, 1);
+});
+
+test("only components handed the game are followed, never host elements or contexts", () => {
+  const { panelElement } = collectorShapedPage();
+  const carriers = gameCarriers(renderOf(panelElement));
+  assert.deepEqual(carriers.map((c) => c.type), [Inner]);
+  const inner = gameCarriers(renderOf({ type: Inner }));
+  assert.deepEqual(inner.map((c) => c.type), [PlayBar, memoTabs]);
+  assert.ok(isFollowable({ type: Panel }));
+  assert.ok(isFollowable({ type: memoTabs }));
+  assert.ok(isFollowable({ type: { $$typeof: Symbol.for("react.forward_ref"), render: () => null } }));
+  assert.ok(!isFollowable({ type: "div" }));
+  assert.ok(!isFollowable({ type: provider }));
+  assert.ok(!isFollowable({ type: Symbol.for("react.fragment") }));
+  assert.ok(!isFollowable(null));
+  const many = { type: "div", props: { children: Array.from({ length: 20 }, () => ({ type: Inner, props: { overview } })) } };
+  assert.equal(gameCarriers(many).length, MAX_CARRIERS, "bounded");
+  const cyclic = { type: "div", props: {} };
+  cyclic.props.children = [cyclic];
+  assert.deepEqual(gameCarriers(cyclic), []);
+});
+
+test("The Collector's RomM wrapper is recognised, Steam's own panel is not", () => {
+  const { children } = collectorShapedPage();
+  assert.equal(collectorOwnsPanel(children), false);
+  const romm = [...children];
+  romm.splice(2, 1, { type: "div", key: "romm-play-section", props: { className: PANEL_CLS, "data-romm": "true" } });
+  assert.equal(collectorOwnsPanel(romm), true);
+  assert.equal(overviewIndex(romm), -1, "and nothing is followed there");
+});
+
+test("two copies under Play: only the first mounted is drawn, the next takes over on unmount", () => {
+  const reg = new PlacementRegistry();
+  const a = {};
+  const b = {};
+  const ra = reg.mountBelow(7, a);
+  reg.mountBelow(7, b);
+  assert.ok(reg.isFirstBelow(7, a));
+  assert.ok(!reg.isFirstBelow(7, b));
+  ra();
+  assert.ok(reg.isFirstBelow(7, b));
+  assert.ok(reg.hasBelow(7));
+  assert.ok(!reg.isFirstBelow(8, b));
+});
+
+test("the path used is logged once; the fallback line carries the panel outline", () => {
+  const lines = [];
+  const log = new PlacementLog((m) => lines.push(m));
+  assert.ok(log.note("under Play (level 2)"));
+  assert.ok(!log.note("under Play (level 2)"));
+  const { panelElement } = collectorShapedPage();
+  log.rememberOutline(outlineTree(renderOf(panelElement)));
+  assert.ok(log.noteFallback());
+  assert.ok(!log.noteFallback());
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^Forge game page: Mods row under Play/);
+  assert.match(lines[1], /above the Play bar \(fallback\)/);
+  assert.match(lines[1], /Inner \{overview,details\}/, "outline names the inner component and its props");
+  const throwing = new PlacementLog(() => {
+    throw new Error("no console");
+  });
+  assert.doesNotThrow(() => throwing.note("x"));
+});
+
+test("the outline is bounded and survives odd nodes", () => {
+  const deep = { type: "div", props: {} };
+  let node = deep;
+  for (let i = 0; i < 50; i++) {
+    node.props.children = { type: "div", props: { className: `d${i}` } };
+    node = node.props.children;
+  }
+  assert.ok(outlineTree(deep, 6).length <= 7);
+  const wide = { type: "div", props: { children: Array.from({ length: 200 }, () => ({ type: "span", props: {} })) } };
+  assert.equal(outlineTree(wide, 6, 60).length, 60);
+  assert.deepEqual(outlineTree(null), []);
 });

@@ -431,7 +431,8 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   opens one-line details: the mods with a switch each, Open / Update, Add
   mods, My Mods, saves, Upscaling and Load order; long explanations are
   behind **Why?**. Where Play's section cannot be found it falls back to a
-  single line above Play. Controller only; B from a page opened here
+  single line above Play. Not shown on non-Steam shortcuts, so not on
+  The Collector's ROM pages. Controller only; B from a page opened here
   returns to the game page. Any error leaves Steam's page untouched, and the
   section switches itself off for the session after three.
 - **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,

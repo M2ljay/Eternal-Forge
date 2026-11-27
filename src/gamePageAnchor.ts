@@ -21,6 +21,12 @@ export function overviewIndex(children: any[]): number {
   );
 }
 
+/** True when The Collector (eternal-romm) has replaced the overview panel
+ * with its own wrapper (a RomM shortcut): Forge leaves that page alone. */
+export function collectorOwnsPanel(children: any[]): boolean {
+  return children.some((c: any) => c?.key === "romm-play-section" || c?.props?.["data-romm"] === "true");
+}
+
 /** InnerContainer's children array: by its class when one is known, else as
  * the array that holds the overview panel. Undefined when neither is found. */
 export function findInsertionChildren(
@@ -76,11 +82,12 @@ export function resolveClassModule(ui: any, name: string, keys: string[]): Recor
 // ---- Below the Play bar ----------------------------------------------------
 // InnerContainer holds Steam's header (hero) and the overview panel, and the
 // overview panel draws the Play bar, the stats and the tabs itself. So the
-// section can only sit under Play from inside that panel's own render: the
-// patch follows the panel's component one level further and puts the section
-// right after the play section there. When that render has no play section
-// (an unknown class, a Steam build that draws it one level deeper), the
-// section falls back to a single line above the panel.
+// section can only sit under Play from inside the panel's own renders: the
+// patch follows the panel's component, and the components it hands the game
+// to, until one render holds the play section, and puts the section right
+// after it there. When no render within PLAY_SEARCH_DEPTH levels has one (an
+// unknown class, a Steam build that hides it deeper), the section falls back
+// to a single line above the panel.
 
 /** True when the element carries one of `names` as a whole class. */
 export function hasClass(node: any, names: string[]): boolean {
@@ -110,6 +117,113 @@ export function findPlaySectionSlot(tree: any, find: TreeFinder, classNames: (st
   return at < 0 ? undefined : { children, index: at + 1 };
 }
 
+// ---- Following the overview panel down to its play section -----------------
+// The Collector (eternal-romm) proves the first level on the TV: InnerContainer's
+// children, the overview panel at index 2 recognised by its props
+// (`overview`, `details`, `bFastRender`), with a class of its own. What it
+// replaces wholesale is the panel's component, which draws the Play bar and the
+// tabs through an inner component of its own (`se` in Steam's bundle). So the
+// play section is not in the panel's first render on stable Steam: it is one or
+// more components further down. Forge follows every component in a render that
+// is handed the game (`overview` or `details`), up to PLAY_SEARCH_DEPTH levels,
+// until a render holds the play section.
+
+/** How many component levels below the overview panel are searched. */
+export const PLAY_SEARCH_DEPTH = 4;
+/** How many components one render may hand on (bounds the patching). */
+export const MAX_CARRIERS = 8;
+
+export type PlayMatch =
+  | { kind: "slot"; slot: Slot }
+  /** The render's root element is the play section itself: the caller returns
+   * the root and the section side by side. */
+  | { kind: "root" };
+
+function playNames(classNames: (string | undefined)[]): string[] {
+  return classNames.filter((n): n is string => typeof n === "string" && n.length > 0);
+}
+
+/** The play section in one render, trying `classNames` in order (the first is
+ * the outermost wrapper Steam uses). Undefined when none is in this render. */
+export function locatePlaySection(ret: any, find: TreeFinder, classNames: (string | undefined)[]): PlayMatch | undefined {
+  if (!ret || typeof ret !== "object") return undefined;
+  for (const name of playNames(classNames)) {
+    if (hasClass(ret, [name])) return { kind: "root" };
+    const slot = findPlaySectionSlot(ret, find, [name]);
+    if (slot) return { kind: "slot", slot };
+  }
+  return undefined;
+}
+
+/** A React component element whose type the tree patcher can follow: a
+ * function or class component, a memo or a forwardRef. Host elements
+ * ("div"), fragments and context objects are not. */
+export function isFollowable(node: any): boolean {
+  const type = node?.type;
+  if (typeof type === "function") return true;
+  if (!type || typeof type !== "object") return false;
+  return typeof type.render === "function" || typeof type.type === "function" || typeof type.type === "object";
+}
+
+function isObject(value: unknown): boolean {
+  return typeof value === "object" && value !== null;
+}
+
+/** Components in one render that are handed the game (`overview` or
+ * `details` props), in tree order, at most `limit`. Only `props.children` is
+ * walked, never the props themselves (an overview object is not a tree). */
+export function gameCarriers(tree: any, limit: number = MAX_CARRIERS): any[] {
+  const out: any[] = [];
+  const seen = new Set<any>();
+  const walk = (node: any, depth: number): void => {
+    if (out.length >= limit || depth > 64 || !node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, depth + 1);
+      return;
+    }
+    const props = node.props;
+    if (!props || typeof props !== "object") return;
+    if (isFollowable(node) && (isObject(props.overview) || isObject(props.details))) out.push(node);
+    walk(props.children, depth + 1);
+  };
+  walk(tree, 0);
+  return out;
+}
+
+/** A short outline of a render (type, class, prop names), logged once when
+ * no play section was found, so a TV log shows what Steam drew instead. */
+export function outlineTree(tree: any, maxDepth = 6, maxLines = 60): string[] {
+  const lines: string[] = [];
+  const seen = new Set<any>();
+  const typeName = (node: any): string => {
+    const t = node?.type;
+    if (typeof t === "string") return t;
+    if (typeof t === "function") return t.displayName || t.name || "fn";
+    if (t && typeof t === "object") {
+      const inner = t.render ?? t.type;
+      const name = t.displayName || inner?.displayName || inner?.name;
+      return `${typeof t.render === "function" ? "forwardRef" : t.type ? "memo" : "object"}(${name || "?"})`;
+    }
+    return typeof t === "symbol" ? "fragment" : String(t);
+  };
+  const walk = (node: any, depth: number): void => {
+    if (lines.length >= maxLines || depth > maxDepth || !node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, depth);
+      return;
+    }
+    const props = node.props ?? {};
+    const cls = typeof props.className === "string" && props.className ? ` .${props.className.slice(0, 60)}` : "";
+    const keys = Object.keys(props).filter((k) => k !== "children" && k !== "className").slice(0, 8);
+    lines.push(`${"  ".repeat(depth)}${typeName(node)}${cls}${keys.length ? ` {${keys.join(",")}}` : ""}`);
+    walk(props.children, depth + 1);
+  };
+  walk(tree, 0);
+  return lines;
+}
+
 /** Puts `element` after the play section unless an element with `key` is
  * already in that array. Returns where it went, or -1 when nothing was done. */
 export function insertAfterPlay(tree: any, find: TreeFinder, classNames: (string | undefined)[], element: any, key: string): number {
@@ -131,26 +245,37 @@ export function aboveFallbackShown(belowMounted: boolean, graceElapsed: boolean)
 }
 
 export class PlacementRegistry {
-  private mounted = new Map<number, number>();
+  private mounted = new Map<number, object[]>();
   private listeners = new Set<() => void>();
 
-  /** Registers a copy below Play; call the returned function on unmount. */
-  mountBelow(appId: number): () => void {
-    this.mounted.set(appId, (this.mounted.get(appId) ?? 0) + 1);
+  /** Registers a copy below Play; call the returned function on unmount.
+   * `token` identifies the copy, so only the first one mounted is drawn when
+   * Steam happens to render the play section twice. */
+  mountBelow(appId: number, token: object = {}): () => void {
+    const list = this.mounted.get(appId) ?? [];
+    list.push(token);
+    this.mounted.set(appId, list);
     this.emit();
     let done = false;
     return () => {
       if (done) return;
       done = true;
-      const n = (this.mounted.get(appId) ?? 1) - 1;
-      if (n > 0) this.mounted.set(appId, n);
+      const now = this.mounted.get(appId) ?? [];
+      const at = now.indexOf(token);
+      if (at >= 0) now.splice(at, 1);
+      if (now.length) this.mounted.set(appId, now);
       else this.mounted.delete(appId);
       this.emit();
     };
   }
 
   hasBelow(appId: number): boolean {
-    return (this.mounted.get(appId) ?? 0) > 0;
+    return (this.mounted.get(appId)?.length ?? 0) > 0;
+  }
+
+  /** True when `token` is the first copy below Play still mounted for the game. */
+  isFirstBelow(appId: number, token: object): boolean {
+    return this.mounted.get(appId)?.[0] === token;
   }
 
   subscribe(fn: () => void): () => void {
@@ -168,6 +293,44 @@ export class PlacementRegistry {
     }
   }
 }
+
+/** Says once per session which way the Mods row was placed (the console
+ * line a TV test reads). The fallback line carries an outline of the
+ * overview panel's render, so the log shows what Steam drew instead. */
+export class PlacementLog {
+  private said = new Set<string>();
+  private outline: string[] = [];
+
+  constructor(private readonly out: (message: string) => void = (m) => console.info(m)) {}
+
+  /** Logs `Forge game page: Mods row <path>` the first time `path` is seen;
+   * `detail` is appended but not part of what counts as seen. */
+  note(path: string, detail = ""): boolean {
+    if (this.said.has(path)) return false;
+    this.said.add(path);
+    try {
+      this.out(`Forge game page: Mods row ${path}${detail}`);
+    } catch {
+      // logging must never break the page
+    }
+    return true;
+  }
+
+  /** Keeps the overview panel's render outline for the fallback line. */
+  rememberOutline(lines: string[]): void {
+    if (!this.outline.length && lines.length) this.outline = lines.slice();
+  }
+
+  noteFallback(): boolean {
+    const outline = this.outline.length ? `\n${this.outline.join("\n")}` : "";
+    return this.note(
+      `above the Play bar (fallback): no play section within ${PLAY_SEARCH_DEPTH} levels of the overview panel`,
+      outline
+    );
+  }
+}
+
+export const placementLog = new PlacementLog();
 
 /** The one registry the game page uses (GameModsSection reads and writes it). */
 export const placements = new PlacementRegistry();

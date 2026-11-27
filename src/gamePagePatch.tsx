@@ -3,10 +3,15 @@
 //
 // Where it goes: directly UNDER Steam's Play bar, so the hero is never
 // covered and Play keeps the page's first focus. Steam's overview panel
-// draws the Play bar and the tabs itself, so the patch follows that panel's
-// component one level further and splices the section in after the play
-// section of its render (found by class: basicAppDetailsSectionStylerClasses
-// .PlaySection, else playSectionClasses.Container).
+// draws the Play bar and the tabs itself, through inner components of its
+// own (The Collector's TV logs prove the panel's place: InnerContainer's
+// children, recognised by its props; its inner render is not seen there,
+// because The Collector replaces the whole panel). So the patch follows the
+// panel's component, and every component it hands the game to (`overview` /
+// `details` props), up to PLAY_SEARCH_DEPTH levels, and splices the section
+// in after the play section of the first render that holds it (found by
+// class: basicAppDetailsSectionStylerClasses.PlaySection, else
+// playSectionClasses.Container). The console says once which path was used.
 //
 // The old anchor stays as the fallback: a one-line copy in the app details
 // InnerContainer, right before the overview panel. It renders nothing while
@@ -33,9 +38,15 @@ import { Component, ErrorInfo, ReactNode } from "react";
 
 import { GameModsSection } from "./GameModsSection";
 import {
+  PLAY_SEARCH_DEPTH,
+  collectorOwnsPanel,
   findInsertionChildren,
-  insertAfterPlay,
+  gameCarriers,
+  isFollowable,
+  locatePlaySection,
+  outlineTree,
   overviewIndex,
+  placementLog,
   resolveClassModule,
 } from "./gamePageAnchor";
 import { FailureBudget } from "./forgeRules";
@@ -94,7 +105,6 @@ function innerContainer(): string | undefined {
 
 let playClasses: (string | undefined)[] = [];
 let playLookupDone = false;
-let playMissLogged = false;
 
 // The play section's classes, read once per session. Under Decky 4.0 either
 // can be missing or stale; then nothing matches and the line above is used.
@@ -110,37 +120,75 @@ function playSectionClassNames(): (string | undefined)[] {
   return playClasses;
 }
 
-// The overview panel's own render: put the section after its play section.
-// A render without one is not an error (Steam draws some states without a
-// Play bar); the one-line copy above covers it.
-const belowPlay = createReactTreePatcher(
-  [(wrapper: any) => (wrapper?.props?.children?.props?.overview ? wrapper.props.children : null)],
-  function (this: any, args: any[], ret?: any) {
-    if (unloaded || budget.disabled || !getForgeSetting("gamePage")) return ret;
-    try {
-      const overview = args?.[0]?.overview ?? this?.props?.overview;
-      const appId = Number(overview?.appid) || 0;
-      if (!appId || !isGameType(overview?.app_type)) return ret;
-      const at = insertAfterPlay(
-        ret,
-        findInReactTree,
-        playSectionClassNames(),
+// The game the route is drawing, set by the route patch: the renders followed
+// below only ever place the section for this game, so a component Steam also
+// uses elsewhere never grows a Forge row there.
+let activeAppId = 0;
+
+const levels: Array<(args: unknown[], tree: any) => any> = [];
+
+// Follows `element`'s component (cached per type, one patcher per level) so
+// its render runs onPanelRender. Level 1 is the overview panel itself.
+function follow(level: number, element: any): void {
+  if (level > PLAY_SEARCH_DEPTH || !isFollowable(element)) return;
+  if (!levels[level]) {
+    levels[level] = createReactTreePatcher(
+      [(node: any) => node],
+      function (this: any, args: any[], ret?: any) {
+        return onPanelRender(level, this, args, ret);
+      },
+      `ForgeGameModsBelowPlay${level}`
+    );
+  }
+  levels[level]([], element);
+}
+
+// One render below the overview panel: the section goes right after the play
+// section when this render holds it; otherwise every component here that is
+// handed the game is followed one level further. A render without a play
+// section is not an error (Steam draws some states without a Play bar); the
+// one-line copy above covers it.
+function onPanelRender(level: number, self: any, args: any[], ret: any): any {
+  if (unloaded || budget.disabled || !getForgeSetting("gamePage")) return ret;
+  try {
+    const props = args?.[0] ?? self?.props;
+    const own = Number(props?.overview?.appid) || 0;
+    const appId = own || activeAppId;
+    if (!appId || appId !== activeAppId) return ret;
+    const names = playSectionClassNames();
+    const match = locatePlaySection(ret, findInReactTree, names);
+    if (match) {
+      const section = (
         <ForgeBoundary key={BELOW_KEY}>
           <GameModsSection appId={appId} placement="below" />
-        </ForgeBoundary>,
-        BELOW_KEY
+        </ForgeBoundary>
       );
-      if (at < 0 && !playMissLogged && !findInReactTree(ret, (x: any) => x?.key === BELOW_KEY)) {
-        playMissLogged = true;
-        console.warn("Forge game page: no play section in the overview panel; showing the one-line section above it");
+      if (match.kind === "slot") {
+        if (!match.slot.children.some((c: any) => c?.key === BELOW_KEY)) {
+          match.slot.children.splice(match.slot.index, 0, section);
+        }
+        placementLog.note(`under Play (level ${level} below the overview panel, after the play section)`);
+        return ret;
       }
-    } catch (e) {
-      noteFailure("placing the section under Play", e);
+      // The play section is this component's own root: draw the section
+      // beside it, never inside it (it may be a sticky flex row).
+      placementLog.note(`under Play (level ${level} below the overview panel, beside the play section's render)`);
+      return (
+        <>
+          {ret}
+          {section}
+        </>
+      );
     }
-    return ret;
-  },
-  "ForgeGameModsBelowPlay"
-);
+    if (level === 1) placementLog.rememberOutline(outlineTree(ret));
+    if (level < PLAY_SEARCH_DEPTH) {
+      for (const carrier of gameCarriers(ret)) follow(level + 1, carrier);
+    }
+  } catch (e) {
+    noteFailure(`placing the section under Play (level ${level})`, e);
+  }
+  return ret;
+}
 
 export function registerGamePagePatch(): void {
   if (patch) return;
@@ -179,20 +227,33 @@ export function registerGamePagePatch(): void {
                 appId = Number(own.appid) || appId;
                 appType = own.app_type ?? appType;
               }
-              if (!appId || !isGameType(appType)) return ret;
+              if (!appId || !isGameType(appType)) {
+                activeAppId = 0;
+                return ret;
+              }
               const children = findInsertionChildren(ret, findInReactTree, innerContainer());
               if (!Array.isArray(children)) return ret;
-              if (children.some((c: any) => c?.key === KEY)) return ret;
+              // A RomM shortcut drawn by The Collector: its wrapper replaces
+              // the overview panel, and ROMs rarely have Nexus mods.
+              if (collectorOwnsPanel(children)) {
+                activeAppId = 0;
+                placementLog.note("left out (The Collector draws this page)");
+                return ret;
+              }
+              activeAppId = appId;
               const at = overviewIndex(children);
               if (at < 0) return ret;
-              // Under Play: patch the overview panel's own render (cached per
-              // component type by the tree patcher). Guarded on its own so a
-              // failure there still leaves the line above.
+              // Under Play: follow the overview panel's own render (cached
+              // per component type by the tree patcher), and the components
+              // it hands the game to, down to the play section. Guarded on
+              // its own so a failure there still leaves the line above. Done
+              // on every render: the panel element is new each time.
               try {
-                belowPlay([], children[at]);
+                follow(1, children[at].props.children);
               } catch (e) {
                 noteFailure("following the overview panel", e);
               }
+              if (children.some((c: any) => c?.key === KEY)) return ret;
               // Above: a single line, shown only when the copy under Play is
               // not mounted.
               children.splice(

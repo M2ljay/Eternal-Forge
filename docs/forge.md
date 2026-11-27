@@ -43,28 +43,67 @@ panel. The overview panel is recognised by the props it is rendered with
 The overview panel draws the Play bar, the stats and the tabs itself, so
 anything spliced into `InnerContainer` lands either above Play (over the
 hero) or below every tab. The section goes **directly under the Play bar**
-instead: the patch follows the overview panel's component one level further
-(a second `createReactTreePatcher`, cached per component type) and, in that
-render, splices the section in right after the play section. The play
-section is found by its class, `basicAppDetailsSectionStylerClasses.
-PlaySection`, else `playSectionClasses.Container`, both looked up through
-`resolveClassModule` (whole class names only). So the hero is never
-covered, and Play keeps the page's first focus.
+instead, from inside the panel's own renders.
+
+What is proven on the TV (stable Steam, Decky 3.3.1): The Collector
+(eternal-romm) logs `replacing AppDetailsOverviewPanel at index 2 with RomM
+wrapper (cls=_1_cYNJSvS6IXs9vLTEYjy5)`. So `InnerContainer`'s children hold
+the overview panel's wrapper at index 2, with a class, and the panel element
+under it carries `overview`, `details` and `bFastRender`: the same lookup
+Forge uses (`overviewIndex`, `findInsertionChildren`). The Collector replaces
+that panel wholesale, so its logs say nothing about the panel's inner render.
+Its own notes say the panel draws Play and the tabs through an inner
+component (`se` in Steam's bundle).
+
+anygame.70 followed the panel's component one level and looked for the play
+section in that one render; on the TV it was not there, and the one-line
+fallback showed above Play. From anygame.71 the patch keeps following: in
+each render below the panel that has no play section, every component that
+is handed the game (an `overview` or `details` object prop; function, class,
+memo or forwardRef components only) is followed one level further, up to
+`PLAY_SEARCH_DEPTH` (4) levels and `MAX_CARRIERS` (8) components per render
+(`gameCarriers`, `locatePlaySection` in `src/gamePageAnchor.ts`). Each level
+has its own `createReactTreePatcher`, cached per component type. In the first
+render that holds the play section, the section is spliced in right after
+it; if that render's root element *is* the play section, the section is
+returned beside it in a fragment, never inside it. The play section is found
+by its class, `basicAppDetailsSectionStylerClasses.PlaySection`, else
+`playSectionClasses.Container` (outer one first), both looked up through
+`resolveClassModule` (whole class names only). The followed renders only
+place the section for the game the route is drawing (`activeAppId`), so a
+component Steam also uses elsewhere never grows a row there. Should Steam draw
+the play section twice, only the first copy mounted is shown
+(`PlacementRegistry.isFirstBelow`).
 
 The old anchor stays as the fallback: a copy in `InnerContainer` right before
-the overview panel, which renders **nothing** while the copy under Play is
+the overview panel, which renders **nothing** while a copy under Play is
 mounted (`PlacementRegistry` in `src/gamePageAnchor.ts`). When no copy under
-Play mounts within 600 ms (an unknown or stale class, a Steam build that
-draws the play section one level deeper, a failure in that patch), it shows
-as a **single line** that never expands: A on it opens the game's full Forge
-page instead. The console says once which case it hit (*no play section
-class on this Steam build* / *no play section in the overview panel*).
+Play mounts within 600 ms (an unknown or stale class, a play section deeper
+than four levels, a failure in that patch), it shows as a **single line**
+that never expands: A on it opens the game's full Forge page instead.
 
-**Not verified on a TV yet**: nobody has looked inside the overview panel's
-render on this Steam build (the plugins that add to the game page all put
-their element before the panel). If the play section is drawn one level
-deeper than that render, every page gets the one-line fallback above Play;
-the console line says so.
+The console (CEF DevTools) says once per session which path was used:
+
+- *Forge game page: Mods row under Play (level N below the overview panel,
+  after the play section)*, or *... beside the play section's render*;
+- *Forge game page: Mods row above the Play bar (fallback): no play section
+  within 4 levels of the overview panel*, followed by an outline of the
+  panel's first render (component names, classes, prop names), so the next
+  TV log shows what Steam drew instead;
+- *Forge game page: Mods row left out (The Collector draws this page)*;
+- *no play section class on this Steam build* when neither class resolves.
+
+RomM shortcuts: The Collector replaces the overview panel with its own
+wrapper (key `romm-play-section`, `data-romm="true"`). Forge does not put
+its row there: non-Steam shortcuts were already left alone (`isGameType`),
+and a page whose `InnerContainer` holds The Collector's wrapper is skipped as
+well (`collectorOwnsPanel`), whichever plugin's route patch runs first. ROMs
+rarely have Nexus mods.
+
+**Still to confirm on a TV**: that the play section is within four levels of
+the panel and is handed the game along the way. The depth search is tested
+on fake trees shaped like The Collector's evidence and against @decky/ui's
+real tree patcher, not on Steam's own components.
 
 `InnerContainer` is found by its class from `appDetailsClasses`, looked up
 through `src/gamePageAnchor.ts`: the named `@decky/ui` export, else
