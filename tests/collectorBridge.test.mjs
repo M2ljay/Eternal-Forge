@@ -10,6 +10,14 @@ import {
   FORGE_EXT_ID,
   collectorPageHandled,
   entriesFromPreview,
+  builtinGroup,
+  cheatWarning,
+  countsLine,
+  enabledBuiltins,
+  groupTargets,
+  runSetBuiltin,
+  savesBackedUp,
+  toggleBlock,
   failure,
   fileKind,
   installedNames,
@@ -378,6 +386,9 @@ test("the ROM card: count, updates and one status line", () => {
   const targets = { success: true, emulator: { label: "Dolphin" }, targets: [{ target_id: "t", label: "T" }] };
   assert.deepEqual(romCardSummary({ installed: true, records: [{ id: "a" }, { id: "b" }], updates: 1, targets, bridge: true }), {
     active: 2,
+    patches: 0,
+    cheats: 0,
+    counts: "2 mods",
     updates: 1,
     status: { text: "Updates waiting", tone: "warn" },
   });
@@ -471,4 +482,182 @@ test("install: 'changed' every time gives up after the bounded re-previews", asy
   const r = await runRomInstall(d, gbArgs);
   assert.deepEqual(r, { ok: false, step: "install", reason: "changed", message: "Still changing" });
   assert.equal(calls.filter((c) => c[0] === "install").length, 3);
+});
+
+
+// ---- Mod kinds (Collector win.29) ----------------------------------------------
+
+const KIND_TARGETS = [
+  { target_id: "textures", label: "Texture pack", kind: "files", accepts: "archive_or_folder" },
+  { target_id: "mods", label: "LayeredFS mods", kind: "layeredFs", accepts: "archive_or_folder" },
+  { target_id: "graphic_mods", label: "Graphics mods", kind: "graphicsMods", accepts: "archive_or_folder" },
+  { target_id: "riivolution", label: "Riivolution", kind: "riivolution", accepts: "archive_or_folder" },
+  { target_id: "soft_patch", label: "Soft patch", kind: "files", accepts: "patch" },
+  { target_id: "cheats", label: "Cheat file", kind: "cheatFile", accepts: "cheat_file", file_name: "0004000000055D00.txt" },
+  { target_id: "cheat_codes", label: "Cheat codes", kind: "builtinToggle", accepts: "none" },
+  { target_id: "patches", label: "Patches", kind: "builtinToggle", accepts: "none" },
+  { target_id: "legacy", label: "Old Collector target", accepts: "archive_or_folder" },
+];
+
+test("kinds: Mods, cheat files and toggle lists are grouped apart (a win.28 target counts as Mods)", () => {
+  const g = groupTargets(KIND_TARGETS);
+  assert.deepEqual(g.mods.map((t) => t.target_id), ["textures", "mods", "graphic_mods", "riivolution", "soft_patch", "legacy"]);
+  assert.deepEqual(g.cheatFiles.map((t) => t.target_id), ["cheats"]);
+  assert.deepEqual(g.toggles.map((t) => t.target_id), ["cheat_codes", "patches"]);
+});
+
+test("kinds: files go only where they fit; toggle targets take none", () => {
+  assert.deepEqual(targetsFor(KIND_TARGETS, "cheat").map((t) => t.target_id), ["cheats"]);
+  assert.deepEqual(targetsFor(KIND_TARGETS, "patch").map((t) => t.target_id), ["soft_patch"]);
+  assert.deepEqual(targetsFor(KIND_TARGETS, "folder").map((t) => t.target_id), ["textures", "mods", "graphic_mods", "riivolution", "legacy"]);
+  const zip = targetsFor(KIND_TARGETS, "zip").map((t) => t.target_id);
+  assert.ok(zip.includes("cheats") && zip.includes("soft_patch"));
+  assert.ok(!zip.includes("cheat_codes") && !zip.includes("patches"));
+  assert.equal(fileKind("0004000000055D00.txt"), "cheat");
+  assert.equal(fileKind("SLUS-20946_ABCD1234.pnach"), "cheat");
+  assert.equal(fileKind("Game (USA).cht"), "cheat");
+});
+
+test("kinds: built-in entries split into patches and cheats", () => {
+  assert.equal(builtinGroup("patches", { name: "Infinite health", description: "" }), "patches", "PCSX2's patch list is all patches");
+  assert.equal(builtinGroup("gecko_codes", { name: "16:9 Widescreen", description: "" }), "patches");
+  assert.equal(builtinGroup("gecko_codes", { name: "60 FPS", description: "" }), "patches");
+  assert.equal(builtinGroup("action_replay_codes", { name: "Max Coins", description: "" }), "cheats");
+  assert.equal(builtinGroup("cheat_codes", { name: "Moon Jump", description: "hold L" }), "cheats");
+});
+
+const LIST = (over = {}) => ({
+  success: true,
+  target_id: "gecko_codes",
+  file: "GameSettings/GALE01.ini",
+  editable: true,
+  reason: null,
+  setting: { label: "Enable Cheats", state: "off", can_enable: true },
+  entries: [
+    { entry_id: "ws", name: "Widescreen 16:9", description: "", notes: [], enabled: true, can_toggle: true, origin: "built-in" },
+    { entry_id: "coins", name: "Max Coins", description: "", notes: ["Needs a save"], enabled: false, can_toggle: true, origin: "built-in" },
+    { entry_id: "raw", name: "Unlabelled", description: "", notes: [], enabled: true, can_toggle: false, origin: "user" },
+  ],
+  ...over,
+});
+
+test("the card counts enabled patches and cheats separately", () => {
+  const counts = enabledBuiltins({ gecko_codes: LIST(), patches: { success: false, reason: "unsupported", message: "x" } });
+  assert.deepEqual(counts, { cheats: 1, patches: 1 });
+  assert.equal(countsLine(3, 2, 0), "3 mods · 2 patches");
+  assert.equal(countsLine(1, 1, 1), "1 mod · 1 patch · 1 cheat");
+  assert.equal(countsLine(0, 0, 0), "No mods");
+  const targets = { success: true, emulator: { label: "Dolphin" }, targets: [{ target_id: "gecko_codes", label: "G", kind: "builtinToggle", setting: { label: "Enable Cheats", state: "off", can_enable: true } }] };
+  const sum = romCardSummary({
+    installed: true,
+    records: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "x", kind: "cheatFile" }],
+    updates: 0,
+    targets,
+    bridge: true,
+    builtins: { gecko_codes: LIST() },
+  });
+  assert.equal(sum.counts, "3 mods · 1 patch · 1 cheat", "a cheat file is not a mod");
+  assert.equal(sum.status.text, "Enable Cheats is off", "named because some are on");
+});
+
+test("the card names Enable Cheats only when cheats or patches are on", () => {
+  const targets = { success: true, emulator: { label: "Dolphin" }, targets: [{ target_id: "gecko_codes", label: "G", kind: "builtinToggle", setting: { label: "Enable Cheats", state: "off", can_enable: true } }] };
+  const sum = romCardSummary({ installed: true, records: [], updates: 0, targets, bridge: true, builtins: {} });
+  assert.equal(sum.status.text, "Ready · Dolphin");
+});
+
+test("an emulator The Collector can't mod shows its reason (RPCS3, Xenia, shadPS4, xemu)", () => {
+  const targets = { success: true, emulator: { label: "RPCS3" }, targets: [], note: null, omitted: [{ label: "Game patches", reason: "RPCS3 patches are YAML keyed by PPU hash" }] };
+  assert.equal(romCardSummary({ installed: true, records: [], updates: 0, targets, bridge: true }).status.text, "RPCS3 patches are YAML keyed by PPU hash");
+});
+
+test("read-only entries say why", () => {
+  assert.equal(toggleBlock({ editable: false, reason: "The emulator keeps this list itself" }, { can_toggle: true }), "The emulator keeps this list itself");
+  assert.match(toggleBlock({ editable: true, reason: null }, { can_toggle: false }), /can't be switched/);
+  assert.equal(toggleBlock({ editable: true, reason: null }, { can_toggle: true }), "");
+});
+
+test("the cheat warning claims a backup only when The Collector says so", () => {
+  assert.equal(cheatWarning(true), "Cheats can break saves; your saves are backed up by The Collector.");
+  assert.match(cheatWarning(undefined), /^Cheats can break saves\. Back up/);
+  assert.match(cheatWarning(false), /Back up/);
+  assert.equal(savesBackedUp({ emulator: "dolphin", gameId: "GALE01" }), undefined, "v1 reports nothing");
+  assert.equal(savesBackedUp({ saveSync: { enabled: true } }), true);
+  assert.equal(savesBackedUp({ save_backup: false }), false);
+});
+
+function toggleBridge(answer) {
+  const calls = [];
+  return {
+    calls,
+    bridge: {
+      version: 1,
+      async setBuiltin(appId, targetId, entryId, enabled) {
+        calls.push([appId, targetId, entryId, enabled]);
+        return answer ?? { success: true, file: "x.ini", backup_path: "b", enabled };
+      },
+    },
+  };
+}
+
+test("switching a cheat on asks first; backing out writes nothing", async () => {
+  const { bridge, calls } = toggleBridge();
+  const list = LIST();
+  let asked = 0;
+  const no = await runSetBuiltin(bridge, 1, list, list.entries[1], true, async () => (asked++, false));
+  assert.equal(no.ok, false);
+  assert.equal(no.cancelled, true);
+  assert.equal(calls.length, 0);
+  const yes = await runSetBuiltin(bridge, 1, list, list.entries[1], true, async () => (asked++, true));
+  assert.equal(yes.ok, true);
+  assert.equal(asked, 2);
+  assert.deepEqual(calls, [[1, "gecko_codes", "coins", true]]);
+  assert.equal(yes.needsSetting.label, "Enable Cheats", "the off setting is reported");
+});
+
+test("patches and switching off do not ask", async () => {
+  const { bridge, calls } = toggleBridge();
+  const list = LIST();
+  let asked = 0;
+  const ask = async () => (asked++, true);
+  await runSetBuiltin(bridge, 1, list, list.entries[0], false, ask);
+  await runSetBuiltin(bridge, 1, list, { ...list.entries[0], enabled: false }, true, ask);
+  await runSetBuiltin(bridge, 1, list, { ...list.entries[1], enabled: true }, false, ask);
+  assert.equal(asked, 0);
+  assert.equal(calls.length, 3);
+});
+
+test("read-only entries are refused before The Collector; its refusals come back as is", async () => {
+  const { bridge, calls } = toggleBridge({ success: false, reason: "emulator_running", message: "Close Dolphin first" });
+  const list = LIST();
+  const ro = await runSetBuiltin(bridge, 1, list, list.entries[2], false, async () => true);
+  assert.equal(ro.reason, "not_editable");
+  assert.equal(calls.length, 0);
+  const run = await runSetBuiltin(bridge, 1, list, list.entries[0], false, async () => true);
+  assert.deepEqual(run, { ok: false, reason: "emulator_running", message: "Close Dolphin first" });
+  const old = await runSetBuiltin({ version: 1 }, 1, list, list.entries[0], false, async () => true);
+  assert.equal(old.reason, "unsupported");
+});
+
+test("a cheat file installs like any source: names only, into the cheat target, recorded as cheatFile", async () => {
+  const { bridge, calls } = fakeBridge();
+  const { d, log } = deps(bridge, {
+    async stage(file, source, folder) {
+      log.staged.push([file.path, source, folder]);
+      return { ok: true, entry: "00040000000CB400.txt" };
+    },
+  });
+  const r = await runRomInstall(d, {
+    appId: 7,
+    source: "ctrpf",
+    file: { path: "Cheats/Sonic Lost World (EUR)/00040000000CB400.txt", mod_id: 0, file_id: 0, file_name: "00040000000CB400.txt", name: "Sonic Lost World (EUR)" },
+    target: { target_id: "cheats", label: "Cheat file", kind: "cheatFile" },
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(log.staged[0].slice(0, 2), ["Cheats/Sonic Lost World (EUR)/00040000000CB400.txt", "ctrpf"]);
+  assert.deepEqual(calls.find((c) => c[0] === "listSources"), ["listSources", 7, "cheats"]);
+  assert.equal(calls.find((c) => c[0] === "preview")[2], "00040000000CB400.txt");
+  assert.equal(calls.find((c) => c[0] === "preview")[3], "cheats");
+  assert.equal(log.records[0].kind, "cheatFile");
+  assert.equal(log.records[0].source, "ctrpf");
 });

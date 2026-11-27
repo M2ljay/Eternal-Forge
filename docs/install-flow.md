@@ -133,3 +133,11 @@ are on disk and checked, and nothing replaced is lost. Forge hands The
 Collector only the Downloads entry's name and a target id, never a path, and
 afterwards removes only the Downloads copy it created itself. Details:
 [forge.md](forge.md#installing-runrominstall).
+
+Since anygame.73 the same holds for **cheat files** (Azahar from
+CTRPF-AR-CHEAT-CODES, RetroArch from libretro's cheat database, a PCSX2
+`.pnach` the user saved): Forge saves the file in Downloads under its own
+name, The Collector previews it and writes it as the emulator's cheat file,
+keeping the one it replaces in `romm-mod-backups`. Switching a built-in
+code or patch on or off is The Collector's `setBuiltin`, which backs up the
+settings file it edits; Forge asks before a cheat is switched on.

@@ -8,7 +8,7 @@
 // the user's own files in Downloads. Installing goes through The Collector's
 // preview and install (collectorBridge.runRomInstall); Forge remembers what
 // it installed (py_modules/rom_mods.py) for the card and for updates.
-import { ButtonItem, ConfirmModal, DialogButton, Focusable, ModalRoot, TextField, showModal } from "@decky/ui";
+import { ButtonItem, ConfirmModal, DialogButton, Focusable, ModalRoot, Navigation, TextField, showModal } from "@decky/ui";
 import { toaster } from "@decky/api";
 import { Component, ErrorInfo, ReactNode, useEffect, useRef, useState } from "react";
 
@@ -21,6 +21,9 @@ import {
   RomLinks,
   RomModRecord,
   RomUpdate,
+  RomCheatCandidate,
+  forgeRomCheatSources,
+  forgeRomCheatStage,
   forgeRomForget,
   forgeRomLink,
   forgeRomMods,
@@ -37,6 +40,16 @@ import {
   searchNexusGames,
 } from "./api";
 import {
+  BuiltinEntry,
+  BuiltinsList,
+  ModSettingLike,
+  builtinGroup,
+  cheatWarning,
+  groupTargets,
+  isModKind,
+  runSetBuiltin,
+  savesBackedUp,
+  toggleBlock,
   CollectorModsApi,
   FORGE_CARD_ID,
   FORGE_EXT_ID,
@@ -73,6 +86,8 @@ interface RomState {
   updates: Record<string, RomUpdate>;
   targets?: any;
   links?: RomLinks;
+  /** listBuiltins answers by toggle target id (win.29). */
+  builtins?: Record<string, any>;
 }
 
 const states = new Map<number, RomState>();
@@ -103,7 +118,10 @@ async function refreshRom(appId: number, withUpdates = false): Promise<void> {
   if (b) {
     tasks.push(
       Promise.resolve(b.getTargets(appId))
-        .then((t) => patch(appId, { targets: t }))
+        .then(async (t) => {
+          patch(appId, { targets: t });
+          await refreshBuiltins(appId, t);
+        })
         .catch((e) => patch(appId, { targets: { success: false, reason: "error", message: String(e) } }))
     );
   }
@@ -115,6 +133,29 @@ async function refreshRom(appId: number, withUpdates = false): Promise<void> {
     );
   }
   await Promise.all(tasks);
+}
+
+/** Every built-in toggle list (Gecko / AR codes, PCSX2 patches and cheat
+ * codes, Azahar cheat codes) for the targets answer. */
+async function refreshBuiltins(appId: number, targetsAnswer?: any): Promise<void> {
+  const b = bridge();
+  const t = targetsAnswer ?? states.get(appId)?.targets;
+  if (!b?.listBuiltins || !isOk(t)) {
+    patch(appId, { builtins: {} });
+    return;
+  }
+  const toggles = groupTargets(t.targets ?? []).toggles;
+  const out: Record<string, any> = {};
+  await Promise.all(
+    toggles.map(async (x) => {
+      try {
+        out[x.target_id] = await b.listBuiltins!(appId, x.target_id);
+      } catch (e) {
+        out[x.target_id] = { success: false, reason: "bridge_error", message: String(e) };
+      }
+    })
+  );
+  patch(appId, { builtins: out });
 }
 
 /** The ROM's state. Re-read when The Collector's page switches to another
@@ -167,7 +208,15 @@ function line(text: ReactNode, color: string = FORGE_STEEL) {
 }
 
 function sourceName(s: RomSource): string {
-  return s === "gamebanana" ? "GameBanana" : s === "nexus" ? "Nexus Mods" : "Your file";
+  return s === "gamebanana"
+    ? "GameBanana"
+    : s === "nexus"
+      ? "Nexus Mods"
+      : s === "ctrpf"
+        ? "CTRPF cheat codes"
+        : s === "libretro"
+          ? "libretro cheats"
+          : "Your file";
 }
 
 function refusalModal(title: string, reason: string, message: string): void {
@@ -241,7 +290,10 @@ async function pickTarget(appId: number, fileName: string): Promise<ModTarget | 
     refusalModal("No place for mods", f.reason, f.message);
     return undefined;
   }
-  const fits = targetsFor(t.targets ?? [], fileKind(fileName));
+  // GameBanana / Nexus files go to the Mods folders; a cheat file only to a
+  // cheat-file target.
+  const kind = fileKind(fileName);
+  const fits = targetsFor(t.targets ?? [], kind).filter((x) => (kind === "cheat" ? true : isModKind(x.kind)));
   if (!fits.length) {
     refusalModal(
       "Nowhere to put this file",
@@ -320,12 +372,14 @@ async function installFor(ctx: RomPageContext, args: Omit<RomInstallArgs, "appId
     {
       bridge: b,
       stage: (file: RomModFile, source: RomSource, folder: string) =>
-        forgeRomStage(ctx.appId, source, file.mod_id, file.file_id, file.file_name, file.name, folder, file.domain ?? ""),
+        source === "ctrpf" || source === "libretro"
+          ? forgeRomCheatStage(ctx.appId, source, file.path ?? "", folder)
+          : forgeRomStage(ctx.appId, source, file.mod_id, file.file_id, file.file_name, file.name, folder, file.domain ?? ""),
       unstage: (entry: string, folder: string) => forgeRomUnstage(entry, folder),
       record: (rec) => forgeRomRecord(ctx.appId, rec),
       confirm: confirmPreview,
     },
-    { ...args, appId: ctx.appId, romId: ctx.romId, target: { target_id: t.target_id, label: t.label } }
+    { ...args, appId: ctx.appId, romId: ctx.romId, target: { target_id: t.target_id, label: t.label, kind: String(t.kind ?? "files") } }
   );
   if (res.ok) {
     toaster.toast({
@@ -671,7 +725,11 @@ async function fromDownloads(ctx: RomPageContext): Promise<void> {
     refusalModal("No place for mods", f.reason, f.message);
     return;
   }
-  const all: ModTarget[] = t.targets ?? [];
+  const all: ModTarget[] = groupTargets(t.targets ?? []).mods;
+  if (!all.length) {
+    refusalModal("No mod folder", "", "The emulator this game launches with has no folder for mods.");
+    return;
+  }
   const target =
     all.length === 1
       ? all[0]
@@ -711,13 +769,135 @@ async function fromDownloads(ctx: RomPageContext): Promise<void> {
   await installFor(ctx, { source: "local", entry: pick.name }, pick.name, target);
 }
 
+// ---- Link-outs ----------------------------------------------------------------------
+// The curated places the emulator guides name that have no API: opened in
+// Steam's own browser (controller only, no keyboard). Nothing is fetched.
+
+interface LinkOut {
+  label: string;
+  url: string;
+  note: string;
+}
+
+const MOD_LINKS: Record<string, LinkOut[]> = {
+  dolphin: [
+    { label: "Dolphin forums: Custom Texture Projects", url: "https://forums.dolphin-emu.org/Forum-custom-texture-projects", note: "HD texture packs per game" },
+    { label: "Henriko Magnifico", url: "https://www.patreon.com/henrikomagnifico", note: "HD texture packs (free Patreon account)" },
+  ],
+  pcsx2: [{ label: "PCSX2 HD Textures Project", url: "https://sites.google.com/view/pcsx2-hd-textures-project", note: "Texture packs, linked to GBAtemp threads" }],
+  azahar: [{ label: "Henriko Magnifico", url: "https://www.patreon.com/henrikomagnifico", note: "HD texture packs (free Patreon account)" }],
+};
+
+const CHEAT_LINKS: Record<string, LinkOut[]> = {
+  pcsx2: [{ label: "GameHacking.org: PS2", url: "https://gamehacking.org/system/ps2", note: "Export as .pnach, save it in Downloads, then Cheat file from Downloads" }],
+  azahar: [{ label: "GBAtemp: 60 FPS cheat codes", url: "https://gbatemp.net/search/?q=60+FPS+patches+cheat+codes", note: "Copy codes by hand; the game version matters" }],
+};
+
+function openLink(l: LinkOut): void {
+  try {
+    Navigation.NavigateToExternalWeb(l.url);
+  } catch {
+    toaster.toast({ title: l.label, body: l.url });
+  }
+}
+
+function Links({ links }: { links?: LinkOut[] }) {
+  if (!links?.length) return null;
+  return (
+    <Focusable flow-children="row" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+      {links.map((l) => (
+        <DialogButton key={l.url} onClick={() => openLink(l)} style={{ width: "auto", flex: "0 0 auto" }}>
+          {l.label}
+        </DialogButton>
+      ))}
+    </Focusable>
+  );
+}
+
+// ---- Cheat files ---------------------------------------------------------------------
+
+/** Cheat files Forge can fetch for this ROM (Azahar: CTRPF by Title ID;
+ * RetroArch: libretro by system and name), then the usual preview/install
+ * into the cheat target. */
+async function findCheats(ctx: RomPageContext, emulator: string, gameId: string, target: ModTarget): Promise<void> {
+  const r = await forgeRomCheatSources(emulator, gameId, ctx.platformSlug, ctx.name, String(target.file_name ?? ""));
+  if (!r.ok) {
+    refusalModal("Cheat list unavailable", "", r.error ?? "");
+    return;
+  }
+  const cands: RomCheatCandidate[] = r.candidates ?? [];
+  if (!cands.length) {
+    refusalModal("No cheats found", "", r.note || "No cheat file matched this game.");
+    return;
+  }
+  const pick =
+    cands.length === 1 && r.source === "ctrpf"
+      ? cands[0]
+      : await choose(
+          "Pick the cheat file",
+          cands.map((c) => ({ label: c.label, description: c.region ? `Region ${c.region}` : c.path.split("/").slice(-1)[0], value: c })),
+          r.source === "ctrpf" ? "Matched by this game's Title ID (one per region)." : "Found by your ROM file's name and the usual releases; pick your game's."
+        );
+  if (!pick) return;
+  const fileName = pick.path.split("/").slice(-1)[0];
+  await installFor(
+    ctx,
+    { source: r.source as RomSource, file: { path: pick.path, mod_id: 0, file_id: 0, file_name: fileName, name: pick.label } },
+    fileName,
+    target
+  );
+}
+
+/** The user's own cheat file (.pnach / .txt / .cht or a .zip holding one). */
+async function cheatFromDownloads(ctx: RomPageContext, target: ModTarget): Promise<void> {
+  const b = bridge();
+  if (!b) return;
+  const s = await b.listSources(ctx.appId, target.target_id);
+  if (!isOk(s)) {
+    const f = failure(s);
+    refusalModal("The Collector can't read Downloads", f.reason, f.message);
+    return;
+  }
+  const usable = ((s.entries ?? []) as { name: string; supported?: boolean; size?: number | null }[]).filter((e) => e.supported !== false);
+  if (!usable.length) {
+    refusalModal("No cheat file in Downloads", "", "Save the cheat file (.pnach, .txt, .cht, or a .zip holding one) at the top of your Downloads folder.");
+    return;
+  }
+  const pick = await choose(
+    `Install into ${target.label}`,
+    usable.slice(0, 40).map((e) => ({ label: e.name, description: e.size ? fmtBytes(e.size) : undefined, value: e })),
+    target.file_name ? `The Collector saves it as ${target.file_name}.` : undefined
+  );
+  if (!pick) return;
+  await installFor(ctx, { source: "local", entry: pick.name }, pick.name, target);
+}
+
 // ---- The tab ----------------------------------------------------------------------
+
+function Heading({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
+      <span style={{ width: "3px", height: "18px", background: FORGE_CRIMSON }} />
+      <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE }}>{children}</span>
+    </div>
+  );
+}
 
 function RomModsTab({ ctx }: { ctx: RomPageContext }) {
   const st = useRom(ctx.appId, ctx.romId, true);
   const b = bridge();
   const [busy, setBusy] = useState(false);
+  const [saves, setSaves] = useState<boolean | undefined>();
   const busyRef = useRef(false);
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(b?.getRomInfo?.(ctx.appId))
+      .then((info) => live && setSaves(savesBackedUp(info)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [ctx.appId, ctx.romId]);
   const run = async (fn: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -738,10 +918,146 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
     updates: Object.keys(st.updates).length,
     targets: st.targets,
     bridge: Boolean(b),
+    builtins: st.builtins,
   });
-  const targets: ModTarget[] = isOk(st.targets) ? st.targets.targets ?? [] : [];
-  const can = Boolean(b) && ctx.installed && targets.length > 0;
-  const settingOff = targets.find((t) => t.setting && t.setting.state === "off" && t.setting.can_enable);
+  const answer = isOk(st.targets) ? st.targets : undefined;
+  const targets: ModTarget[] = answer?.targets ?? [];
+  const groups = groupTargets(targets);
+  const emulator = String(answer?.emulator?.id ?? "").toLowerCase();
+  const gameId = String(answer?.game_id ?? "");
+  const can = Boolean(b) && ctx.installed;
+  const canMods = can && groups.mods.length > 0;
+  const modRecords = records.filter((r) => (r.kind ?? "files") !== "cheatFile");
+  const cheatRecords = records.filter((r) => r.kind === "cheatFile");
+  const warning = cheatWarning(saves);
+
+  const confirmCheat = () =>
+    new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (v: boolean) => {
+        if (!done) {
+          done = true;
+          resolve(v);
+        }
+      };
+      showModal(
+        <ConfirmModal
+          strTitle="Turn cheats on?"
+          strDescription={warning}
+          strOKButtonText="Turn on"
+          strCancelButtonText="Cancel"
+          onOK={() => finish(true)}
+          onCancel={() => finish(false)}
+          closeModal={() => finish(false)}
+        />
+      );
+    });
+
+  const enableSetting = (targetId: string, setting: ModSettingLike, cheats: boolean) =>
+    void run(async () => {
+      if (!b?.enableSetting) return;
+      if (cheats && !(await confirmCheat())) return;
+      const go = await new Promise<boolean>((resolve) =>
+        showModal(
+          <ConfirmModal
+            strTitle={`Turn on ${setting.label}?`}
+            strDescription="Close the emulator first. The Collector copies its settings file to the backup folder, then changes that one line."
+            strOKButtonText="Turn on"
+            strCancelButtonText="Cancel"
+            onOK={() => resolve(true)}
+            onCancel={() => resolve(false)}
+            closeModal={() => resolve(false)}
+          />
+        )
+      );
+      if (!go) return;
+      const r = await b.enableSetting(ctx.appId, targetId);
+      if (!isOk(r)) {
+        const f = failure(r);
+        refusalModal("Not turned on", f.reason, f.message);
+      }
+      await refreshRom(ctx.appId);
+    });
+
+  /** The emulator switch a group needs (Load Custom Textures, Enable Cheats). */
+  const SettingLine = ({ targetId, setting, cheats }: { targetId: string; setting?: ModSettingLike | null; cheats: boolean }) => {
+    if (!setting) return null;
+    if (setting.state === "on") return line(`${setting.label}: on`, GREEN);
+    return (
+      <Focusable flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+          {line(
+            setting.state === "off" ? `${setting.label} is off: these won't load until it is on.` : `${setting.label}: can't be read`,
+            AMBER
+          )}
+        </div>
+        {setting.state === "off" && setting.can_enable && b?.enableSetting ? (
+          <DialogButton disabled={busy} onClick={() => enableSetting(targetId, setting, cheats)} style={{ width: "auto", flex: "0 0 auto" }}>
+            Turn on
+          </DialogButton>
+        ) : (
+          setting.state === "off" && <span style={{ color: STEEL_MUTED, fontSize: `${CARD_TEXT.hint}px` }}>turn it on in the emulator</span>
+        )}
+      </Focusable>
+    );
+  };
+
+  const toggle = (list: BuiltinsList, e: BuiltinEntry) =>
+    void run(async () => {
+      if (!b) return;
+      const r = await runSetBuiltin(b, ctx.appId, list, e, !e.enabled, confirmCheat);
+      if (!r.ok) {
+        if (!r.cancelled) refusalModal(r.reason === "changed" ? "The list changed" : "Not switched", r.reason, r.message);
+      } else if (r.needsSetting) {
+        toaster.toast({ title: `${e.name}: on`, body: `${r.needsSetting.label} is off in the emulator; turn it on below.` });
+      }
+      await refreshBuiltins(ctx.appId);
+    });
+
+  /** One group's built-in entries across every toggle list. */
+  const builtinRows = (group: "cheats" | "patches") => {
+    const rows: ReactNode[] = [];
+    for (const t of groups.toggles) {
+      const ans = st.builtins?.[t.target_id];
+      if (!ans) continue;
+      if (!isOk(ans)) {
+        if (group === "cheats") rows.push(<div key={`${t.target_id}-err`}>{line(`${t.label}: ${failure(ans).message}`, STEEL_MUTED)}</div>);
+        continue;
+      }
+      const list = ans as BuiltinsList;
+      const entries = list.entries.filter((e) => builtinGroup(list.target_id, e) === group);
+      if (!entries.length) continue;
+      rows.push(
+        <div key={`${t.target_id}-h`} style={{ color: STEEL_MUTED, fontSize: `${CARD_TEXT.hint}px` }}>
+          {t.label}
+          {list.editable ? "" : ` · read-only: ${list.reason ?? ""}`}
+        </div>
+      );
+      for (const e of entries) {
+        const block = toggleBlock(list, e);
+        rows.push(
+          <Focusable key={`${t.target_id}/${e.entry_id}`} flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "40px" }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+              {line(e.name, WHITE)}
+              {(e.description || e.notes.length > 0) && line([e.description, ...e.notes].filter(Boolean).join(" · "), STEEL_MUTED)}
+              {block && line(block, STEEL_MUTED)}
+            </div>
+            <DialogButton
+              disabled={busy || Boolean(block) || !b?.setBuiltin}
+              onClick={() => toggle(list, e)}
+              style={{ width: "auto", minWidth: "72px", flex: "0 0 auto", color: e.enabled ? WHITE : FORGE_STEEL, background: e.enabled ? FORGE_CRIMSON : undefined }}
+            >
+              {e.enabled ? "On" : "Off"}
+            </DialogButton>
+          </Focusable>
+        );
+      }
+      if (group === "cheats" || list.target_id === "patches") {
+        rows.push(<SettingLine key={`${t.target_id}-s`} targetId={t.target_id} setting={list.setting ?? t.setting} cheats={group === "cheats"} />);
+      }
+    }
+    return rows;
+  };
 
   const remove = (rec: RomModRecord) =>
     showModal(
@@ -750,7 +1066,7 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
         strDescription={
           rec.entries.length
             ? `The Collector moves ${rec.entries.join(", ")} from ${rec.target_label || "the mod folder"} to its backup folder. Nothing is deleted.`
-            : "Forge doesn't know which files this mod added; remove it in The Collector's Mods panel."
+            : "Forge doesn't know which files this mod added; remove it from the list of other files below."
         }
         strOKButtonText="Remove"
         strCancelButtonText="Cancel"
@@ -758,7 +1074,7 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
           void run(async () => {
             if (!b) return;
             const r = await runRomRemove(b, ctx.appId, rec, (id) => forgeRomForget(ctx.appId, id));
-            if (r.ok) toaster.toast({ title: "Mod removed", body: r.backupFolder ? `Backed up to ${r.backupFolder}` : r.message });
+            if (r.ok) toaster.toast({ title: "Removed", body: r.backupFolder ? `Backed up to ${r.backupFolder}` : r.message });
             else refusalModal("Not removed", "", r.message);
             await refreshRom(ctx.appId, true);
           })
@@ -766,17 +1082,17 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
       />
     );
 
-  // What is in the mod folders that Forge did not install (The Collector's
-  // own Mods button is hidden while Forge's tab is registered, so these are
-  // listed here too, with Remove).
+  // Files in the folders Forge did not install (The Collector's own Mods
+  // button is hidden while Forge's tab is registered).
   const owned = new Set(records.flatMap((r) => r.entries.map((e) => `${r.target_id}/${e.toLowerCase()}`)));
-  const others = targets.flatMap((t) =>
-    (t.installed ?? [])
-      .map((e) => e.name)
-      .filter((n) => n && !owned.has(`${t.target_id}/${n.toLowerCase()}`))
-      .slice(0, 20)
-      .map((name) => ({ target: t, name }))
-  );
+  const othersIn = (list: ModTarget[]) =>
+    list.flatMap((t) =>
+      (t.installed ?? [])
+        .map((e) => e.name)
+        .filter((n) => n && !owned.has(`${t.target_id}/${n.toLowerCase()}`))
+        .slice(0, 20)
+        .map((name) => ({ target: t, name }))
+    );
   const removeOther = (t: ModTarget, name: string) =>
     showModal(
       <ConfirmModal
@@ -806,15 +1122,7 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
         ctx,
         {
           source: rec.source,
-          file: {
-            mod_id: rec.mod_id,
-            file_id: u.file.file_id,
-            file_name: u.file.file_name,
-            name: rec.name,
-            version: u.file.version,
-            date: u.file.date,
-            domain: rec.domain,
-          },
+          file: { mod_id: rec.mod_id, file_id: u.file.file_id, file_name: u.file.file_name, name: rec.name, version: u.file.version, date: u.file.date, domain: rec.domain },
           keepEntries: rec.entries,
         },
         u.file.file_name,
@@ -822,63 +1130,72 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
       );
     });
 
+  const recordRow = (rec: RomModRecord) => {
+    const u = st.updates[rec.id];
+    return (
+      <Focusable key={rec.id} flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "40px" }}>
+        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+          {line(rec.name, WHITE)}
+          {line([sourceName(rec.source), rec.target_label, rec.version && `v${rec.version}`].filter(Boolean).join(" · "), STEEL_MUTED)}
+        </div>
+        {u && (rec.source === "gamebanana" || rec.source === "nexus") && (
+          <DialogButton disabled={busy} onClick={() => update(rec, u)} style={{ width: "auto", flex: "0 0 auto" }}>
+            Update{u.current ? ` to ${u.current}` : ""}
+          </DialogButton>
+        )}
+        <DialogButton disabled={busy || !b?.remove} onClick={() => remove(rec)} style={{ width: "auto", flex: "0 0 auto" }}>
+          Remove
+        </DialogButton>
+      </Focusable>
+    );
+  };
+  const otherRow = (o: { target: ModTarget; name: string }) => (
+    <Focusable key={`${o.target.target_id}/${o.name}`} flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "36px" }}>
+      <div style={{ flex: "1 1 auto", minWidth: 0 }}>{line(`${o.name} · ${o.target.label}`, FORGE_STEEL)}</div>
+      <DialogButton disabled={busy || !b?.remove} onClick={() => removeOther(o.target, o.name)} style={{ width: "auto", flex: "0 0 auto" }}>
+        Remove
+      </DialogButton>
+    </Focusable>
+  );
+
+  const cheatRows = builtinRows("cheats");
+  const patchRows = builtinRows("patches");
+  const fetchable = emulator === "azahar" || emulator === "retroarch";
+  const omitted: { label: string; reason: string }[] = answer?.omitted ?? [];
+  const modOthers = othersIn(groups.mods);
+  const cheatOthers = othersIn(groups.cheatFiles);
+
   return (
     <Focusable flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "8px 2px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-        <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE }}>Mods</span>
-        <span style={{ color: FORGE_STEEL }}>{records.length} by Forge</span>
+        <span style={{ color: FORGE_STEEL }}>{summary.counts}</span>
         <UpdatesChip n={summary.updates} />
         <span style={{ flex: "1 1 auto" }} />
         {ctx.platformName && <span style={{ color: STEEL_MUTED, fontSize: `${CARD_TEXT.hint}px` }}>{ctx.platformName}</span>}
       </div>
       {line(summary.status.text, TONE[summary.status.tone])}
-      {targets.length > 0 && line(`Mod folders: ${targets.map((t) => t.label).join(", ")}`, STEEL_MUTED)}
-      {settingOff?.setting && b?.enableSetting && (
-        <Focusable flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {line(`${settingOff.setting.label} is off: mods there won't load.`, AMBER)}
-          <DialogButton
-            style={{ width: "auto", flex: "0 0 auto" }}
-            disabled={busy}
-            onClick={() =>
-              showModal(
-                <ConfirmModal
-                  strTitle={`Turn on ${settingOff.setting?.label}?`}
-                  strDescription="Close the emulator first. The Collector copies its settings file to the backup folder, then changes that one line."
-                  strOKButtonText="Turn on"
-                  onOK={() =>
-                    void run(async () => {
-                      const r = await b.enableSetting!(ctx.appId, settingOff.target_id);
-                      if (!isOk(r)) {
-                        const f = failure(r);
-                        refusalModal("Not turned on", f.reason, f.message);
-                      }
-                      await refreshRom(ctx.appId);
-                    })
-                  }
-                />
-              )
-            }
-          >
-            Turn on
-          </DialogButton>
-        </Focusable>
-      )}
+
+      <Heading>Mods</Heading>
+      {groups.mods.length > 0 && line(`Folders: ${groups.mods.map((t) => t.label).join(", ")}`, STEEL_MUTED)}
+      {groups.mods.map((t) => (
+        <SettingLine key={`${t.target_id}-set`} targetId={t.target_id} setting={t.setting} cheats={false} />
+      ))}
       <Focusable flow-children="row" style={{ display: "flex", gap: "8px" }}>
-        <DialogButton disabled={!can || busy} onClick={() => void run(() => fromGameBanana(ctx))} style={{ flex: "1 1 0" }}>
+        <DialogButton disabled={!canMods || busy} onClick={() => void run(() => fromGameBanana(ctx))} style={{ flex: "1 1 0" }}>
           GameBanana
         </DialogButton>
-        <DialogButton disabled={!can || busy} onClick={() => void run(() => fromNexus(ctx))} style={{ flex: "1 1 0" }}>
+        <DialogButton disabled={!canMods || busy} onClick={() => void run(() => fromNexus(ctx))} style={{ flex: "1 1 0" }}>
           Nexus Mods
         </DialogButton>
-        <DialogButton disabled={!can || busy} onClick={() => void run(() => fromDownloads(ctx))} style={{ flex: "1 1 0" }}>
+        <DialogButton disabled={!canMods || busy} onClick={() => void run(() => fromDownloads(ctx))} style={{ flex: "1 1 0" }}>
           My Downloads
         </DialogButton>
-        {b?.openFolder && targets.length > 0 && (
+        {b?.openFolder && groups.mods.length > 0 && (
           <DialogButton
             disabled={busy}
             onClick={() =>
               void run(async () => {
-                const t = targets.length === 1 ? targets[0] : await choose("Open which folder?", targets.map((x) => ({ label: x.label, value: x })));
+                const t = groups.mods.length === 1 ? groups.mods[0] : await choose("Open which folder?", groups.mods.map((x) => ({ label: x.label, value: x })));
                 if (t) await b.openFolder!(ctx.appId, t.target_id);
               })
             }
@@ -888,41 +1205,46 @@ function RomModsTab({ ctx }: { ctx: RomPageContext }) {
           </DialogButton>
         )}
       </Focusable>
-      {records.length === 0 && line(can ? "No mods installed by Forge yet." : "", STEEL_MUTED)}
-      {records.map((rec) => {
-        const u = st.updates[rec.id];
-        return (
-          <Focusable key={rec.id} flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "40px" }}>
-            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-              {line(rec.name, WHITE)}
-              {line(
-                [sourceName(rec.source), rec.target_label, rec.version && `v${rec.version}`].filter(Boolean).join(" · "),
-                STEEL_MUTED
-              )}
-            </div>
-            {u && rec.source !== "local" && (
-              <DialogButton disabled={busy} onClick={() => update(rec, u)} style={{ width: "auto", flex: "0 0 auto" }}>
-                Update{u.current ? ` to ${u.current}` : ""}
+      {canMods && <Links links={MOD_LINKS[emulator]} />}
+      {modRecords.length === 0 && canMods && line("No mods installed by Forge yet.", STEEL_MUTED)}
+      {modRecords.map(recordRow)}
+      {modOthers.length > 0 && line("Other files in the mod folders", WHITE)}
+      {modOthers.map(otherRow)}
+
+      {(groups.cheatFiles.length > 0 || cheatRows.length > 0 || CHEAT_LINKS[emulator]) && <Heading>Cheats</Heading>}
+      {(groups.cheatFiles.length > 0 || cheatRows.length > 0) && line(warning, AMBER)}
+      {groups.cheatFiles.map((t) => (
+        <Focusable key={t.target_id} flow-children="column" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {line(`${t.label}${t.file_name ? ` · saved as ${t.file_name}` : ""}`, STEEL_MUTED)}
+          <Focusable flow-children="row" style={{ display: "flex", gap: "8px" }}>
+            {fetchable && (
+              <DialogButton disabled={!can || busy} onClick={() => void run(() => findCheats(ctx, emulator, gameId, t))} style={{ flex: "1 1 0" }}>
+                {emulator === "azahar" ? "Find cheats (CTRPF)" : "Find cheats (libretro)"}
               </DialogButton>
             )}
-            <DialogButton disabled={busy || !b?.remove} onClick={() => remove(rec)} style={{ width: "auto", flex: "0 0 auto" }}>
-              Remove
+            <DialogButton disabled={!can || busy} onClick={() => void run(() => cheatFromDownloads(ctx, t))} style={{ flex: "1 1 0" }}>
+              Cheat file from Downloads
             </DialogButton>
           </Focusable>
-        );
-      })}
-      {others.length > 0 && line("Other files in the mod folders", WHITE)}
-      {others.map((o) => (
-        <Focusable key={`${o.target.target_id}/${o.name}`} flow-children="row" style={{ display: "flex", gap: "8px", alignItems: "center", minHeight: "36px" }}>
-          <div style={{ flex: "1 1 auto", minWidth: 0 }}>{line(`${o.name} · ${o.target.label}`, FORGE_STEEL)}</div>
-          <DialogButton disabled={busy || !b?.remove} onClick={() => removeOther(o.target, o.name)} style={{ width: "auto", flex: "0 0 auto" }}>
-            Remove
-          </DialogButton>
+          <SettingLine targetId={t.target_id} setting={t.setting} cheats />
         </Focusable>
       ))}
+      <Links links={CHEAT_LINKS[emulator]} />
+      {cheatRecords.map(recordRow)}
+      {cheatOthers.map(otherRow)}
+      {cheatRows}
+
+      {patchRows.length > 0 && <Heading>Built-in patches</Heading>}
+      {patchRows}
+
+      {omitted.length > 0 && <Heading>Not offered</Heading>}
+      {omitted.map((o) => (
+        <div key={o.label}>{line(`${o.label}: ${o.reason}`, STEEL_MUTED)}</div>
+      ))}
+
       <div style={{ color: STEEL_MUTED, fontSize: `${CARD_TEXT.hint}px` }}>
-        Installs go through The Collector: you see its preview first, and anything replaced or removed is moved to its backup
-        folder.
+        Installs and switches go through The Collector: you see its preview first, and anything replaced, removed or edited is
+        backed up in its backup folder.
       </div>
     </Focusable>
   );
@@ -948,6 +1270,7 @@ function RomModsCard({ ctx }: { ctx: RomPageContext }) {
     updates: Object.keys(st.updates).length,
     targets: st.targets,
     bridge: Boolean(bridge()),
+    builtins: st.builtins,
   });
   // X opens the Mods tab: The Collector's when it offers a way to switch,
   // else the tab's content in a modal.
@@ -984,7 +1307,7 @@ function RomModsCard({ ctx }: { ctx: RomPageContext }) {
     >
       <span style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
         <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE }}>Mods</span>
-        <span style={{ color: FORGE_STEEL }}>{summary.active ? `${summary.active} active` : "No mods"}</span>
+        <span style={{ color: FORGE_STEEL }}>{summary.counts}</span>
         <UpdatesChip n={summary.updates} />
         <span style={{ flex: "1 1 auto" }} />
         <Prompt button="X" label={MODS_TAB_TITLE} />

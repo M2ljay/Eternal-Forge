@@ -451,6 +451,12 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   previews, installs and backs up into the emulator's mod folder. Forge
   tracks what it installed, so updates and the card's count work, and
   removal goes through The Collector's backup.
+  Since anygame.73 the tab is grouped into **Mods**, **Cheats** and
+  **Built-in patches** (widescreen, 60 FPS): cheat files from
+  CTRPF-AR-CHEAT-CODES (Azahar, by Title ID) and libretro's cheat database
+  (RetroArch), your own `.pnach` for PCSX2, built-in codes and patches with
+  On/Off, a warning before cheats go on, link-outs to the curated texture
+  sites, and a card that says *3 mods · 2 patches*.
 - **Anti-cheat lock.** Games with a client-side anti-cheat (Easy Anti-Cheat,
   BattlEye, Vanguard, Ricochet, FACEIT, EA Javelin, GameGuard...) are locked:
   installs and switching mods on are refused by the backend, not just hidden.

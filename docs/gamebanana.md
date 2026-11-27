@@ -157,6 +157,15 @@ and install (`forge_rom_stage`). `.7z` and `.rar` are unpacked into a folder
 first, because The Collector reads only `.zip`. Updates use `update_for`
 against the record Forge keeps for the ROM (`runtime/forge-rom-mods.json`).
 
+### Mod kinds (anygame.73)
+
+GameBanana files for a ROM go only to The Collector's **Mods** targets
+(`files`, `layeredFs`, `graphicsMods`, `riivolution`); a cheat file
+(`.txt`, `.pnach`, `.cht`) only to the `cheats` target. Toggle lists take no
+file. Cheats come from their own sources (see
+[forge.md](forge.md#cheat-sources-py_modulesrom_cheatspy-forge_rom_cheat_)),
+not from GameBanana.
+
 ## Not done / to check on the PC
 
 - The unverified endpoints above, against the live site (sorts, search,

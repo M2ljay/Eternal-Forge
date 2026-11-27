@@ -168,16 +168,22 @@ def auto_pick(ranked: list):
 # itself an installable source.
 
 PATCH_EXTS = (".ips", ".bps", ".ups")
+# Cheat files (The Collector's cheatFile targets): copied as is, renamed by
+# The Collector to the file the emulator reads.
+CHEAT_EXTS = (".txt", ".pnach", ".cht")
 _RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 
 def stage_kind(file_name: str) -> str:
-    """"zip", "patch" or "extract" (any other archive: unpacked to a folder)."""
+    """"zip", "patch", "cheat" or "extract" (any other archive: unpacked to
+    a folder)."""
     ext = os.path.splitext(file_name or "")[1].lower()
     if ext == ".zip":
         return "zip"
     if ext in PATCH_EXTS:
         return "patch"
+    if ext in CHEAT_EXTS:
+        return "cheat"
     return "extract"
 
 
@@ -203,7 +209,7 @@ def stage_entry_name(mod_name: str, file_name: str, taken) -> str:
     kind = stage_kind(file_name)
     stem, ext = os.path.splitext(os.path.basename((file_name or "").replace("\\", "/")))
     base = safe_entry_base(stem or mod_name)
-    ext = ext.lower() if kind in ("zip", "patch") else ""
+    ext = ext.lower() if kind in ("zip", "patch", "cheat") else ""
     lower = {str(t).lower() for t in taken or ()}
     n = 1
     while True:
@@ -229,7 +235,9 @@ def same_folder(a: str, b: str) -> bool:
 # ---- Records ------------------------------------------------------------------
 # One list per ROM app id: what Forge installed through The Collector.
 
-SOURCES = ("gamebanana", "nexus", "local")
+SOURCES = ("gamebanana", "nexus", "local", "ctrpf", "libretro")
+# Sources whose files have no numeric mod id: a record is named by its file.
+FILE_SOURCES = ("local", "ctrpf", "libretro")
 
 
 def make_record(raw: dict, now: float) -> dict:
@@ -252,10 +260,11 @@ def make_record(raw: dict, now: float) -> dict:
         "target_label": str(raw.get("target_label") or "")[:120],
         "entries": entries,
         "rom_id": int(raw.get("rom_id") or 0),
+        "kind": str(raw.get("kind") or "files")[:20],
         "installed_at": int(now),
     }
-    if source == "local":
-        rec["id"] = f"local:{rec['file_name']}:{rec['target_id']}"
+    if source in FILE_SOURCES:
+        rec["id"] = f"{source}:{rec['file_name']}:{rec['target_id']}"
     return rec
 
 
@@ -263,8 +272,11 @@ def upsert(records: list, rec: dict) -> list:
     """The list with `rec` in place of any record of the same mod and target
     (an update replaces the old file's record)."""
     def same(r):
+        # A cheat-file target holds ONE file: a new one replaces any record there.
+        if rec.get("kind") == "cheatFile" and r.get("target_id") == rec["target_id"]:
+            return True
         return (r.get("source") == rec["source"] and r.get("target_id") == rec["target_id"]
-                and (r.get("mod_id") == rec["mod_id"] if rec["source"] != "local" else r.get("id") == rec["id"]))
+                and (r.get("mod_id") == rec["mod_id"] if rec["source"] not in FILE_SOURCES else r.get("id") == rec["id"]))
     return [r for r in records if not same(r)] + [rec]
 
 

@@ -193,12 +193,78 @@ calls The Collector's `remove` per entry (moved to `romm-mod-backups`, never
 deleted) and forgets the record once all went. A record with no known
 entries is not removed (Forge never removes a whole folder for it).
 
-### RetroArch cheats
+### Mod kinds: Mods, Cheats, Built-in patches (anygame.73, Collector win.29)
 
-Not done: The Collector's bridge has no cheat target (cheats are a
-per-core `.cht` file plus a RetroArch setting, not a mod folder). Next step:
-a `cheats` target in The Collector, which Forge's tab would list like any
-other.
+The Collector's targets carry a `kind` since win.29 (a win.28 target without
+one counts as `files`). Forge's ROM tab groups them
+(`groupTargets` / `builtinGroup` in `src/collectorBridge.ts`):
+
+| Group | Target kinds | What Forge shows |
+|---|---|---|
+| **Mods** | `files` (texture packs, RetroArch soft patch), `layeredFs` (Azahar `load/mods/<TitleID>`), `graphicsMods` (Dolphin GraphicMods, Cemu graphic packs), `riivolution` (Dolphin, Wii) | GameBanana, Nexus Mods, My Downloads, Open folder, the curated link-outs, Forge's installs (Update / Remove), other files (Remove), and each folder's emulator setting (*Load Custom Textures is off* + **Turn on**) |
+| **Cheats** | `cheatFile` (Azahar `cheats/<TitleID>.txt`, PCSX2 `cheats/<SERIAL>_<CRC>.pnach`, RetroArch `cheats/<core>/<stem>.cht`), plus the cheat entries of the `builtinToggle` lists | The cheat warning, **Find cheats** (Azahar, RetroArch), **Cheat file from Downloads**, the link-outs, the installed cheat file (Remove), every cheat entry with **On / Off**, and *Enable Cheats* with **Turn on** |
+| **Built-in patches** | the patch entries of `builtinToggle` lists: PCSX2's whole `patches` list, and Gecko / AR / cheat-code entries whose name says widescreen, 16:9, aspect, 60 FPS, frame rate, deinterlace, resolution, bloom, blur or fog | Each with **On / Off**, its description and notes |
+
+**Switches.** `listBuiltins` is read for every `builtinToggle` target
+(`gecko_codes`, `action_replay_codes`, `patches`, `cheat_codes`); each entry
+shows its name, description and notes. When `can_toggle` is false, or the
+list is not `editable`, the switch is disabled and the reason is shown
+(`toggleBlock`). **On / Off** calls `setBuiltin`; a `changed` answer is shown
+and the list is read again; `emulator_running` and the rest come back in The
+Collector's words (`runSetBuiltin`). When the list's setting (Enable Cheats)
+is off, turning an entry on says so and offers **Turn on**.
+
+**Cheat warning.** Turning a **cheat** on (an entry, a cheat file's Enable
+Cheats) asks first: *"Cheats can break saves; your saves are backed up by
+The Collector"* only when The Collector reports a save backup for that ROM.
+The v1 bridge reports none (no field in `getRomInfo`), so today the warning
+says *"Cheats can break saves. Back up this game's saves before turning
+cheats on"*. `savesBackedUp` reads `saveBackup` / `saveSync` (a boolean or
+`{enabled}`) if a later Collector adds one. Patches and switching off do
+not ask.
+
+**Card.** *3 mods · 2 patches · 1 cheat*: Forge-installed mods (a cheat
+file is not a mod), enabled built-in patches, enabled cheats
+(`countsLine`). Enable Cheats is named on the card only when some cheat or
+patch is on.
+
+**Emulators with nothing to install** (RPCS3, Xenia Canary, shadPS4, xemu):
+The Collector answers no targets and `omitted` reasons; the tab lists them
+under *Not offered* and offers no installs, and the card shows the first
+reason.
+
+### Cheat sources (`py_modules/rom_cheats.py`, `forge_rom_cheat_*`)
+
+| Emulator | Source | Matching | Notes |
+|---|---|---|---|
+| Azahar (3DS) | GitHub [JourneyOver/CTRPF-AR-CHEAT-CODES](https://github.com/JourneyOver/CTRPF-AR-CHEAT-CODES), `Cheats/<Game> (<REGION>)/<TitleID>.txt` | By the Title ID The Collector read from the game file (`game_id`), case-insensitive. A Title ID is per region, so the match is the right region; when several files share it the user picks | No Title ID (`.3dsx`) -> says so. The repository states no licence; Forge only fetches one file on the user's PC at their request and never redistributes it |
+| RetroArch | libretro's [libretro-database](https://github.com/libretro/libretro-database) `cht/<System>/<No-Intro name>.cht` (CC BY-SA 4.0) | System from the RomM platform slug (`LIBRETRO_SYSTEMS`); then up to eight likely names (`libretro_guesses`): the ROM file's own stem first (The Collector names the cheat target `<stem>.cht` after the ROM file, and No-Intro dumps carry the database's exact names), then the clean title with USA, World, USA/Europe, Europe, Japan. The ones that exist are offered; the user picks | 267 MB in all, so never listed. Nothing found -> use RetroArch's Online Updater or a `.cht` in Downloads. PS2, GameCube, 3DS have no folder there |
+| PCSX2 | GameHacking.org | None: it publishes no API, no bulk or raw download and no terms permitting automated access, so Forge only links to it | The user exports the `.pnach`, saves it in Downloads, and uses **Cheat file from Downloads**; The Collector renames it to `<SERIAL>_<CRC>.pnach` |
+| Dolphin | built in | `gecko_codes` / `action_replay_codes` lists | No file to fetch |
+
+Nothing goes through api.github.com: it allows 60 unauthenticated calls an
+hour per IP, shared by every device behind it, and the repository's test
+(`test_notes_do_not_come_from_a_rate_limited_api`) refuses any code that
+uses it. CTRPF is read from the repository zip on `codeload.github.com`
+(about 1 MB, cached a week in `runtime/cheat-sources/ctrpf.zip`, a stale
+copy used when the download fails); libretro files come from
+`raw.githubusercontent.com`. Only paths that pass `valid_path` (the
+`Cheats/<dir>/<TitleID>.txt` or `cht/<known system>/<name>.cht` shape, no
+traversal) are read, at most 2 MB, refused when they are a web page or
+binary. The file is saved at the top of Downloads under its own name and
+installed through the usual preview into the `cheats` target, which writes
+it as the target's `file_name`. A cheat-file target holds one file, so a new cheat file's
+record replaces the old one. PCSX2 and Azahar cheats in a new file start
+off: switch them in the Cheats list.
+
+### Link-outs
+
+Places the guides name that have no API open in Steam's own browser
+(`Navigation.NavigateToExternalWeb`), controller only, nothing fetched:
+Dolphin forums *Custom Texture Projects* and Henriko Magnifico (Dolphin),
+the *PCSX2 HD Textures Project* (PCSX2), Henriko Magnifico (Azahar),
+GameHacking.org (PCSX2 cheats), and a GBAtemp search for the 60 FPS cheat
+code thread (Azahar). No QR code: Forge bundles no QR encoder.
 
 ## Every game in the library
 
@@ -209,9 +275,12 @@ other.
 | Other Steam game, no Nexus page | GameBanana only (`noNexus`, local domain `local-<app id>`, never sent to Nexus; Browse opens GameBanana) | Same as above | Works |
 | Non-Steam shortcut (other launcher, standalone exe) | Nexus Mods (matched by name, picked or searched by hand), or GameBanana only | Folder from the shortcut's start folder (`strShortcutStartDir`, else the exe's folder), else the controller folder picker; remembered per app id (`forge_game_folders`), changeable in the QAM (**Game folder > Change**) | Works; card and tab on its Steam page |
 | Game Steam has no install record for | As above | Controller folder picker | Works |
-| ROM from The Collector (Dolphin, PPSSPP, PCSX2, Azahar/Citra, RetroArch soft patches) | GameBanana (name + platform), Nexus Mods where a page exists, own files in Downloads | The Collector's target for the emulator the ROM launches with (texture packs, graphics mods, Riivolution, `romfs`/`exefs`, soft patches) | Works with The Collector 0.33.0-win.28+; older Collector: page left alone |
-| ROM whose emulator The Collector has no folder rules for (Cemu, xemu, RPCS3, Ryujinx, ...) | - | none | Card says so (*No known mod folder for this emulator*); not moddable until The Collector adds the emulator |
-| PCSX2 `.pnach` patches and cheats, RetroArch cheats | - | - | Not offered (named by the ELF CRC The Collector does not read; cheats have no target yet) |
+| ROM mods (Dolphin, PPSSPP, PCSX2, Azahar/Citra, RetroArch soft patches, Cemu graphic packs) | GameBanana (name + platform), Nexus Mods where a page exists, own files in Downloads, link-outs (Dolphin forums, PCSX2 HD Textures Project, Henriko Magnifico) | The Collector's Mods targets: texture packs, LayeredFS, graphics mods, Riivolution, soft patches | Works with The Collector 0.33.0-win.28+ (kinds: win.29); older Collector: page left alone |
+| ROM cheats: Azahar | CTRPF-AR-CHEAT-CODES by Title ID, own file | `cheats/<TitleID>.txt` (The Collector names it); entries switched in the Cheats list | Works (win.29) |
+| ROM cheats: RetroArch | libretro cheat database by system + name, own file | `cheats/<core>/<stem>.cht` | Works (win.29) |
+| ROM cheats: PCSX2 | Own `.pnach` from Downloads; GameHacking.org link-out (no API) | `cheats/<SERIAL>_<CRC>.pnach`; Enable Cheats + entries in the Cheats list | Works (win.29) |
+| ROM cheats and built-in patches: Dolphin (Gecko / AR), PCSX2 (patches, cheat codes), Azahar (cheat codes) | Built into the emulator | Switched On/Off with The Collector (`setBuiltin`); Enable Cheats offered | Works (win.29); read-only entries show why |
+| ROM on RPCS3, Xenia Canary, shadPS4, xemu (and emulators The Collector does not know) | - | none | The Collector's reasons shown under *Not offered*; no installs |
 | VR games | Same as their kind above (the VR file guard applies to every install) | Same | Works |
 | Anti-cheat game (client-side anti-cheat) | Refused: installs and switching on are blocked by the backend, the card says *Locked · <anti-cheat>* and **Why?** explains; the per-game override stays one press in **Why?** | - | Refused, reason shown (unchanged protections) |
 | Soundtracks, tools, videos | - | - | Not shown (not games) |

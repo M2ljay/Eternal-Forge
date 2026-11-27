@@ -90,6 +90,10 @@ class StagingNameTests(unittest.TestCase):
         self.assertEqual(rm.stage_kind("fix.bps"), "patch")
         self.assertEqual(rm.stage_kind("pack.7z"), "extract")
         self.assertEqual(rm.stage_kind("pack.rar"), "extract")
+        self.assertEqual(rm.stage_kind("0004000000055D00.TXT"), "cheat")
+        self.assertEqual(rm.stage_kind("game.pnach"), "cheat")
+        self.assertEqual(rm.stage_kind("game.cht"), "cheat")
+        self.assertEqual(rm.stage_entry_name("x", "g.pnach", []), "g.pnach")
 
     def test_entry_names_are_the_archives_own_and_unique(self):
         self.assertEqual(rm.stage_entry_name("HD", "HD Textures v2.zip", []), "HD Textures v2.zip")

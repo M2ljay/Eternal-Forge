@@ -3271,7 +3271,9 @@ export interface RomLinks {
 
 export interface RomModRecord {
   id: string;
-  source: "gamebanana" | "nexus" | "local";
+  source: "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro";
+  /** The target's kind when installed ("cheatFile" for a cheat file). */
+  kind?: string;
   mod_id: number;
   file_id: number;
   file_name: string;
@@ -3314,3 +3316,21 @@ export const forgeRomMods = callable<[app_id: number], { ok: boolean; mods?: Rom
 export const forgeRomUpdates = callable<[app_id: number], { ok: boolean; updates?: Record<string, RomUpdate> }>(
   "forge_rom_updates"
 );
+
+// ---- Cheat files for ROM games (anygame.73) ----------------------------------
+export interface RomCheatCandidate {
+  path: string;
+  label: string;
+  region?: string;
+  score?: number;
+}
+
+export const forgeRomCheatSources = callable<
+  /** file_stem: the cheat target's own file name (RetroArch names it after the ROM file). */
+  [emulator: string, game_id: string, platform_slug: string, name: string, file_stem: string],
+  { ok: boolean; error?: string; source?: "ctrpf" | "libretro" | ""; candidates?: RomCheatCandidate[]; note?: string }
+>("forge_rom_cheat_sources");
+export const forgeRomCheatStage = callable<
+  [app_id: number, source: string, path: string, collector_folder: string],
+  { ok: boolean; error?: string; reason?: string; entry?: string; kind?: string }
+>("forge_rom_cheat_stage");

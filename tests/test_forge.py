@@ -417,6 +417,9 @@ ALLOWED_UNGATED = {
     "rom games via The Collector": {
         "forge_rom_link", "forge_rom_set_nexus", "forge_rom_stage", "forge_rom_unstage",
         "forge_rom_record", "forge_rom_forget", "forge_rom_mods", "forge_rom_updates",
+        # Cheat files: listed from two GitHub repositories and saved into
+        # Downloads; The Collector writes them after its preview.
+        "forge_rom_cheat_sources", "forge_rom_cheat_stage",
     },
     # Where a game lives (a non-Steam shortcut's folder) and folder names for
     # the controller folder picker; no mod files move.

@@ -75,6 +75,18 @@ export interface ModEntry {
   modified?: number;
 }
 
+/** win.29: what a target is. */
+export type ModKind = "files" | "cheatFile" | "builtinToggle" | "riivolution" | "graphicsMods" | "layeredFs";
+
+export interface ModSettingLike {
+  label: string;
+  state: string;
+  can_enable: boolean;
+  file?: string;
+  section?: string;
+  key?: string;
+}
+
 export interface ModTarget {
   target_id: string;
   label: string;
@@ -82,8 +94,32 @@ export interface ModTarget {
   exists?: boolean;
   notes?: string[];
   installed?: ModEntry[];
-  accepts?: "patch" | "archive_or_folder" | string;
-  setting?: { label: string; state: string; can_enable: boolean } | null;
+  accepts?: "patch" | "archive_or_folder" | "cheat_file" | "none" | string;
+  setting?: ModSettingLike | null;
+  /** win.29; absent from a win.28 Collector (then treated as "files"). */
+  kind?: ModKind | string;
+  /** cheatFile only: the exact file The Collector writes. */
+  file_name?: string | null;
+}
+
+export interface BuiltinEntry {
+  entry_id: string;
+  name: string;
+  description: string;
+  notes: string[];
+  enabled: boolean;
+  can_toggle: boolean;
+  origin: string;
+}
+
+export interface BuiltinsList {
+  success: true;
+  target_id: string;
+  file: string;
+  editable: boolean;
+  reason: string | null;
+  entries: BuiltinEntry[];
+  setting: ModSettingLike | null;
 }
 
 export interface ModSource extends ModEntry {
@@ -120,6 +156,9 @@ export interface CollectorModsApi {
   readSetting?(appId: number, targetId: string): Promise<any>;
   enableSetting?(appId: number, targetId: string): Promise<any>;
   openFolder?(appId: number, targetId: string): Promise<any>;
+  /** win.29 additions. */
+  listBuiltins?(appId: number, targetId: string): Promise<any>;
+  setBuiltin?(appId: number, targetId: string, entryId: string, enabled: boolean): Promise<any>;
 }
 
 type Win = Record<string, any> | undefined;
@@ -264,23 +303,124 @@ export function collectorPageHandled(win: Win): boolean {
 
 // ---- Targets and sources -------------------------------------------------------
 
-/** Targets a file of this kind can go to: a bare soft patch only to patch
- * targets, a folder only to the others, and a .zip to either (The Collector
- * takes a .zip holding exactly one patch for a soft patch, and refuses any
- * other in its preview). */
-export function targetsFor(targets: ModTarget[], kind: "patch" | "zip" | "folder" | string): ModTarget[] {
-  if (kind === "zip") return [...(targets ?? [])];
-  const patch = kind === "patch";
-  return (targets ?? []).filter((t) => (t.accepts === "patch") === patch);
+/** Targets a file of this kind can go to: a cheat file only to cheat-file
+ * targets, a bare soft patch only to patch targets, a folder only to the
+ * archive/folder targets, and a .zip to any target that installs files (The
+ * Collector takes a .zip holding exactly one patch or cheat file for those,
+ * and refuses any other in its preview). Toggle targets take no file. */
+export function targetsFor(targets: ModTarget[], kind: "patch" | "zip" | "folder" | "cheat" | string): ModTarget[] {
+  const list = (targets ?? []).filter((t) => t.accepts !== "none" && t.kind !== "builtinToggle");
+  if (kind === "zip") return list;
+  if (kind === "cheat") return list.filter((t) => t.accepts === "cheat_file");
+  if (kind === "patch") return list.filter((t) => t.accepts === "patch");
+  return list.filter((t) => t.accepts !== "patch" && t.accepts !== "cheat_file");
 }
 
 /** The kind a downloaded file will be staged as (same rule as the backend's
  * rom_mods.stage_kind). */
-export function fileKind(fileName: string): "zip" | "patch" | "folder" {
+export function fileKind(fileName: string): "zip" | "patch" | "cheat" | "folder" {
   const ext = (fileName.match(/\.[^.]+$/)?.[0] ?? "").toLowerCase();
   if (ext === ".zip") return "zip";
   if (ext === ".ips" || ext === ".bps" || ext === ".ups") return "patch";
+  if (ext === ".txt" || ext === ".pnach" || ext === ".cht") return "cheat";
   return "folder";
+}
+
+// ---- Mod kinds (win.29) ------------------------------------------------------------
+
+export type KindGroup = "mods" | "cheats" | "patches";
+
+const MOD_KINDS = new Set(["files", "layeredFs", "graphicsMods", "riivolution"]);
+const PATCH_WORDS = /widescreen|16:9|ultrawide|aspect|60 ?fps|30 ?fps|frame ?rate|fps|no[- ]?interlac|deinterlac|resolution|hd ?patch|bloom|blur|no ?fog/i;
+
+/** Where a target goes in the tab: Mods (files, LayeredFS, graphics mods,
+ * Riivolution), Cheats (cheat files), or both Cheats and Built-in patches for
+ * a built-in toggle list (its entries are sorted by builtinGroup). */
+export function targetGroup(t: ModTarget): KindGroup | "toggles" {
+  const kind = t.kind ?? "files";
+  if (kind === "cheatFile") return "cheats";
+  if (kind === "builtinToggle") return "toggles";
+  // files, layeredFs, graphicsMods, riivolution - and any kind a later
+  // Collector adds that installs files.
+  return "mods";
+}
+
+/** True for the kinds the Mods group is made of. */
+export function isModKind(kind: string | undefined): boolean {
+  return MOD_KINDS.has(kind ?? "files");
+}
+
+/** A built-in entry is a patch (widescreen, 60 FPS, ...) or a cheat. PCSX2's
+ * `patches` list is all patches; Gecko / AR / cheat_codes entries are cheats
+ * unless their name says they are a display or frame-rate patch. */
+export function builtinGroup(targetId: string, e: Pick<BuiltinEntry, "name" | "description">): "cheats" | "patches" {
+  if (targetId === "patches") return "patches";
+  return PATCH_WORDS.test(`${e.name} ${e.description ?? ""}`) ? "patches" : "cheats";
+}
+
+export interface GroupedTargets {
+  mods: ModTarget[];
+  cheatFiles: ModTarget[];
+  toggles: ModTarget[];
+}
+
+export function groupTargets(targets: ModTarget[]): GroupedTargets {
+  const out: GroupedTargets = { mods: [], cheatFiles: [], toggles: [] };
+  for (const t of targets ?? []) {
+    const g = targetGroup(t);
+    if (g === "cheats") out.cheatFiles.push(t);
+    else if (g === "toggles") out.toggles.push(t);
+    else out.mods.push(t);
+  }
+  return out;
+}
+
+/** Enabled built-in entries by group, over every listed toggle target. */
+export function enabledBuiltins(lists: Record<string, any>): { cheats: number; patches: number } {
+  let cheats = 0;
+  let patches = 0;
+  for (const [targetId, ans] of Object.entries(lists ?? {})) {
+    if (!isOk(ans)) continue;
+    for (const e of (ans as BuiltinsList).entries ?? []) {
+      if (!e.enabled) continue;
+      if (builtinGroup(targetId, e) === "patches") patches++;
+      else cheats++;
+    }
+  }
+  return { cheats, patches };
+}
+
+/** Why an entry's switch is read-only, or "" when it can be switched. */
+export function toggleBlock(list: Pick<BuiltinsList, "editable" | "reason">, e: Pick<BuiltinEntry, "can_toggle">): string {
+  if (!list.editable) return list.reason || "This list can't be changed from here.";
+  if (!e.can_toggle) return list.reason || "This entry can't be switched from here (no label to switch it by).";
+  return "";
+}
+
+/** The warning shown before a cheat is switched on. It says The Collector
+ * backs saves up only when that is known to be on for this ROM; the bridge
+ * (v1) does not report it, so by default it tells the user to back up. */
+export function cheatWarning(savesBackedUp: boolean | undefined): string {
+  return savesBackedUp === true
+    ? "Cheats can break saves; your saves are backed up by The Collector."
+    : "Cheats can break saves. Back up this game's saves before turning cheats on: The Collector doesn't report a save backup for it.";
+}
+
+/** Whether The Collector says this ROM's saves are synced or backed up. Not
+ * in the v1 contract: read only from an explicit field if a later Collector
+ * adds one; anything else is "unknown" (undefined). */
+export function savesBackedUp(romInfo: any): boolean | undefined {
+  const v = romInfo?.saveBackup ?? romInfo?.save_backup ?? romInfo?.saveSync ?? romInfo?.save_sync;
+  if (typeof v === "boolean") return v;
+  if (v && typeof v === "object" && typeof v.enabled === "boolean") return v.enabled;
+  return undefined;
+}
+
+/** "3 mods · 2 patches · 1 cheat" (zero groups left out; "No mods" when all are zero). */
+export function countsLine(mods: number, patches: number, cheats: number): string {
+  const part = (n: number, one: string, many: string) => (n ? `${n} ${n === 1 ? one : many}` : "");
+  const parts = [part(mods, "mod", "mods"), part(patches, "patch", "patches"), part(cheats, "cheat", "cheats")].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "No mods";
 }
 
 /** Entry names installed in one target, from a getTargets answer. */
@@ -301,12 +441,14 @@ export function isEntryName(name: string): boolean {
 
 // ---- The install flow ------------------------------------------------------------
 
-export type RomSource = "gamebanana" | "nexus" | "local";
+export type RomSource = "gamebanana" | "nexus" | "local" | "ctrpf" | "libretro";
 
 /** How often a "changed" install answer leads to a fresh preview. */
 export const MAX_REPREVIEWS = 2;
 
 export interface RomModFile {
+  /** Cheat sources (ctrpf, libretro): the repository path to fetch. */
+  path?: string;
   mod_id: number;
   file_id: number;
   file_name: string;
@@ -324,7 +466,7 @@ export interface RomInstallArgs {
   file?: RomModFile;
   /** Local: the Downloads entry the user picked (from listSources). */
   entry?: string;
-  target: { target_id: string; label: string };
+  target: { target_id: string; label: string; kind?: string };
   /** An update: the entries the old file added, kept on the record when the
    * new file writes the same names again. */
   keepEntries?: string[];
@@ -443,6 +585,7 @@ export async function runRomInstall(d: RomInstallDeps, a: RomInstallArgs): Promi
     domain: a.file?.domain ?? "",
     target_id: target,
     target_label: a.target.label,
+    kind: a.target.kind ?? "files",
     entries: added,
     rom_id: a.romId ?? 0,
   });
@@ -497,10 +640,55 @@ export async function runRomRemove(
   return { ok: true, removed, message: "Moved to The Collector's backup folder", backupFolder };
 }
 
+// ---- Built-in switches ---------------------------------------------------------------
+
+export type ToggleResult =
+  | { ok: true; enabled: boolean; backupPath: string | null; needsSetting: ModSettingLike | null }
+  | { ok: false; cancelled?: boolean; reason: string; message: string };
+
+/** Switches one built-in entry. Turning a CHEAT on asks first (the cheat
+ * warning); patches and switching off do not. A read-only entry is refused
+ * before The Collector is asked. `changed` comes back as is: list again.
+ * When the list's emulator setting (Enable Cheats) is off, the answer says
+ * so, so the tab can offer to turn it on. */
+export async function runSetBuiltin(
+  bridge: CollectorModsApi,
+  appId: number,
+  list: BuiltinsList,
+  entry: BuiltinEntry,
+  enabled: boolean,
+  confirmCheat: () => Promise<boolean>
+): Promise<ToggleResult> {
+  if (typeof bridge.setBuiltin !== "function") {
+    return { ok: false, reason: "unsupported", message: "This version of The Collector can't switch these yet." };
+  }
+  const block = toggleBlock(list, entry);
+  if (block) return { ok: false, reason: "not_editable", message: block };
+  if (enabled && builtinGroup(list.target_id, entry) === "cheats") {
+    let go = false;
+    try {
+      go = await confirmCheat();
+    } catch {
+      go = false;
+    }
+    if (!go) return { ok: false, cancelled: true, reason: "cancelled", message: "Left off" };
+  }
+  const r = await bridge.setBuiltin(appId, list.target_id, entry.entry_id, enabled);
+  if (!isOk(r)) return { ok: false, ...failure(r) };
+  const needs = enabled && list.setting && list.setting.state === "off" ? list.setting : null;
+  return { ok: true, enabled: Boolean(r.enabled ?? enabled), backupPath: r.backup_path ?? null, needsSetting: needs };
+}
+
 // ---- The ROM card ----------------------------------------------------------------
 
 export interface RomCardSummary {
   active: number;
+  /** Enabled built-in patches (widescreen, 60 FPS, ...). */
+  patches: number;
+  /** Enabled cheats (built-in entries). */
+  cheats: number;
+  /** "3 mods · 2 patches". */
+  counts: string;
   updates: number;
   status: { text: string; tone: "ok" | "warn" | "error" | "hint" };
 }
@@ -513,8 +701,11 @@ export function romCardSummary(o: {
   updates: number;
   targets?: any;
   bridge: boolean;
+  /** listBuiltins answers by target id. */
+  builtins?: Record<string, any>;
 }): RomCardSummary {
-  const active = o.records.length;
+  const active = o.records.filter((r: any) => (r?.kind ?? "files") !== "cheatFile").length;
+  const { cheats, patches } = enabledBuiltins(o.builtins ?? {});
   const updates = Math.max(0, o.updates);
   const status = ((): RomCardSummary["status"] => {
     if (!o.bridge) return { text: "Update The Collector to mod ROMs with Forge", tone: "hint" };
@@ -522,12 +713,20 @@ export function romCardSummary(o: {
     if (o.targets === undefined) return { text: "Reading...", tone: "hint" };
     if (!isOk(o.targets)) return { text: failure(o.targets, "No mod folder").message, tone: "warn" };
     const targets: ModTarget[] = o.targets.targets ?? [];
-    if (!targets.length) return { text: o.targets.note || "No known mod folder for this emulator", tone: "warn" };
-    const off = targets.find((t) => t.setting && t.setting.state === "off");
+    if (!targets.length) {
+      const omitted = (o.targets.omitted ?? [])[0];
+      return { text: o.targets.note || omitted?.reason || "No known mod folder for this emulator", tone: "warn" };
+    }
+    // The card names a setting that is off only for the mod folders, or for
+    // cheats/patches when some are switched on (else it would nag about
+    // Enable Cheats for a game nobody cheats in).
+    const off = targets.find(
+      (t) => t.setting && t.setting.state === "off" && (isModKind(t.kind) || cheats + patches > 0)
+    );
     if (off?.setting) return { text: `${off.setting.label} is off`, tone: "warn" };
     const emu = o.targets.emulator?.label;
     if (updates) return { text: "Updates waiting", tone: "warn" };
     return { text: emu ? `Ready · ${emu}` : "Ready", tone: "ok" };
   })();
-  return { active, updates, status };
+  return { active, patches, cheats, counts: countsLine(active, patches, cheats), updates, status };
 }

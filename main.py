@@ -38822,6 +38822,163 @@ async def _forge_list_folders(self, path: str = "") -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# ---- Cheat files for ROM games (anygame.73) --------------------------------------
+# Rules and sources in py_modules/rom_cheats.py. No listing goes through the
+# rate-limited GitHub API (see test_notes_do_not_come_from_a_rate_limited_api):
+# CTRPF comes as the repository zip from codeload.github.com, cached a week in
+# Forge's runtime folder; libretro cheat files are asked for by likely name on
+# raw.githubusercontent.com. Only paths that pass rom_cheats.valid_path are
+# ever read.
+
+rom_cheats = _guarded_import("rom_cheats")
+_CTRPF_ZIP_TTL = 7 * 86400
+
+
+async def _cheat_get(url: str, limit: int):
+    """(status, bytes) of a GET, at most `limit` bytes (more raises)."""
+    session = await _http_session()
+    headers = {"User-Agent": APP_HEADERS.get("User-Agent", "decky-nexus")}
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        if resp.status != 200:
+            return resp.status, b""
+        data = await resp.content.read(limit + 1)
+        if len(data) > limit:
+            raise RuntimeError("download too large")
+        return 200, data
+
+
+def _ctrpf_zip_path() -> str:
+    return os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "cheat-sources", "ctrpf.zip")
+
+
+async def _ctrpf_zip() -> str:
+    """The CTRPF repository zip, downloaded at most once a week."""
+    path = _ctrpf_zip_path()
+    try:
+        if time.time() - os.path.getmtime(path) < _CTRPF_ZIP_TTL and zipfile.is_zipfile(path):
+            return path
+    except OSError:
+        pass
+    status, data = await _cheat_get(rom_cheats.CTRPF_ZIP_URL, rom_cheats.MAX_CTRPF_ZIP)
+    if status != 200:
+        if os.path.isfile(path) and zipfile.is_zipfile(path):
+            return path  # stale beats nothing
+        raise RuntimeError(f"HTTP {status}")
+
+    def write():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        if not zipfile.is_zipfile(tmp):
+            os.remove(tmp)
+            raise RuntimeError("not a zip")
+        os.replace(tmp, path)
+    await asyncio.to_thread(write)
+    return path
+
+
+def _zip_names(path: str) -> list:
+    with zipfile.ZipFile(path) as z:
+        return z.namelist()
+
+
+def _zip_read(path: str, member: str) -> bytes:
+    with zipfile.ZipFile(path) as z:
+        info = z.getinfo(member)
+        if info.file_size > rom_cheats.MAX_CHEAT_BYTES:
+            raise RuntimeError("cheat file too large")
+        return z.read(member)
+
+
+async def _forge_rom_cheat_sources(self, emulator: str, game_id: str, platform_slug: str, name: str,
+                                   file_stem: str = "") -> dict:
+    """Cheat files Forge can fetch for this ROM: {ok, source, candidates,
+    note}. Azahar by Title ID (CTRPF), RetroArch by likely No-Intro name in
+    libretro's database (file_stem: the cheat target's own file name); other
+    emulators have none (PCSX2: link out)."""
+    emulator = (emulator or "").lower()
+    try:
+        if emulator == "azahar":
+            if not rom_cheats.is_title_id(game_id or ""):
+                return {"ok": True, "source": "ctrpf", "candidates": [],
+                        "note": "The Collector could not read this game's Title ID, so Forge can't match its cheats."}
+            names = await asyncio.to_thread(_zip_names, await _ctrpf_zip())
+            got = rom_cheats.ctrpf_matches(rom_cheats.zip_paths(names), game_id)
+            return {"ok": True, "source": "ctrpf", "candidates": got,
+                    "note": "" if got else f"No cheats for Title ID {game_id.upper()} in CTRPF-AR-CHEAT-CODES."}
+        if emulator == "retroarch":
+            folder = rom_cheats.libretro_folder(platform_slug)
+            if not folder:
+                return {"ok": True, "source": "libretro", "candidates": [],
+                        "note": "libretro's cheat database has no folder for this system."}
+            cands = []
+            for guess in rom_cheats.libretro_guesses(file_stem, name):
+                path = f"cht/{folder}/{guess}"
+                if not rom_cheats.valid_path("libretro", path):
+                    continue
+                status, data = await _cheat_get(rom_cheats.raw_url("libretro", path), rom_cheats.MAX_CHEAT_BYTES)
+                if status == 200 and rom_cheats.looks_like_text_cheats(data):
+                    cands.append({"path": path, "label": guess[:-4]})
+                if len(cands) >= 4:
+                    break
+            return {"ok": True, "source": "libretro", "candidates": cands,
+                    "note": "" if cands else ("No cheat file in libretro's database has this game's name. "
+                                              "Use RetroArch's Online Updater, or save a .cht in Downloads.")}
+        return {"ok": True, "source": "", "candidates": [], "note": ""}
+    except Exception as e:  # noqa: BLE001 - shown to the user, never fatal
+        decky.logger.info(f"forge rom cheats: {type(e).__name__}: {e}")
+        return {"ok": False, "error": f"Couldn't read the cheat list ({e})."}
+
+
+async def _forge_rom_cheat_stage(self, app_id: int, source: str, path: str, collector_folder: str) -> dict:
+    """Fetch one cheat file and save it at the top of The Collector's
+    Downloads under its own name. Returns the entry NAME; The Collector
+    renames it to the file the emulator reads when it installs it."""
+    if source not in ("ctrpf", "libretro") or not rom_cheats.valid_path(source, path or ""):
+        return {"ok": False, "error": "Not a cheat file Forge fetches"}
+    downloads = _rom_downloads(collector_folder)
+    if not downloads:
+        return {"ok": False, "reason": "downloads_mismatch",
+                "error": "The Collector reads a Downloads folder Forge can't confirm as yours, so nothing was put there."}
+    try:
+        if source == "ctrpf":
+            zpath = await _ctrpf_zip()
+            member = rom_cheats.zip_member(await asyncio.to_thread(_zip_names, zpath), path)
+            if not member:
+                return {"ok": False, "error": "That cheat file is no longer in CTRPF-AR-CHEAT-CODES."}
+            data = await asyncio.to_thread(_zip_read, zpath, member)
+        else:
+            status, data = await _cheat_get(rom_cheats.raw_url(source, path), rom_cheats.MAX_CHEAT_BYTES)
+            if status != 200:
+                return {"ok": False, "error": f"Download failed (HTTP {status})"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"Download failed ({e})"}
+    if not rom_cheats.looks_like_text_cheats(data):
+        return {"ok": False, "error": "That download is not a cheat file."}
+    base = path.rsplit("/", 1)[-1]
+    try:
+        entry = rom_mods.stage_entry_name(base, base, os.listdir(downloads))
+    except OSError as e:
+        return {"ok": False, "error": f"Could not read Downloads: {e}"}
+    target = os.path.join(downloads, entry)
+
+    def write():
+        tmp = target + ".forge-part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, target)
+    try:
+        await asyncio.to_thread(write)
+    except OSError as e:
+        return {"ok": False, "error": f"Could not write into Downloads: {e}"}
+    _rom_store().note_staged(entry)
+    decky.logger.info(f"forge rom: staged {source} cheat for app {int(app_id)} as {entry!r}")
+    return {"ok": True, "entry": entry, "kind": "cheat"}
+
+
+Plugin.forge_rom_cheat_sources = _forge_rom_cheat_sources
+Plugin.forge_rom_cheat_stage = _forge_rom_cheat_stage
 Plugin.forge_rom_link = _forge_rom_link
 Plugin.forge_rom_set_nexus = _forge_rom_set_nexus
 Plugin.search_nexus_games = _search_nexus_games
