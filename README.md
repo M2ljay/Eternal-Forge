@@ -424,18 +424,20 @@ and what is still unverified: [docs/gamebanana.md](docs/gamebanana.md).
 
 Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
 
-- **Mods tab and Overview card on every game page (anygame.72).** On a
-  game's library page, mods are a **Mods tab** (in Steam's own tab row when
-  Forge finds one; otherwise a "Mods" tab header under Play that opens the
-  tab right there) plus a **Mods card** under Play: the active-mod count, an
-  amber *N updates* chip, one status line (*Load order OK*, *Up to date*,
-  *Locked · Ricochet*, *Not set up*) and **X** to open the tab. The tab holds
+- **Mods tab and Overview card on every game page (anygame.72, placed on
+  screen two since anygame.77).** Under Core's game view (screen one is only
+  the art, the logo and the play bar), mods are a **Mods tab** in Steam's own
+  tab row plus a **Mods card** among Steam's section cards, one press down
+  from Play: the active-mod count, an amber *N updates* chip, one status line
+  (*Load order OK*, *Up to date*, *Locked · Ricochet*, *Not set up*) and **X**
+  to open the tab (**Set up** for a game that is not set up). The tab holds
   the mods with a switch each, Open / Update, Add mods, My Mods, saves,
-  Upscaling and Load order; long explanations are behind **Why?**. The old
-  row survives only as a one-line fallback above Play when neither anchor is
-  found. Controller only; B from a page opened here returns to the game
-  page. Any error leaves Steam's page untouched, and the patch switches
-  itself off for the session after three.
+  Upscaling and Load order; long explanations are behind **Why?**. Nothing
+  is ever drawn on screen one: when Forge cannot find Steam's tab row or
+  section cards it shows nothing and logs the page outline once. Controller
+  only; B from a page opened here returns to the game page. Any error leaves
+  Steam's page untouched, and the patch switches itself off for the session
+  after three.
 - **Every game in the library.** Steam games, non-Steam shortcuts (other
   launchers, standalone exes) and The Collector's ROMs. Any game Forge has no
   rules for is offered **Set up** right on the card: a non-Steam game's

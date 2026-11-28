@@ -463,19 +463,15 @@ export function profileSwitchSummary(
   return { title: clean ? `Profile: ${name}` : `Profile ${name}, with problems`, body: bits.join(" ") };
 }
 
-// ---- Compact game page card ----------------------------------------------------
-// The Mods section sits under Steam's Play bar as one row (ROW_HEIGHT tall,
-// gunmetal, a thin crimson bar on the left): "Mods", one or two status chips,
-// the last save backup as a hint, and at most two buttons. A on the row
-// opens the details below it; long explanations sit behind "Why?" in a small
-// modal. The anti-cheat override exists only in that modal.
+// ---- The game page's details ---------------------------------------------------
+// The Mods tab's content (and the card's modal) lists the details one line
+// each: the anti-cheat lock, the offer to go back after a crash, the mods with
+// their switches, saves, Upscaling and Load order. Long explanations sit
+// behind "Why?" in a small modal; the anti-cheat override exists only there.
 
-export const ROW_HEIGHT = 56;
 /** Pixel sizes at 1080p, matched to Steam's game-page meta text. */
 export const CARD_TEXT = { title: 18, body: 16, button: 15, hint: 14 } as const;
-export const CARD_MAX_BUTTONS = 2;
 
-export type CardPlacement = "below" | "above";
 export type ChipTone = "crimson" | "steel" | "amber" | "hint";
 export interface CardChip {
   text: string;
@@ -497,71 +493,9 @@ export interface CardInput {
   lastBackupAt: number;
 }
 
-/** The anti-cheat's short name for the chip: "Ricochet", "EAC + BattlEye". */
+/** The anti-cheat's short name: "Ricochet", "EAC + BattlEye". */
 export function anticheatName(products: string[]): string {
   return products.length ? products.join(" + ") : "anti-cheat";
-}
-
-/** One or two chips, most important first: the lock, then updates, then the
- * mod count. */
-export function statusChips(c: CardInput): CardChip[] {
-  const out: CardChip[] = [];
-  const ac = c.anticheat;
-  if (c.mode === "locked") out.push({ text: `Locked · ${anticheatName(ac.products)}`, tone: "crimson" });
-  else if (ac.detected && ac.override_on) out.push({ text: "Lock off", tone: "crimson" });
-  if (c.mode === "setup") out.push({ text: "Not set up", tone: "hint" });
-  if (c.offer && c.mode === "mods") out.push({ text: "Restore offered", tone: "amber" });
-  if (c.mode === "mods" && c.updates > 0) out.push({ text: `Updates ${c.updates}`, tone: "amber" });
-  if (c.mode === "mods" || (c.mode === "locked" && c.managed)) {
-    const list = c.mods;
-    if (!list) out.push({ text: "Reading...", tone: "hint" });
-    else if (list.length === 0) out.push({ text: "Not modded", tone: "hint" });
-    else {
-      const on = list.filter((m) => m.enabled).length;
-      out.push(on ? { text: `${on} enabled`, tone: "steel" } : { text: `All ${list.length} off`, tone: "hint" });
-    }
-  }
-  return out.slice(0, 2);
-}
-
-/** The save hint on the row: null without Ludusavi. */
-export function savesHint(found: boolean, lastBackupAt: number, now: number): string | null {
-  if (!found) return null;
-  return lastBackupAt > 0 ? `Saves backed up ${backupAge(lastBackupAt, now)}` : "No save backup yet";
-}
-
-export type CardAction = "restore-mods" | "undo-restore" | "mods" | "setup" | "why" | "restore-saves";
-
-export const CARD_ACTION_LABELS: Record<CardAction, string> = {
-  "restore-mods": "Restore mods...",
-  "undo-restore": "Undo restore",
-  mods: "Mods...",
-  setup: "Set up...",
-  why: "Why?",
-  "restore-saves": "Restore saves...",
-};
-
-/** The row's buttons, at most CARD_MAX_BUTTONS, most relevant first: the
- * crash offer, Undo, the way to the full page (Mods..., Set up..., or Why?
- * for a locked game Forge does not manage), then Restore saves... when a
- * backup exists. Never the anti-cheat override. */
-export function compactButtons(c: CardInput): CardAction[] {
-  const out: CardAction[] = [];
-  const locked = c.mode === "locked";
-  if (c.offer && c.managed && !locked) out.push("restore-mods");
-  if (c.undo && c.managed) out.push("undo-restore");
-  if (c.managed) out.push("mods");
-  else if (c.mode === "setup") out.push("setup");
-  else if (locked) out.push("why");
-  if (c.savesFound && c.lastBackupAt > 0) out.push("restore-saves");
-  return out.slice(0, CARD_MAX_BUTTONS);
-}
-
-/** What A on the row does: under Play it opens the details; the one-line
- * fallback above the panel never grows, so it goes to the row's first
- * button's target instead. */
-export function rowPress(placement: CardPlacement): "toggle" | "open" {
-  return placement === "below" ? "toggle" : "open";
 }
 
 export type DetailLine = "lock" | "override" | "offer" | "undo" | "mods" | "saves" | "upscaling" | "loadorder" | "setup";
@@ -611,8 +545,8 @@ export function lockSummary(ac: Pick<AntiCheatVerdict, "products">): string {
 // On the game page, mods are a Mods tab (beside Steam's or The Collector's own
 // tabs) plus a card in the Overview: the active-mod count, an amber "N
 // updates" chip when updates exist, and ONE status line. X on the card opens
-// the Mods tab. It replaces the row under Play; the row stays only as the
-// fallback when neither the tab container nor the play section is found.
+// the Mods tab. On Steam pages both live on screen two (anygame.77); there is
+// no row fallback any more.
 
 export type StatusTone = "ok" | "warn" | "error" | "hint";
 
@@ -669,21 +603,42 @@ export function updatesChip(n: number): string | null {
   return n > 0 ? `${n} update${n === 1 ? "" : "s"}` : null;
 }
 
-/** Where the game page puts Forge, in fallback order:
- * - "tab": a Mods tab in Steam's own tab container, plus the card under Play;
- * - "section": no tab container, so a Mods section that behaves like a tab
- *   (a focusable "Mods" tab header, the card, and the tab's content opening
- *   below it) under Play;
- * - "row": neither anchor - the old one-line row above the overview panel.
- * "none" when the page is not one Forge draws on. */
-export type GamePagePlacement = "tab" | "section" | "row" | "none";
+/** Where Steam's game page gets Forge (anygame.77), always on screen two of
+ * Core's game view, never on screen one (the art and the play bar):
+ * - the tab: in Steam's own tabbed page (its tab row), when found;
+ * - the card: among Steam's section cards when their list is found
+ *   ("sections"), else - once the scout has finished looking - at the end of
+ *   the first tab's content when the tabbed page is found ("first-tab");
+ * - neither found: nothing at all (the old row above Play is gone).
+ * Without the overview panel the page is not one Forge draws on. */
+export type CardAnchor = "sections" | "first-tab" | "none";
+export interface GamePagePlacement {
+  tab: boolean;
+  card: CardAnchor;
+}
 
-export function gamePagePlacement(o: { overviewFound: boolean; tabContainer: boolean; playSection: boolean }): GamePagePlacement {
-  if (!o.overviewFound) return "none";
-  if (o.playSection && o.tabContainer) return "tab";
-  if (o.playSection) return "section";
-  if (o.tabContainer) return "tab";
-  return "row";
+export function gamePagePlacement(o: {
+  overviewFound: boolean;
+  tabContainer: boolean;
+  sectionCards: boolean;
+  scoutDone: boolean;
+}): GamePagePlacement {
+  if (!o.overviewFound) return { tab: false, card: "none" };
+  const card: CardAnchor = o.sectionCards ? "sections" : o.tabContainer && o.scoutDone ? "first-tab" : "none";
+  return { tab: o.tabContainer, card };
+}
+
+/** True when anything of Forge is drawn on the page. */
+export function placementShown(p: GamePagePlacement): boolean {
+  return p.tab || p.card !== "none";
+}
+
+/** What X on the Steam card does: switch to Forge's tab when Steam can be
+ * told to, run setup for a game that is not set up, else open the tab's
+ * content in a modal (the card never grows in place among Steam's cards). */
+export function cardPress(o: { mode: SectionMode; steamTab: boolean }): "tab" | "setup" | "modal" {
+  if (o.mode === "setup") return "setup";
+  return o.steamTab ? "tab" : "modal";
 }
 
 /** The id and title Forge's tab carries in Steam's tab container and in The

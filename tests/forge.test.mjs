@@ -7,18 +7,11 @@ import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 
 import {
-  CARD_ACTION_LABELS,
-  CARD_MAX_BUTTONS,
   CARD_TEXT,
-  ROW_HEIGHT,
-  compactButtons,
   detailLines,
   lockLineActions,
   lockModalActions,
   lockSummary,
-  rowPress,
-  savesHint,
-  statusChips,
   FailureBudget,
   FORGE_BLACK,
   FORGE_CRIMSON,
@@ -56,6 +49,8 @@ import {
   warningSummary,
   cardSummary,
   gamePagePlacement,
+  placementShown,
+  cardPress,
   updatesChip,
   activeLabel,
   MODS_TAB_ID,
@@ -214,9 +209,10 @@ test("the game page patch fails safe and unpatches", () => {
   assert.match(src, /routerHook\.addPatch\(ROUTE/);
   assert.match(src, /routerHook\.removePatch\(ROUTE, patch\)/);
   assert.match(src, /getDerivedStateFromError/);
-  assert.match(src, /<ForgeBoundary key=\{KEY\}>/);
+  assert.match(src, /<ForgeBoundary key=\{CARD_KEY\}>/);
+  assert.match(src, /<ForgeBoundary key=\{TAB_KEY\}>/);
   assert.match(src, /if \(at < 0\) return ret;/, "no overview panel: insert nothing");
-  assert.match(src, /c\?\.key === KEY/, "never inserted twice");
+  assert.match(src, /c\?\.key === SCOUT_KEY/, "never inserted twice");
   assert.ok((src.match(/catch \(e\)/g) || []).length >= 4, "every step is guarded");
   assert.match(src, /budget\.disabled/);
   const index = readCode("index.tsx");
@@ -446,66 +442,22 @@ const mods = (on, off) => [
   ...Array.from({ length: off }, (_, i) => ({ folder: `off${i}`, enabled: false })),
 ];
 
-test("collapsed: one 56 px row, text in Steam's meta sizes, at most two buttons", () => {
-  assert.equal(ROW_HEIGHT, 56);
-  assert.equal(CARD_MAX_BUTTONS, 2);
+test("text sizes match Steam's game-page meta text", () => {
   for (const [k, v] of Object.entries(CARD_TEXT)) assert.ok(v >= 14 && v <= 18, `${k} ${v}px`);
   assert.ok(CARD_TEXT.body >= 16, "body text matches Steam's meta text");
 });
 
-test("collapsed: the status chip says locked, updates, count or not modded", () => {
-  assert.deepEqual(statusChips(cod), [{ text: "Locked · Ricochet", tone: "crimson" }]);
-  assert.deepEqual(statusChips(card({ mods: mods(3, 1) })), [{ text: "3 enabled", tone: "steel" }]);
-  assert.deepEqual(statusChips(card({ mods: mods(3, 0), updates: 2 })), [
-    { text: "Updates 2", tone: "amber" },
-    { text: "3 enabled", tone: "steel" },
-  ]);
-  assert.deepEqual(statusChips(card({ mods: [] })), [{ text: "Not modded", tone: "hint" }]);
-  assert.deepEqual(statusChips(card({ mods: undefined })), [{ text: "Reading...", tone: "hint" }]);
-  assert.deepEqual(statusChips(card({ mods: mods(0, 4) })), [{ text: "All 4 off", tone: "hint" }]);
-  assert.deepEqual(statusChips(card({ mode: "setup", managed: false })), [{ text: "Not set up", tone: "hint" }]);
-  const lockOff = card({ anticheat: verdict({ detected: true, override_on: true }), mods: mods(1, 0) });
-  assert.equal(statusChips(lockOff)[0].text, "Lock off");
-  assert.equal(statusChips(lockOff)[0].tone, "crimson");
-  // Never more than two chips, whatever is going on.
-  assert.ok(statusChips(card({ anticheat: verdict({ detected: true, override_on: true }), offer: true, updates: 5, mods: mods(2, 0) })).length <= 2);
-});
-
-test("collapsed: the save backup is a short hint, silent without Ludusavi", () => {
-  assert.equal(savesHint(false, 0, NOW), null);
-  assert.equal(savesHint(true, 0, NOW), "No save backup yet");
-  assert.equal(savesHint(true, NOW - 2 * 3600, NOW), "Saves backed up 2 h ago");
-});
-
-test("collapsed: the most relevant two buttons, Mods... first for a managed game", () => {
-  assert.deepEqual(compactButtons(card({ mods: mods(2, 0) })), ["mods"]);
-  assert.deepEqual(compactButtons(card({ savesFound: true, lastBackupAt: NOW - 60 })), ["mods", "restore-saves"]);
-  // No backup yet: no Restore saves... on the row.
-  assert.deepEqual(compactButtons(card({ savesFound: true, lastBackupAt: 0 })), ["mods"]);
-  // The crash offer outranks everything.
-  assert.deepEqual(compactButtons(card({ offer: true, savesFound: true, lastBackupAt: NOW })), ["restore-mods", "mods"]);
-  assert.deepEqual(compactButtons(card({ undo: true, savesFound: true, lastBackupAt: NOW })), ["undo-restore", "mods"]);
-  assert.deepEqual(compactButtons(card({ mode: "setup", managed: false })), ["setup"]);
-  // Call of Duty: not managed, locked, no backup yet.
-  assert.deepEqual(compactButtons(cod), ["why"]);
-  assert.deepEqual(compactButtons({ ...cod, lastBackupAt: NOW }), ["why", "restore-saves"]);
-  for (const c of [cod, card({ offer: true, undo: true, savesFound: true, lastBackupAt: NOW })]) {
-    assert.ok(compactButtons(c).length <= CARD_MAX_BUTTONS);
-  }
-  assert.equal(CARD_ACTION_LABELS.mods, "Mods...");
-  assert.equal(CARD_ACTION_LABELS["restore-saves"], "Restore saves...");
-});
-
-test("A on the row expands under Play; the one-line fallback above never grows", () => {
-  assert.equal(rowPress("below"), "toggle");
-  assert.equal(rowPress("above"), "open");
+test("X on the Steam card: Steam's Mods tab, Set up for a game that is not set up, else the tab in a modal", () => {
+  assert.equal(cardPress({ mode: "mods", steamTab: true }), "tab");
+  assert.equal(cardPress({ mode: "locked", steamTab: true }), "tab", "a locked game's tab shows the lock and Why?");
+  assert.equal(cardPress({ mode: "mods", steamTab: false }), "modal", "never grows in place among Steam's cards");
+  assert.equal(cardPress({ mode: "setup", steamTab: true }), "setup");
+  assert.equal(cardPress({ mode: "setup", steamTab: false }), "setup");
   const src = readCode("GameModsSection.tsx");
-  assert.match(src, /const open = press === "toggle" && expanded;/);
-  assert.match(src, /\{open && detailsBody\}/, "details render only when expanded under Play");
-  assert.match(src, /useState\(false\)/, "collapsed by default");
-  // anygame.72: the card's tab content is the same details, closed by default.
-  assert.match(src, /const \[tabOpen, setTabOpen\] = useState\(false\);/);
   assert.match(src, /onSecondaryButton=\{openTab\}/, "X opens the Mods tab");
+  assert.match(src, /if \(press === "setup"\) return openSetup\(\);/);
+  assert.match(src, /<ModsCard appId=\{appId\} view="tab" \/>/, "the modal is a live copy of the tab");
+  assert.ok(!/view: "row"|ROW_HEIGHT|compactButtons|rowPress/.test(src), "the old row is gone");
 });
 
 test("expanded: details are one line each, OptiScaler and Load order live there", () => {
@@ -532,7 +484,6 @@ test("the anti-cheat override is reachable only through the Why? modal", () => {
     card({ anticheat: verdict({ detected: true, override_on: true, override_allowed: true }), offer: true, undo: true }),
   ];
   for (const c of every) {
-    assert.ok(!compactButtons(c).includes("allow-anyway"));
     assert.ok(!detailLines(c).includes("allow-anyway"));
   }
   for (const o of [
@@ -552,13 +503,38 @@ test("the anti-cheat override is reachable only through the Why? modal", () => {
 
 const AC_OFF = { products: [], override_on: false, detected: false };
 
-test("placement falls back tab -> section -> row, and nothing without the overview", () => {
-  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: true, playSection: true }), "tab");
-  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: false, playSection: true }), "section");
-  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: true, playSection: false }), "tab");
-  assert.equal(gamePagePlacement({ overviewFound: true, tabContainer: false, playSection: false }), "row");
-  assert.equal(gamePagePlacement({ overviewFound: false, tabContainer: true, playSection: true }), "none");
+test("placement: tab in Steam's tab row, card among its section cards; nothing at all without either", () => {
+  const p = (o) => gamePagePlacement({ overviewFound: true, tabContainer: false, sectionCards: false, scoutDone: false, ...o });
+  assert.deepEqual(p({ tabContainer: true, sectionCards: true }), { tab: true, card: "sections" });
+  assert.deepEqual(p({ tabContainer: false, sectionCards: true }), { tab: false, card: "sections" });
+  // Tabbed page but no section list: the card waits for the scout, then ends the first tab.
+  assert.deepEqual(p({ tabContainer: true }), { tab: true, card: "none" });
+  assert.deepEqual(p({ tabContainer: true, scoutDone: true }), { tab: true, card: "first-tab" });
+  // Neither anchor: nothing, ever (no row above Play, nothing on screen one).
+  for (const scoutDone of [false, true]) {
+    const none = p({ scoutDone });
+    assert.deepEqual(none, { tab: false, card: "none" });
+    assert.equal(placementShown(none), false);
+  }
+  assert.deepEqual(gamePagePlacement({ overviewFound: false, tabContainer: true, sectionCards: true, scoutDone: true }), { tab: false, card: "none" });
+  assert.equal(placementShown(p({ tabContainer: true })), true);
   assert.equal(MODS_TAB_ID, "forge-mods");
+});
+
+test("the Steam card is styled like Steam's section cards under Core", () => {
+  const src = read("GameModsSection.tsx");
+  const css = src.slice(src.indexOf("const CSS = `"), src.indexOf("`;", src.indexOf("const CSS = `")));
+  const ov = css.slice(css.indexOf(".${OV_MAIN} {"), css.indexOf(".${OV_LABEL}"));
+  assert.match(ov, /background: \$\{FORGE_GUNMETAL\} !important;/);
+  assert.match(ov, /border-radius: 10px !important;/);
+  assert.match(ov, /color: \$\{FORGE_STEEL\} !important;/);
+  assert.match(ov, /box-shadow: none !important;/);
+  assert.match(ov, /border: 2px solid \$\{FORGE_CRIMSON\}/, "a crimson focus edge");
+  assert.ok(!/0 0 \d+px|blur\(/.test(ov), "no glow");
+  assert.match(src, /background: AMBER,\s*color: BLACK,/, "amber chip with black text");
+  assert.equal(FORGE_GUNMETAL, "#1A1D21");
+  assert.equal(FORGE_STEEL, "#C9D1D9");
+  assert.equal(FORGE_CRIMSON, "#D7263D");
 });
 
 test("the card counts active mods and updates, with one status line", () => {

@@ -373,8 +373,8 @@ export function SettingsPage() {
             <Section title="Game page" blurb="Forge on Steam's own library pages">
               <ForgeToggle
                 name="gamePage"
-                label="Mods section on game pages"
-                description="Installed mods, their switches and updates, Add mods, the anti-cheat lock and the way back after a crash, above Play on each game's page. Turn off to leave Steam's page untouched."
+                label="Mods tab and card on game pages"
+                description="A Mods tab and an Overview card one press down from Play on each game's page: installed mods, their switches and updates, Add mods, the anti-cheat lock and the way back after a crash. Turn off to leave Steam's page untouched."
               />
               <ForgeToggle
                 name="tileDots"

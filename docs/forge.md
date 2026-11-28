@@ -14,11 +14,11 @@ report check, OptiScaler's GPU lookup and the "game is running" check.
 | Mods tab and Overview card on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts`, `src/GameModsSection.tsx` | `forge_game_status` |
 | ROM pages (The Collector) | `src/collectorBridge.ts`, `src/RomMods.tsx` | `py_modules/rom_mods.py`, `forge_rom_*` in `main.py` |
 | Every other library game (shortcuts, no folder, no Nexus page) | `setUpGame` in `src/ExperimentalSetup.tsx`, `src/FolderPicker.tsx` | `set_game_folder`, `forge_list_folders`, `search_nexus_games`, `_experimental_install` |
-| Anti-cheat lock | the section's locked state | `py_modules/forge_guard.py`, wrappers at the end of `main.py` |
-| Way back after a crash | `src/forge.ts` (game start/exit), the section's offer | `forge_guard_*` |
+| Anti-cheat lock | the card's and tab's locked state | `py_modules/forge_guard.py`, wrappers at the end of `main.py` |
+| Way back after a crash | `src/forge.ts` (game start/exit), the tab's offer | `forge_guard_*` |
 | Update dots on tiles | `src/forge.ts` (one stylesheet) | `forge_update_dots`, cache filled by `check_updates` too |
 | Steam collection "Modded" | `src/moddedSync.ts`, rules in `src/moddedCollection.ts` | `forge_note_modded`, `forge_modded_state`, `forge_set_modded_collection`, the `forge_mods_changed` event |
-| Save backups (Ludusavi, optional) | `src/SaveBackup.tsx`, the section's save line | `py_modules/save_backup.py`, `forge_save_*`, `_wrap_save_backups` in `main.py`, the `forge_save_backup` event |
+| Save backups (Ludusavi, optional) | `src/SaveBackup.tsx`, the tab's save line | `py_modules/save_backup.py`, `forge_save_*`, `_wrap_save_backups` in `main.py`, the `forge_save_backup` event |
 | Upscaling (OptiScaler) | `UpscalingEntry` in `src/GameModsSection.tsx`, run watch in `src/optiscaler.ts` | `py_modules/optiscaler.py`, `forge_optiscaler_*` and `_wrap_optiscaler_refusal` in `main.py` |
 | Load order (LOOT rules) and profiles | `LoadOrderEntry` in `src/GameModsSection.tsx`, `src/ForgeLoadOrder.tsx`, `src/LoadOrderPage.tsx` (its `forge` mode), `src/forgeLoScope.ts` | `py_modules/load_order.py`, `forge_lo_*` and `forge_profile_*` in `main.py` |
 
@@ -33,59 +33,123 @@ save backups are tested by `tests/test_save_backup.py` against a fake
 The frontend parts can be switched off in the plugin's Settings, under
 **Game page**.
 
-## Mods tab and Overview card (anygame.72)
+## Mods tab and Overview card (anygame.72, screen two since anygame.77)
 
-The approved design ("Core: current vision", boards 6 and 7): on every game
-page mods are a **Mods tab** beside the page's own tabs, plus a **Mods card**
-in the Overview. The card replaces the row under Play (anygame.70/.71); the
-row is kept only as the last fallback.
+The approved design ("Core: current vision", boards 6 and 7, and the game
+view board `GameSteam`): on every game page mods are a **Mods tab** beside
+the page's own tabs, plus a **Mods card** among the Overview's cards. Mods is
+a tab and a card, never a bar.
+
+Core 3.3.9 restyles Steam's game page into a two-screen **clean game view**
+(Core's `docs/eternal/CORE-UI.md`, "The game view"): screen one is only the
+hero art, the logo and a transparent play bar; screen two, one press down
+from the play bar, is `AppDetailsContainer` holding Steam's tab row and its
+section cards. **Forge never draws anything on screen one.**
 
 ### Where it goes, in order (`gamePagePlacement` in `src/forgeRules.ts`)
 
-1. **Tab**: in every render the patch follows below the overview panel (see
-   below), it also looks for a **tab container**: an element handed an array
-   of at least two tabs, each with an id and a title (`tabs` or `sections`;
-   `id`/`key`; `title`/`label`), the shape of Steam's tabbed page and of
-   `@decky/ui`'s `Tabs` (`findTabContainer` in `src/gamePageAnchor.ts`).
-   Forge's tab (`forge-mods`, "Mods") goes last, in a **new** array (Steam's
-   own list is never changed in place), its content wrapped in the same error
-   boundary. When the container is controlled (`onShowTab`), the card's X
-   switches to it (`SteamTabs`). The card still goes under Play.
-2. **Section** (no tab container): under Play, a focusable **"Mods" tab
-   header** (crimson underline while open), the card, and the tab's content
-   opening right below the card. A or X on either opens and closes it.
-3. **Row** (neither the tab container nor the play section was found): the
-   old one-line row above the overview panel, unchanged, behind the same
-   failure budget and error boundary.
+- **The tab**: in Steam's tabbed page on screen two (its `tabs` prop, the
+  tab row `gamepadTabbedPageClasses.TabRow`), last, in a **new** array
+  (Steam's own list is never changed in place), its content inside Forge's
+  error boundary. When the tabbed page is controlled (`onShowTab`), the
+  card's X switches to it (`SteamTabs`).
+- **The card**: second among Steam's section cards (`AppDetailsSection`
+  inside `AppDetailSectionList`), after Steam's first card, as on the board
+  (`CARD_INDEX`), and only while the first tab (Steam's Overview) is shown.
+  When the tabbed page is found but its section list is not, once the scout
+  (below) has finished looking, the card ends the first tab's content
+  instead.
+- **Neither found**: nothing at all. The one-line row above Play (anygame.70
+  to .76) and the tab-like section under Play (.71 to .76) are **gone** on
+  Steam pages. The console logs the page outline once: what the scout saw
+  on screen two and the overview panel's render.
 
 On a ROM page (The Collector's own page) Forge registers its tab with
 `order: 25`, so Mods sits between Achievements (20) and Saves (30) as on the
 board; The Collector's built-in orders are Overview 0, Achievements 20,
-Saves 30, Media 34, Details 37, BIOS 40 (anygame.75). The Overview card registers at `order: 20`, between The Collector's RetroAchievements (10) and Save sync (30) cards (anygame.76).
+Saves 30, Media 34, Details 37, BIOS 40 (anygame.75). The Overview card registers at `order: 20`, between The Collector's RetroAchievements (10) and Save sync (30) cards (anygame.76). ROM pages are unchanged by anygame.77.
 
-The console says once which way: *Mods tab in Steam's tab container (level
-N below the overview panel)*, *under Play (...)*, or the fallback line.
+### How the patch finds screen two (anygame.77)
 
-**Not seen on a TV yet**: whether Steam's game page renders a tab container
-of that shape within four levels of the overview panel. If it does not, the
-section form is what shows; nothing breaks either way.
+anygame.72 to .76 followed, from the overview panel, only components handed
+the game (`overview` / `details` props), four levels deep. On the TV that
+chain never reached Steam's tabs: Forge fell back to its row over the art.
+So the patch now finds the way itself (`src/gamePageAnchor.ts`,
+`src/gamePagePatch.tsx`):
+
+1. The route patch puts an invisible **scout** into InnerContainer (a
+   `display: none` span: no size, no focus, nothing drawn).
+2. After the page mounts (`SCOUT_TRIES_MS`: 0.25, 0.7, 1.5, 3 and 6 s) the
+   scout looks inside the page for screen two by Core's class maps:
+   `basicAppDetailsSectionStylerClasses.AppDetailsContainer`, the tab row
+   (`gamepadTabbedPageClasses.TabRow`, else `TabRowTabs`), and the section
+   list (`AppDetailSectionList`, else the parent of the first
+   `AppDetailsSection` / `AppDetailsSectionContainer`), each looked up with
+   `resolveClassModule` (Decky 3: `findClassModule`; Decky 4: `findVar`).
+3. From each element found it climbs React's fibers (`__reactFiber$...`) up
+   to the overview panel (recognised by `overview`, `details`,
+   `bFastRender`), naming every component type on the way: for the tab row,
+   from the element that carries the tab list (`tabs` / `sections`) upward
+   (`tabPageFiber`, `componentPath`, `discoverScreenTwo`).
+4. Those types are kept for the session (`ScreenTwoPaths`): component types
+   are fixed for a Steam build, so later game pages are placed on their first
+   render. The patch follows them from the panel's render down (one tree
+   patcher per type, so a type always gets the same patched copy), as well as
+   the old game carriers (`CARRIER_DEPTH` 4). In a render that holds the
+   tabbed page the tab is added; in one that holds the section list the card
+   is inserted.
+5. When the scout learns a path, Steam is asked to draw the page again: the
+   nearest class component from screen two up to just above the overview
+   panel is told to update. Steam's function components cannot be; then the
+   tab and card appear from Steam's next render of the page (its data loads
+   in after the art), or on the next game page opened.
+
+The console says once which way: *Mods tab in Steam's tab row (N below the
+overview panel)*, *Mods card among Steam's section cards (...)*, *Mods card
+at the end of Steam's first tab*, *Mods path to screen two learned*, or
+*Mods not shown: neither Steam's tab row nor its section cards were found on
+screen two (nothing is drawn on screen one)* followed by the outline (what
+the scout found, the fibers above an element it could not trace to the
+panel, and the overview panel's render).
+
+**Not seen on a TV yet**: that Steam's game page tab row is a tabbed page with
+a `tabs` prop (Core's notes say it is the Library's `tabbedpage`; confirm
+with a Core UI snapshot of a Steam game page), and that the redraw request
+reaches a class component. Tested on fake DOMs and fiber chains shaped like
+the page Core describes, including the TV case where the carrier search finds
+nothing (`tests/gamePageAnchor.test.mjs`).
 
 ### The card
 
-Gunmetal, 10 px radius, one press down from Play:
+Styled like Steam's section cards under Core (and the board's Mods card):
+gunmetal `#1A1D21`, 10 px radius, steel `#C9D1D9` text, 22 x 24 px padding,
+on screen two among Steam's cards:
 
-- **Mods**, the active-mod count (*3 active*, *No mods*), and an amber chip
-  with black text when updates exist (*2 updates*);
+- **MODS** in small caps, the active-mod count large (*3 active*, *3 of 5
+  active*, *No mods*), and an amber `#C98B4A` chip with black text when
+  updates exist (*2 updates*);
 - **one status line**, most urgent first (`cardSummary`): *Locked ·
   Ricochet* (crimson), *Closed early twice · restore offered* (amber), *Not
   set up · press X to set up*, *Load order OK* / *Load order: 1 problem* (the
   Bethesda games), *No mods yet*, *All 4 off*, *Updates waiting*, *Up to
   date*;
-- a controller prompt, **X Mods**; X (or A) opens the Mods tab. Focus is a
-  square crimson edge around the card on a raised surface, no glow.
+- a controller prompt: **X Mods**, or **X Set up** for a game that is not
+  set up. X (or A) opens Steam's Mods tab; when Steam cannot be told to
+  switch tabs, the tab's content opens in a modal (a live copy, so switches
+  show their new state); for a game that is not set up it runs **Set up**
+  (`cardPress`). Focus is a square crimson `#D7263D` edge around the card on
+  the raised `#2A2F36` surface, no glow.
 
-The tab's content is the old expanded view (lock, crash offer, Undo, mods
-with switches, saves, Upscaling, Load order, Set up).
+The **Locked** (anti-cheat) and **Set up** states are this card too, on
+screen two only; the anti-cheat protections are unchanged (installs and
+switching on refused by the backend, the override only in the lock's
+**Why?** modal).
+
+The tab's content is the details view: the anti-cheat lock, the crash offer,
+Undo, the mods with switches, saves, Upscaling, Load order, Set up, one line
+each (`detailLines`), long explanations behind **Why?**. Text is 16 px (the
+title 18 px, buttons 15 px, hints 14 px at 1080p) and never wraps. Pages
+opened from here go back to the game page on B (`pushFromGamePage`).
 
 ### Every game is offered setup
 
@@ -354,7 +418,7 @@ code thread (Azahar). No QR code: Forge bundles no QR encoder.
 **Needs the TV**: the folder hint read from `appDetailsStore` for a shortcut,
 the picker's drive list, and a full shortcut setup.
 
-## The Mods section
+## The route patch
 
 Steam's game page is `/library/app/:appid`. Like ProtonDB Badges and HLTB
 for Deck, the plugin adds a `routerHook.addPatch` on that route and follows
@@ -362,61 +426,21 @@ for Deck, the plugin adds a `routerHook.addPatch` on that route and follows
 `InnerContainer`, which holds the header (hero) and Steam's own overview
 panel. The overview panel is recognised by the props it is rendered with
 (`overview`, `details`, `bFastRender`), the same shape HLTB for Deck keys on.
+The Collector's TV logs prove its place: *replacing AppDetailsOverviewPanel
+at index 2 with RomM wrapper*, so InnerContainer's children hold the panel's
+wrapper at index 2 (`overviewIndex`, `findInsertionChildren`).
 
-### Where it goes: under the Play bar
+`InnerContainer` is found by its class from `appDetailsClasses`, looked up
+through `src/gamePageAnchor.ts`: the named `@decky/ui` export, else
+`findClassModule`, else `findVar` (only in `@decky/ui` 5). The loader supplies
+`@decky/ui`: 4.x under Decky 3.3.1, 5.x under Decky 4.0, whose Steam client
+renamed nearly all classes and whose class names are pinned per Steam build.
+When the class is missing or stale, the page is found as the array that
+holds the overview panel. No overview panel, nothing at all.
 
-The overview panel draws the Play bar, the stats and the tabs itself, so
-anything spliced into `InnerContainer` lands either above Play (over the
-hero) or below every tab. The section goes **directly under the Play bar**
-instead, from inside the panel's own renders.
-
-What is proven on the TV (stable Steam, Decky 3.3.1): The Collector
-(eternal-romm) logs `replacing AppDetailsOverviewPanel at index 2 with RomM
-wrapper (cls=_1_cYNJSvS6IXs9vLTEYjy5)`. So `InnerContainer`'s children hold
-the overview panel's wrapper at index 2, with a class, and the panel element
-under it carries `overview`, `details` and `bFastRender`: the same lookup
-Forge uses (`overviewIndex`, `findInsertionChildren`). The Collector replaces
-that panel wholesale, so its logs say nothing about the panel's inner render.
-Its own notes say the panel draws Play and the tabs through an inner
-component (`se` in Steam's bundle).
-
-anygame.70 followed the panel's component one level and looked for the play
-section in that one render; on the TV it was not there, and the one-line
-fallback showed above Play. From anygame.71 the patch keeps following: in
-each render below the panel that has no play section, every component that
-is handed the game (an `overview` or `details` object prop; function, class,
-memo or forwardRef components only) is followed one level further, up to
-`PLAY_SEARCH_DEPTH` (4) levels and `MAX_CARRIERS` (8) components per render
-(`gameCarriers`, `locatePlaySection` in `src/gamePageAnchor.ts`). Each level
-has its own `createReactTreePatcher`, cached per component type. In the first
-render that holds the play section, the section is spliced in right after
-it; if that render's root element *is* the play section, the section is
-returned beside it in a fragment, never inside it. The play section is found
-by its class, `basicAppDetailsSectionStylerClasses.PlaySection`, else
-`playSectionClasses.Container` (outer one first), both looked up through
-`resolveClassModule` (whole class names only). The followed renders only
-place the section for the game the route is drawing (`activeAppId`), so a
-component Steam also uses elsewhere never grows a row there. Should Steam draw
-the play section twice, only the first copy mounted is shown
-(`PlacementRegistry.isFirstBelow`).
-
-The old anchor stays as the fallback: a copy in `InnerContainer` right before
-the overview panel, which renders **nothing** while a copy under Play is
-mounted (`PlacementRegistry` in `src/gamePageAnchor.ts`). When no copy under
-Play mounts within 600 ms (an unknown or stale class, a play section deeper
-than four levels, a failure in that patch), it shows as a **single line**
-that never expands: A on it opens the game's full Forge page instead.
-
-The console (CEF DevTools) says once per session which path was used:
-
-- *Forge game page: Mods row under Play (level N below the overview panel,
-  after the play section)*, or *... beside the play section's render*;
-- *Forge game page: Mods row above the Play bar (fallback): no play section
-  within 4 levels of the overview panel*, followed by an outline of the
-  panel's first render (component names, classes, prop names), so the next
-  TV log shows what Steam drew instead;
-- *Forge game page: Mods row left out (The Collector draws this page)*;
-- *no play section class on this Steam build* when neither class resolves.
+The only thing the route patch puts into InnerContainer is the scout (see
+"How the patch finds screen two"); the tab and the card are placed from the
+overview panel's own renders, on screen two.
 
 RomM shortcuts: The Collector replaces the overview panel with its own
 wrapper (key `romm-play-section`, `data-romm="true"`). The route patch does
@@ -426,59 +450,8 @@ game-page API instead (see "ROM games" above), and the log says *on The
 Collector's page*. Other non-Steam shortcuts (app type `1 << 30`) get the
 card and tab like Steam games (`isGameType`).
 
-**Still to confirm on a TV**: that the play section is within four levels of
-the panel and is handed the game along the way. The depth search is tested
-on fake trees shaped like The Collector's evidence and against @decky/ui's
-real tree patcher, not on Steam's own components.
-
-`InnerContainer` is found by its class from `appDetailsClasses`, looked up
-through `src/gamePageAnchor.ts`: the named `@decky/ui` export, else
-`findClassModule`, else `findVar` (only in `@decky/ui` 5). The loader supplies
-`@decky/ui`: 4.x under Decky 3.3.1, 5.x under Decky 4.0, whose Steam client
-renamed nearly all classes and whose class names are pinned per Steam build.
-When the class is missing or stale, the fallback goes into whichever
-children array holds the overview panel. No overview panel, no section.
-
-### What the fallback row shows
-
-Since anygame.72 this row is only the last fallback (neither Steam's tab
-container nor the play section found); its expanded details are the Mods
-tab's content.
-
-**Collapsed (the default)**: one row, 56 px tall, gunmetal with a thin
-crimson bar on the left (`ROW_HEIGHT`, `statusChips`, `compactButtons` and
-`savesHint` in `src/forgeRules.ts`):
-
-- **Mods** and one or two status chips: *Locked · Ricochet* (crimson text),
-  *Lock off* (crimson, the override is on), *Updates 2* (amber),
-  *Restore offered* (amber), *3 enabled* (steel), *All 4 off*, *Not modded*,
-  *Not set up* (hint);
-- the last save backup as hint text (*Saves backed up 2 h ago*, *No save
-  backup yet*, an amber *Save backup failed*), only with Ludusavi;
-- at most two buttons, most relevant first: **Restore mods...** (the crash
-  offer), **Undo restore**, then the way to the game's full page (**Mods...**:
-  My Mods, or the store when nothing is installed; **Set up...** in the
-  any-game mode; **Why?** for a locked game Forge does not manage), then
-  **Restore saves...** when a backup exists.
-
-**Expanded** (A on the row; A again folds it): one line per subject, each a
-label, a single line of text cut with an ellipsis, and its buttons
-(`detailLines`): the anti-cheat lock (**Switch N off**, **Why?**) or the
-override (**Lock mods again**, **Why?**), the crash offer (**Restore...**,
-**Not now**, **Why?**), **Undo restore**, the mods (count, **Add mods**,
-**My Mods** or **All N...**, then up to six mods - updates first, then the
-ones that are on - each a switch plus **Open** / **Update**), saves
-(**Restore saves...**), Upscaling and Load order. Long explanations are
-behind **Why?**, in a small modal. Text is 16 px (the title 18 px, buttons
-15 px, hints and chips 14 px at 1080p), in line with Steam's game-page meta
-text, and nothing on the page wraps.
-
-Pages opened from here go back to the game page on B, not to the Quick
-Access Menu (`pushFromGamePage` in `src/Tabs.tsx`).
-
-For a game the plugin does not manage it shows nothing, unless the
-experimental any-game mode is on, in which case it offers to set the game
-up (from the Quick Access Menu).
+For a game the plugin does not manage, the card says *Not set up* and X runs
+**Set up** (see "Every game is offered setup").
 
 ### Failing safe
 
@@ -486,15 +459,18 @@ The page belongs to Steam, so every failure leaves it as Steam drew it:
 
 - each step of the patch is in a `try`; a failure returns Steam's tree
   unchanged;
-- the section renders inside an error boundary that renders nothing on an
-  error;
+- the tab and the card render inside an error boundary that renders nothing
+  on an error;
 - after three failures of either kind in a session the patch stops touching
   the page until the plugin reloads (`FailureBudget`);
 - when the overview panel is not found (soundtracks, tools, a Steam update
-  that moved things) nothing is inserted;
-- the section never takes focus. Play keeps the page's first focus; the
-  row is one press down from it (one press up in the one-line fallback),
-  works with the D-pad and A alone, and leaves B to Steam;
+  that moved things) nothing is inserted; when screen two is not found,
+  nothing is drawn;
+- at most 96 component types are ever wrapped in a session, the discovered
+  path is followed at most 40 components deep and 12 elements per render;
+- nothing takes focus. Play keeps the page's first focus; the tab and card
+  are on screen two, work with the D-pad, A and X, and leave B (and Y, which
+  Core uses to go back to the top) to Steam;
 - the route patch is removed when the plugin unloads.
 
 ## Anti-cheat lock
@@ -541,7 +517,7 @@ Where the verdict comes from, in order:
 1. **Per-game override.** Off by default, offered for **every** locked
    game, online-only ones included. On the game page it is only in the
    lock's **Why?** modal (`LockWhyModal`, `lockModalActions`), never on the
-   row or the expanded lines; there, and in the QAM, it is **one press**:
+   card or the Mods tab's lines; there, and in the QAM, it is **one press**:
    no further dialog. The risk is on the button and in the locked text:
    - games with an offline or anti-cheat-off mode (`OFFLINE_CAPABLE`: Elden
      Ring, Nightreign, Dark Souls III, Armored Core VI, GTA V, Halo MCC) read
@@ -807,11 +783,10 @@ will report the cloud as out of step the next time it runs.
 
 ### Game page and Settings
 
-With Ludusavi installed, the Mods row shows *Saves backed up 12 min ago* (or
-*No save backup yet*) as hint text, an amber *Save backup failed* when the
-latest attempt did not work, and **Restore saves...** once a backup exists;
-the expanded view has a Saves line with **Restore saves...** whenever
-Ludusavi knows the game. Both also show on anti-cheat locked games: a backup
+With Ludusavi installed, the Mods tab has a Saves line (*Saves backed up 12
+min ago*, an amber *Save backup failed* when the latest attempt did not
+work) with **Restore saves...** whenever Ludusavi knows the game (the
+one-line row that also showed it is gone since anygame.77). Both also show on anti-cheat locked games: a backup
 only reads the game, and a restore puts saves back, not mod files.
 
 **Restore saves...** lists Ludusavi's backups of the game, newest first, and
@@ -833,7 +808,7 @@ folder, and that the restore list matches Ludusavi's own.
 
 ## Upscaling (OptiScaler)
 
-A line in the game page's Mods section (expanded view), **Upscaling**, that
+A line in the game page's Mods tab, **Upscaling**, that
 puts [OptiScaler](https://github.com/optiscaler/OptiScaler) into one game:
 it takes the upscaler a game already offers (DLSS, FSR 2/3 or XeSS) and
 runs another one in its place. Shown wherever the section is (managed games,
@@ -1003,7 +978,7 @@ reports the GPU name; and that a game crash shows the removal offer.
 For **Skyrim Special Edition, Fallout 4, Starfield and Oblivion
 Remastered** only (Steam app ids 489830, 377160, 1716740, 2623190, or
 their Nexus domains). Every other game shows nothing new. The game page's
-Mods section gets one **Load order** line in its expanded view: how many
+Mods tab gets one **Load order** line: how many
 plugins are on, the current profile, problems in crimson and warnings in
 amber, and three buttons: **Load order...** (the panel, which also says
 where the rules came from), **Sort** (with LOOT rules) and **Profiles...**.

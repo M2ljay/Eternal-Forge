@@ -1,24 +1,20 @@
 // Forge's Mods on Steam's own game page (/library/app/:appid).
 //
-// anygame.72: mods are a Mods TAB (in Steam's own tab container when the
-// patch finds one; otherwise a Mods section under Play that behaves like a
-// tab) plus an Overview CARD under Play: the active-mod count, an amber
-// "N updates" chip, one status line, and X to open the Mods tab. The tab's
-// content is the old expanded view below. The old row survives only as the
-// fallback above the overview panel (neither anchor found).
+// anygame.77: everything is on screen two of Core's game view (one press down
+// from the play bar), nothing on screen one. Mods are a Mods TAB in Steam's
+// own tabbed page plus an Overview CARD among Steam's section cards: "MODS",
+// the active-mod count, an amber "N updates" chip, one status line, and X to
+// open the Mods tab (Set up... for a game that is not set up; the tab's
+// content in a modal when Steam cannot be told to switch tabs). The tab's
+// content is the details view below. There is no row above or under Play any
+// more: when neither anchor is found nothing is drawn (gamePagePatch.tsx).
 //
-// The row (fallback): collapsed it is one row: "Mods", a status chip or two,
-// the last save backup as a hint, and at most two buttons. A on the row
-// opens the details under it (the anti-cheat lock, the offer to go back
-// after a crash, the mods with their switches, saves, Upscaling and Load
-// order), each one line; long explanations sit behind "Why?" in a small
-// modal. The anti-cheat override is only in the lock's "Why?" modal.
+// The details: the anti-cheat lock, the offer to go back after a crash, the
+// mods with their switches, saves, Upscaling and Load order, each one line;
+// long explanations sit behind "Why?" in a small modal. The anti-cheat
+// override is only in the lock's "Why?" modal.
 //
-// Injected by gamePagePatch.tsx inside an error boundary, twice: under Play
-// ("below") and as a one-line fallback above the overview panel ("above"),
-// which renders nothing while the copy under Play is mounted. Nothing here
-// takes focus on its own: Play keeps the page's first focus, and the row is
-// one press down from it.
+// Nothing here takes focus on its own: Play keeps the page's first focus.
 import {
   ButtonItem,
   ConfirmModal,
@@ -29,7 +25,6 @@ import {
 } from "@decky/ui";
 import { toaster } from "@decky/api";
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { FaChevronDown, FaChevronUp } from "react-icons/fa";
 
 import {
   ForgeGuardSummary,
@@ -59,24 +54,20 @@ import {
 } from "./api";
 import {
   AntiCheatVerdict,
-  CARD_ACTION_LABELS,
   CARD_TEXT,
-  CardAction,
   CardChip,
   CardInput,
-  CardPlacement,
   MODS_TAB_ID,
   MODS_TAB_TITLE,
   StatusTone,
   activeLabel,
+  cardPress,
   cardSummary,
   updatesChip,
   FORGE_CRIMSON,
   FORGE_GUNMETAL,
   FORGE_STEEL,
-  ROW_HEIGHT,
   RestorePlan,
-  compactButtons,
   countLabel,
   detailLines,
   loadOrderSupported,
@@ -89,17 +80,14 @@ import {
   offerBody,
   optiscalerLine,
   overrideLabel,
-  rowPress,
   rowsToShow,
   saveBackupLine,
-  savesHint,
   sectionMode,
   sortOutcome,
-  statusChips,
   undoOutcome,
   warningSummary,
 } from "./forgeRules";
-import { ABOVE_GRACE_MS, aboveFallbackShown, placementLog, placements, steamTabs } from "./gamePageAnchor";
+import { placements, steamTabs } from "./gamePageAnchor";
 import { getForgeSetting, subscribeForgeSettings } from "./forgeSettings";
 import { allowModsAnyway, lockModsAgain, overrideOnLabel } from "./ForgeLock";
 import { SupportedGame, getSupportedGame, isExperimentalEnabled, modeParams } from "./games";
@@ -119,14 +107,12 @@ const BROWSE_ROUTE = "/nexus-mods";
 const DETAIL_ROUTE = "/nexus-mods/mod";
 const MANAGER_ROUTE = "/nexus-mods/manager";
 
-const CARD = "forge-card";
-const MAIN = "forge-row-main";
 const BTN = "forge-btn";
 const ROW = "forge-row";
 const TEXT = "forge-text";
 const OV = "forge-ov";
 const OV_MAIN = "forge-ov-main";
-const TABHEAD = "forge-tabhead";
+const OV_LABEL = "forge-ov-label";
 const TABPANE = "forge-tabpane";
 
 const STATUS_COLOR: Record<StatusTone, string> = {
@@ -186,17 +172,8 @@ export function UpdatesChip({ n }: { n: number }) {
 // Focus is a crimson edge and a lighter surface, never a glow. Text never
 // wraps: one line, cut with an ellipsis.
 const CSS = `
-.${CARD} {
-  margin: 8px 2.8vw 4px;
-  background: ${FORGE_GUNMETAL};
-  border-left: 3px solid ${FORGE_CRIMSON};
-  border-radius: 6px;
-  color: ${FORGE_STEEL};
-  font-size: ${CARD_TEXT.body}px;
-  line-height: 1.3;
-}
 .${TEXT} { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.${BTN}, .${ROW}, .${MAIN} {
+.${BTN}, .${ROW} {
   color: ${FORGE_STEEL} !important;
   border: 2px solid transparent !important;
   border-radius: 6px !important;
@@ -204,7 +181,6 @@ const CSS = `
   min-width: 0 !important;
 }
 .${BTN}, .${ROW} { background: ${GUNMETAL_RAISED} !important; }
-.${MAIN} { background: transparent !important; }
 .${BTN} {
   height: 36px !important;
   padding: 0 14px !important;
@@ -213,35 +189,32 @@ const CSS = `
   white-space: nowrap;
 }
 .${BTN}.gpfocus, .${BTN}.gpfocuswithin, .${BTN}:hover,
-.${ROW}.gpfocus, .${ROW}.gpfocuswithin, .${ROW}:hover,
-.${MAIN}.gpfocus, .${MAIN}.gpfocuswithin, .${MAIN}:hover {
+.${ROW}.gpfocus, .${ROW}.gpfocuswithin, .${ROW}:hover {
   border-color: ${FORGE_CRIMSON} !important;
   background: ${GUNMETAL_RAISED} !important;
   color: ${WHITE} !important;
 }
 .${BTN}.forge-primary { background: ${FORGE_CRIMSON} !important; color: ${WHITE} !important; }
 .${BTN}.forge-primary.gpfocus, .${BTN}.forge-primary:hover { border-color: ${WHITE} !important; }
-.${OV} { margin: 8px 2.8vw 4px; color: ${FORGE_STEEL}; font-size: ${CARD_TEXT.body}px; line-height: 1.3; }
+.${OV} { width: 100%; box-sizing: border-box; margin-bottom: 16px; color: ${FORGE_STEEL}; line-height: 1.3; }
 .${OV_MAIN} {
   position: relative;
+  width: 100% !important;
+  box-sizing: border-box;
   background: ${FORGE_GUNMETAL} !important;
   border: none !important;
   border-radius: 10px !important;
   box-shadow: none !important;
   color: ${FORGE_STEEL} !important;
   min-width: 0 !important;
+  padding: 22px 24px !important;
+  text-align: left;
 }
 .${OV_MAIN}.gpfocus, .${OV_MAIN}:hover { background: ${GUNMETAL_RAISED} !important; }
 .${OV_MAIN}.gpfocus::after, .${OV_MAIN}:hover::after {
   content: ""; position: absolute; inset: -3px; border: 2px solid ${FORGE_CRIMSON}; border-radius: 0; pointer-events: none;
 }
-.${TABHEAD} {
-  background: transparent !important; border: none !important; border-radius: 0 !important; box-shadow: none !important;
-  color: ${FORGE_STEEL} !important; padding: 6px 4px !important; min-width: 0 !important; width: auto !important;
-  font-size: ${CARD_TEXT.title}px !important; font-weight: 700; border-bottom: 3px solid transparent !important;
-}
-.${TABHEAD}.forge-tab-on { color: ${WHITE} !important; border-bottom-color: ${FORGE_CRIMSON} !important; }
-.${TABHEAD}.gpfocus, .${TABHEAD}:hover { color: ${WHITE} !important; background: ${GUNMETAL_RAISED} !important; }
+.${OV_LABEL} { font-size: 13px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: ${FORGE_STEEL}; }
 .${TABPANE} { background: ${FORGE_GUNMETAL}; border-radius: 10px; margin-top: 6px; padding: 8px 14px 12px 16px; }
 `;
 
@@ -414,58 +387,37 @@ async function applyChanges(
   return failed;
 }
 
-/** "below": the Overview card under Play (plus the tab-like section when
- * Steam has no tab container); "above": the one-line row fallback; "tab":
- * the content of Forge's tab in Steam's own tab container. */
-export function GameModsSection({ appId, placement }: { appId: number; placement: CardPlacement | "tab" }) {
-  if (placement === "tab") return <ModsCard appId={appId} placement="below" view="tab" />;
-  return placement === "below" ? <BelowPlay appId={appId} /> : <AbovePlay appId={appId} />;
+/** "card": the Overview card among Steam's section cards; "tab": the content
+ * of Forge's tab in Steam's own tabbed page. Both on screen two only. */
+export function GameModsSection({ appId, placement }: { appId: number; placement: "card" | "tab" }) {
+  if (placement === "tab") return <ModsCard appId={appId} view="tab" />;
+  return <CardSlot appId={appId} />;
 }
 
-/** Under Play: registers itself so the line above stays empty. Should Steam
- * draw the play section twice, only the first copy mounted is shown. */
-function BelowPlay({ appId }: { appId: number }) {
+/** Registers the card while mounted (the page's scout reads it). Should
+ * Steam draw its section list twice, only the first copy mounted is shown. */
+function CardSlot({ appId }: { appId: number }) {
   const [token] = useState(() => ({}));
   const [, rerender] = useState(0);
   useEffect(() => {
     const unsub = placements.subscribe(() => rerender((n) => n + 1));
-    const release = placements.mountBelow(appId, token);
+    const release = placements.mount(appId, token);
     return () => {
       release();
       unsub();
     };
   }, [appId, token]);
-  if (!placements.isFirstBelow(appId, token)) return null;
-  return <ModsCard appId={appId} placement="below" view="card" />;
+  if (!placements.isFirst(appId, token)) return null;
+  return <ModsCard appId={appId} view="card" />;
 }
 
-/** Above the overview panel: only when the copy under Play is not mounted,
- * after a short grace period, and then a single line that never grows. */
-function AbovePlay({ appId }: { appId: number }) {
-  const [, rerender] = useState(0);
-  const [grace, setGrace] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setGrace(true), ABOVE_GRACE_MS);
-    const unsub = placements.subscribe(() => rerender((n) => n + 1));
-    return () => {
-      clearTimeout(timer);
-      unsub();
-    };
-  }, [appId]);
-  if (!aboveFallbackShown(placements.hasBelow(appId), grace)) return null;
-  placementLog.noteFallback();
-  return <ModsCard appId={appId} placement="above" view="row" />;
-}
-
-function ModsCard({ appId, placement, view }: { appId: number; placement: CardPlacement; view: "row" | "card" | "tab" }) {
+function ModsCard({ appId, view }: { appId: number; view: "card" | "tab" }) {
   const game = getSupportedGame(appId);
   const [lo, setLo] = useState<_LoState | undefined>();
-  const [tabOpen, setTabOpen] = useState(false);
   const [, setTabsSeen] = useState(0);
   const [status, setStatus] = useState<Status | undefined>();
   const [mods, setMods] = useState<InstalledMod[] | undefined>();
   const [updates, setUpdates] = useState<Set<string>>(new Set());
-  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [enabledSetting, setEnabledSetting] = useState(() => getForgeSetting("gamePage"));
   const [saves, setSaves] = useState<SaveBackupStatus | undefined>();
@@ -569,8 +521,6 @@ function ModsCard({ appId, placement, view }: { appId: number; placement: CardPl
     setBrowseGame(game);
     pushFromGamePage(MANAGER_ROUTE);
   };
-  // "Mods...": the game's full Forge page, My Mods when it has any.
-  const openFull = () => (list.length > 0 ? openManager() : openStore());
   // Set up right here (a non-Steam shortcut asks for its folder with the
   // controller picker); the QAM's rows do the same.
   const openSetup = () =>
@@ -666,35 +616,7 @@ function ModsCard({ appId, placement, view }: { appId: number; placement: CardPl
   const lockWhy = () =>
     showModal(<LockWhyModal appId={appId} ac={ac} onChanged={() => refresh(false)} />);
 
-  const doAction = (a: CardAction) => {
-    switch (a) {
-      case "restore-mods":
-        return offerRestore();
-      case "undo-restore":
-        return undoRestore();
-      case "mods":
-        return openFull();
-      case "setup":
-        return openSetup();
-      case "why":
-        return lockWhy();
-      case "restore-saves":
-        return restoreSaves();
-    }
-  };
-
-  const chips = statusChips(card);
-  const actions = compactButtons(card);
-  const hint = savesHint(savesFound, lastBackupAt, now);
   const saveLine = saveBackupLine(savesFound, saves?.game, now);
-  const press = rowPress(placement);
-  // The line above the panel never grows: A goes where "Mods..." (or
-  // "Set up...", or the lock's "Why?") would.
-  const onRow =
-    press === "toggle"
-      ? () => setExpanded((e) => !e)
-      : () => (game ? openFull() : locked ? lockWhy() : openSetup());
-  const open = press === "toggle" && expanded;
 
   const detailsBody = (
     <Focusable
@@ -829,107 +751,72 @@ function ModsCard({ appId, placement, view }: { appId: number; placement: CardPl
       </Focusable>
     );
   }
-  if (view === "card") {
-    // Forge's tab is in Steam's tab container: no tab header of our own.
-    const steamTab = steamTabs.injected(appId);
-    // X (and A) open the Mods tab: Steam's own when the container can be
-    // told to switch, else the tab's content right here.
-    const openTab = () => {
-      if (steamTabs.open(appId, MODS_TAB_ID)) return;
-      setTabOpen((o) => !o);
-    };
-    const showPane = tabOpen;
-    return (
-      <Focusable className={OV} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
-        <style>{CSS}</style>
-        {!steamTab && (
-          <Focusable flow-children="row" style={{ display: "flex", gap: "16px", marginBottom: "6px" }}>
-            <DialogButton
-              className={`${TABHEAD}${showPane ? " forge-tab-on" : ""}`}
-              onClick={openTab}
-              onSecondaryButton={openTab}
-              onSecondaryActionDescription={MODS_TAB_TITLE}
-            >
-              {MODS_TAB_TITLE}
-            </DialogButton>
-          </Focusable>
-        )}
-        <DialogButton
-          className={OV_MAIN}
-          onClick={openTab}
-          onSecondaryButton={openTab}
-          onSecondaryActionDescription={showPane ? "Close Mods" : "Open Mods"}
-          style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", padding: "12px 16px", textAlign: "left" }}
-        >
-          <span style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-            <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE, flex: "0 0 auto" }}>Mods</span>
-            <span className={TEXT} style={{ color: FORGE_STEEL, flex: "0 1 auto" }}>
-              {activeLabel(summary.active, game ? list.length : 0)}
+  // The Overview card (view === "card"), styled like Steam's section cards
+  // under Core: gunmetal, 10 px radius, steel text, the amber chip with black
+  // text, a crimson edge on focus and no glow. X opens the Mods tab.
+  const steamTab = steamTabs.injected(appId);
+  const press = cardPress({ mode, steamTab: steamTabs.has(appId) });
+  const openTab = () => {
+    if (press === "setup") return openSetup();
+    if (press === "tab" && steamTabs.open(appId, MODS_TAB_ID)) return;
+    // A fresh copy of the tab (its own state), so switches in the modal
+    // show their new state.
+    showModal(
+      <ModsModal title={`Mods · ${steamName(appId, "this game")}`}>
+        <ModsCard appId={appId} view="tab" />
+      </ModsModal>
+    );
+  };
+  const xLabel = press === "setup" ? "Set up" : MODS_TAB_TITLE;
+  const total = game ? list.length : 0;
+  return (
+    <Focusable className={OV} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
+      <style>{CSS}</style>
+      <DialogButton
+        className={OV_MAIN}
+        onClick={openTab}
+        onSecondaryButton={openTab}
+        onSecondaryActionDescription={xLabel}
+        data-forge-steam-tab={steamTab ? "1" : "0"}
+        style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "10px" }}
+      >
+        <span className={OV_LABEL}>{MODS_TAB_TITLE}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+          {total > 0 ? (
+            <>
+              <span style={{ fontSize: "30px", fontWeight: 700, color: WHITE, flex: "0 0 auto", lineHeight: 1 }}>
+                {summary.active}
+              </span>
+              <span className={TEXT} style={{ color: FORGE_STEEL, fontSize: `${CARD_TEXT.title}px`, flex: "0 1 auto" }}>
+                {total !== summary.active ? `of ${total} active` : "active"}
+              </span>
+            </>
+          ) : (
+            <span className={TEXT} style={{ color: FORGE_STEEL, fontSize: `${CARD_TEXT.title}px`, flex: "0 1 auto" }}>
+              {activeLabel(summary.active, total)}
             </span>
-            <UpdatesChip n={summary.updates} />
-            <span style={{ flex: "1 1 auto" }} />
-            <Prompt button="X" label={showPane ? "Close" : MODS_TAB_TITLE} />
-          </span>
-          <span className={TEXT} style={{ color: STATUS_COLOR[summary.status.tone] }}>
+          )}
+          <UpdatesChip n={summary.updates} />
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+          <span className={TEXT} style={{ color: STATUS_COLOR[summary.status.tone], flex: "1 1 auto" }}>
             {summary.status.text}
           </span>
-        </DialogButton>
-        {showPane && (
-          <Focusable className={TABPANE} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
-            {detailsBody}
-          </Focusable>
-        )}
-      </Focusable>
-    );
-  }
-
-  return (
-    <Focusable className={CARD} flow-children="column" style={{ display: "flex", flexDirection: "column" }}>
-      <style>{CSS}</style>
-      <Focusable
-        flow-children="row"
-        style={{ display: "flex", alignItems: "center", gap: "8px", height: `${ROW_HEIGHT}px`, padding: "0 10px 0 4px" }}
-      >
-        <DialogButton
-          className={MAIN}
-          onClick={onRow}
-          style={{
-            flex: "1 1 auto",
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            height: `${ROW_HEIGHT - 8}px`,
-            padding: "0 12px",
-            textAlign: "left",
-            overflow: "hidden",
-          }}
-        >
-          <span style={{ fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, color: WHITE, flex: "0 0 auto" }}>Mods</span>
-          {chips.map((c) => (
-            <Chip key={c.text} chip={c} />
-          ))}
-          {hint && (
-            <span className={TEXT} style={{ fontSize: `${CARD_TEXT.hint}px`, color: STEEL_MUTED, flex: "0 1 auto" }}>
-              {hint}
-              {saveLine?.failed && <span style={{ color: AMBER }}> · {saveLine.failed}</span>}
-            </span>
-          )}
-          <span style={{ flex: "1 1 auto" }} />
-          {press === "toggle" && (
-            <span style={{ display: "flex", color: STEEL_MUTED, flex: "0 0 auto" }}>
-              {open ? <FaChevronUp /> : <FaChevronDown />}
-            </span>
-          )}
-        </DialogButton>
-        {actions.map((a) => (
-          <Button key={a} disabled={busy} onClick={() => doAction(a)}>
-            {CARD_ACTION_LABELS[a]}
-          </Button>
-        ))}
-      </Focusable>
-
-      {open && detailsBody}
+          <Prompt button="X" label={xLabel} />
+        </span>
+      </DialogButton>
     </Focusable>
+  );
+}
+
+/** The Mods tab's content in a modal, for a card whose tab Steam cannot be
+ * told to show (no tab container, or an uncontrolled one). */
+function ModsModal({ title, children, closeModal }: { title: string; children: ReactNode; closeModal?: () => void }) {
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <div style={{ color: WHITE, fontSize: `${CARD_TEXT.title}px`, fontWeight: 700, marginBottom: "8px" }}>{title}</div>
+      {children}
+    </ModalRoot>
   );
 }
 

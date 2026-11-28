@@ -1,34 +1,44 @@
 // Game-page anchor tests. Run via: pnpm run test:anchor
 // (compiles src/gamePageAnchor.ts standalone, then executes this file)
 // Decky 3.3.1 hands plugins @decky/ui 4 (webpack Steam), Decky 4.0 hands them
-// @decky/ui 5 (ES-module Steam, renamed classes). Both must place the section,
-// and a page without the overview panel must get nothing.
+// @decky/ui 5 (ES-module Steam, renamed classes). Both must find the page, a
+// page without the overview panel must get nothing, and (anygame.77) Forge
+// goes only to screen two: Steam's tab row and section cards, never screen one.
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
 
 import {
-  ABOVE_GRACE_MS,
+  CARD_INDEX,
+  CARRIER_DEPTH,
   MAX_CARRIERS,
-  PLAY_SEARCH_DEPTH,
   PlacementLog,
   PlacementRegistry,
-  aboveFallbackShown,
+  SCOUT_TRIES_MS,
+  ScreenTwoPaths,
+  addCardToFirstTab,
   collectorOwnsPanel,
+  componentPath,
+  discoverScreenTwo,
+  fiberOf,
   findInsertionChildren,
-  findPlaySectionSlot,
+  findSectionHost,
   gameCarriers,
   hasClass,
-  insertAfterPlay,
+  insertCard,
   isFollowable,
-  locatePlaySection,
+  isOverviewFiber,
   outlineTree,
   overviewIndex,
+  pathElements,
   resolveClassModule,
   findTabContainer,
+  firstTabActive,
   addTab,
+  tabPageFiber,
   tabSwitcher,
+  walkRender,
   SteamTabs,
 } from "../.test-build/gamePageAnchor.js";
 
@@ -98,94 +108,6 @@ test("missing, throwing or wrong answers fail soft", () => {
   assert.equal(resolveClassModule(hostile, "appDetailsClasses", ["InnerContainer"]), undefined);
 });
 
-// ---- under the Play bar ---------------------------------------------------------
-// The overview panel's own render: hero-free, the play section first, then the
-// tabs. Forge goes right after the play section, never before it.
-
-function overviewRender(playClass = "PlaySection_x1 Glassy") {
-  const play = { props: { className: playClass, children: "Play" } };
-  const tabs = { props: { className: "Tabs_x2" } };
-  const children = [play, tabs];
-  return { play, tabs, children, tree: { props: { className: "Panel", children: { props: { children } } } } };
-}
-const forge = { key: "forge-mods-below-play", props: {} };
-
-test("the section goes AFTER the play section, before the tabs", () => {
-  const { play, tabs, children, tree } = overviewRender();
-  const at = insertAfterPlay(tree, find, ["PlaySection_x1", undefined], forge, forge.key);
-  assert.equal(at, 1);
-  assert.deepEqual(children, [play, forge, tabs]);
-  assert.ok(children.indexOf(forge) > children.indexOf(play), "never above Play");
-});
-
-test("it is put in once, whatever Steam re-renders", () => {
-  const { children, tree } = overviewRender();
-  insertAfterPlay(tree, find, ["PlaySection_x1"], forge, forge.key);
-  assert.equal(insertAfterPlay(tree, find, ["PlaySection_x1"], { ...forge }, forge.key), -1);
-  assert.equal(children.filter((c) => c.key === forge.key).length, 1);
-});
-
-test("Decky 3.3.1 and 4.0: either play section class finds the slot", () => {
-  const { tree } = overviewRender("aB3_cont PlayContainer_q");
-  assert.equal(findPlaySectionSlot(tree, find, [undefined, "PlayContainer_q"]).index, 1);
-  assert.equal(findPlaySectionSlot(tree, find, ["PlaySection_stale", "PlayContainer_q"]).index, 1);
-});
-
-test("no play section, a stale class or no class map: nothing is inserted (the line above takes over)", () => {
-  const { children, tree } = overviewRender();
-  assert.equal(insertAfterPlay(tree, find, ["stale"], forge, forge.key), -1);
-  assert.equal(insertAfterPlay(tree, find, [undefined, ""], forge, forge.key), -1);
-  assert.equal(insertAfterPlay(null, find, ["PlaySection_x1"], forge, forge.key), -1);
-  assert.equal(children.length, 2);
-});
-
-test("classes match whole names only", () => {
-  assert.ok(hasClass({ props: { className: "a PlaySection_x1 b" } }, ["PlaySection_x1"]));
-  assert.ok(!hasClass({ props: { className: "PlaySection_x10" } }, ["PlaySection_x1"]));
-  assert.ok(!hasClass({ props: {} }, ["PlaySection_x1"]));
-});
-
-test("the line above shows only when nothing is mounted under Play, after the grace period", () => {
-  assert.ok(ABOVE_GRACE_MS > 0 && ABOVE_GRACE_MS <= 1500);
-  assert.equal(aboveFallbackShown(false, false), false);
-  assert.equal(aboveFallbackShown(false, true), true);
-  assert.equal(aboveFallbackShown(true, true), false);
-  const reg = new PlacementRegistry();
-  let calls = 0;
-  const unsub = reg.subscribe(() => calls++);
-  const a = reg.mountBelow(10);
-  const b = reg.mountBelow(10);
-  assert.ok(reg.hasBelow(10));
-  assert.ok(!reg.hasBelow(11));
-  a();
-  a();
-  assert.ok(reg.hasBelow(10), "a second copy keeps it registered; unmount is idempotent");
-  b();
-  assert.ok(!reg.hasBelow(10));
-  unsub();
-  reg.mountBelow(10);
-  assert.equal(calls, 4);
-});
-
-test("the patch follows the panel down to Play and keeps the old anchor only as the one-line fallback", () => {
-  const src = readFileSync(new URL("../src/gamePagePatch.tsx", import.meta.url), "utf8");
-  assert.match(src, /locatePlaySection\(ret, findInReactTree, names\)/);
-  assert.match(src, /<GameModsSection appId=\{appId\} placement="below" \/>/);
-  assert.match(src, /<GameModsSection appId=\{appId\} placement="above" \/>/);
-  assert.match(src, /follow\(1, children\[at\]\.props\.children\)/, "follows the overview panel found by its props");
-  assert.match(src, /gameCarriers\(ret\)\) follow\(level \+ 1, carrier\)/, "and the components it hands the game to");
-  assert.match(src, /findInsertionChildren\(ret, findInReactTree, innerContainer\(\)\)/, "Decky 3/4 InnerContainer lookup kept");
-  assert.match(src, /"basicAppDetailsSectionStylerClasses", \["PlaySection"/);
-  assert.match(src, /"playSectionClasses", \["PlayBarDetailLabel", "Container"\]/);
-  assert.match(src, /collectorOwnsPanel\(children\)/, "Collector-drawn ROM pages are left alone");
-  assert.match(src, /placementLog\.note\(/, "the path used is logged once");
-  const section = readFileSync(new URL("../src/GameModsSection.tsx", import.meta.url), "utf8");
-  assert.match(section, /placements\.mountBelow\(appId, token\)/);
-  assert.match(section, /placements\.isFirstBelow\(appId, token\)/);
-  assert.match(section, /aboveFallbackShown\(placements\.hasBelow\(appId\), grace\)/);
-  assert.match(section, /placementLog\.noteFallback\(\)/);
-});
-
 // ---- Trees shaped like The Collector's TV evidence -------------------------
 // [FE] gameDetailPatch: replacing AppDetailsOverviewPanel at index 2 with RomM
 // wrapper (cls=_1_cYNJSvS6IXs9vLTEYjy5): InnerContainer's third child is the
@@ -237,20 +159,6 @@ function renderOf(element) {
   return null;
 }
 
-// The patch's walk, without React: place under Play, else follow the carriers.
-function descend(element, names, level = 1, log = []) {
-  if (level > PLAY_SEARCH_DEPTH) return { log };
-  const ret = renderOf(element);
-  log.push(level);
-  const match = locatePlaySection(ret, find, names);
-  if (match) return { level, match, ret, log };
-  for (const carrier of gameCarriers(ret)) {
-    const found = descend(carrier, names, level + 1, log);
-    if (found.match) return found;
-  }
-  return { log };
-}
-
 test("Collector-shaped tree: the overview panel is found at index 2, by its props, with its class", () => {
   const { children, tree } = collectorShapedPage();
   assert.equal(overviewIndex(children), 2);
@@ -259,43 +167,6 @@ test("Collector-shaped tree: the overview panel is found at index 2, by its prop
   assert.equal(findInsertionChildren(tree, find, "stale"), children, "Decky 4.0: by the panel");
 });
 
-test("Collector-shaped tree: Play is not in the panel's own render, it is found one component down", () => {
-  const { panelElement } = collectorShapedPage();
-  assert.equal(locatePlaySection(renderOf(panelElement), find, [PLAY]), undefined, "the level the old patch looked at");
-  const { level, match, ret } = descend(panelElement, [PLAY, "PlayContainer_q"]);
-  assert.equal(level, 2);
-  assert.equal(match.kind, "slot");
-  const section = { type: "forge", key: "forge-mods-below-play" };
-  match.slot.children.splice(match.slot.index, 0, section);
-  assert.deepEqual(ret.props.children.map((c) => c.key), ["play", "forge-mods-below-play", "tabs"], "after Play, before the tabs");
-});
-
-test("Decky 4.0: only the second play class is known, still found one level down", () => {
-  const { panelElement } = collectorShapedPage();
-  const { level } = descend(panelElement, ["stale", PLAY]);
-  assert.equal(level, 2);
-});
-
-test("no known play class: the walk stops within the depth limit and the line above takes over", () => {
-  const { panelElement } = collectorShapedPage();
-  const { match, log } = descend(panelElement, ["stale", undefined]);
-  assert.equal(match, undefined);
-  assert.ok(Math.max(...log) <= PLAY_SEARCH_DEPTH);
-});
-
-test("a component whose own root is the play section: matched as the root (drawn beside it)", () => {
-  const root = { type: "div", props: { className: `${PLAY} sticky`, children: [] } };
-  assert.deepEqual(locatePlaySection(root, find, [PLAY]), { kind: "root" });
-});
-
-test("the outer play class wins over an inner one", () => {
-  const inner = { type: "div", props: { className: "PlayContainer_q" } };
-  const outer = { type: "div", props: { className: PLAY, children: [inner] } };
-  const tree = { type: "div", props: { children: [outer, { type: "div", props: { className: "tabs" } }] } };
-  const match = locatePlaySection(tree, find, [PLAY, "PlayContainer_q"]);
-  assert.equal(match.slot.children, tree.props.children);
-  assert.equal(match.slot.index, 1);
-});
 
 test("only components handed the game are followed, never host elements or contexts", () => {
   const { panelElement } = collectorShapedPage();
@@ -317,6 +188,7 @@ test("only components handed the game are followed, never host elements or conte
   assert.deepEqual(gameCarriers(cyclic), []);
 });
 
+
 test("The Collector's RomM wrapper is recognised, Steam's own panel is not", () => {
   const { children } = collectorShapedPage();
   assert.equal(collectorOwnsPanel(children), false);
@@ -326,32 +198,43 @@ test("The Collector's RomM wrapper is recognised, Steam's own panel is not", () 
   assert.equal(overviewIndex(romm), -1, "and nothing is followed there");
 });
 
-test("two copies under Play: only the first mounted is drawn, the next takes over on unmount", () => {
+
+test("two cards mounted: only the first is drawn, the next takes over on unmount", () => {
   const reg = new PlacementRegistry();
+  let calls = 0;
+  const unsub = reg.subscribe(() => calls++);
   const a = {};
   const b = {};
-  const ra = reg.mountBelow(7, a);
-  reg.mountBelow(7, b);
-  assert.ok(reg.isFirstBelow(7, a));
-  assert.ok(!reg.isFirstBelow(7, b));
+  const ra = reg.mount(7, a);
+  const rb = reg.mount(7, b);
+  assert.ok(reg.isFirst(7, a));
+  assert.ok(!reg.isFirst(7, b));
   ra();
-  assert.ok(reg.isFirstBelow(7, b));
-  assert.ok(reg.hasBelow(7));
-  assert.ok(!reg.isFirstBelow(8, b));
+  ra();
+  assert.ok(reg.isFirst(7, b), "unmount is idempotent and hands over");
+  assert.ok(reg.has(7));
+  assert.ok(!reg.isFirst(8, b));
+  rb();
+  assert.ok(!reg.has(7));
+  unsub();
+  reg.mount(7);
+  assert.equal(calls, 4);
 });
 
-test("the path used is logged once; the fallback line carries the panel outline", () => {
+test("where Forge went is logged once; 'nothing shown' carries the page outline", () => {
   const lines = [];
   const log = new PlacementLog((m) => lines.push(m));
-  assert.ok(log.note("under Play (level 2)"));
-  assert.ok(!log.note("under Play (level 2)"));
+  assert.ok(log.note("tab in Steam's tab row (3 below the overview panel)"));
+  assert.ok(!log.note("tab in Steam's tab row (3 below the overview panel)"));
   const { panelElement } = collectorShapedPage();
   log.rememberOutline(outlineTree(renderOf(panelElement)));
-  assert.ok(log.noteFallback());
-  assert.ok(!log.noteFallback());
+  assert.ok(log.noteNothing(["screen two: container not found", "tab row not found"]));
+  assert.ok(!log.noteNothing(["again"]), "once per session");
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /^Forge game page: Mods row under Play/);
-  assert.match(lines[1], /above the Play bar \(fallback\)/);
+  assert.match(lines[0], /^Forge game page: Mods tab in Steam's tab row/);
+  assert.match(lines[1], /not shown: neither Steam's tab row nor its section cards/);
+  assert.match(lines[1], /nothing is drawn on screen one/);
+  assert.match(lines[1], /screen two: container not found\ntab row not found\noverview panel render:/);
   assert.match(lines[1], /Inner \{overview,details\}/, "outline names the inner component and its props");
   const throwing = new PlacementLog(() => {
     throw new Error("no console");
@@ -372,6 +255,338 @@ test("the outline is bounded and survives odd nodes", () => {
   assert.deepEqual(outlineTree(null), []);
 });
 
+
+
+// ---- Screen two (anygame.77) -------------------------------------------------
+// The TV (anygame.72-.76): the carrier search (components handed `overview` /
+// `details`) never reached Steam's tabs, so the one-line row showed over the
+// art. These trees reproduce that: the overview panel hands the game to no
+// one, the tabbed page sits inside AppDetailsContainer three components down,
+// and the section cards are a tab's content. The scout's DOM + fiber climb
+// names the way; the patch then follows it.
+
+function Layout() {}
+function Body() {}
+function Focus() {}
+const memoFocus = { $$typeof: Symbol.for("react.memo"), type: Focus };
+function TabbedPage() {}
+function Sections() {}
+function Section() {}
+
+const shown = [];
+function tvTabbedPage() {
+  return {
+    type: TabbedPage,
+    props: {
+      tabs: [
+        { id: "activity", title: "Activity", content: { type: Sections, props: {} } },
+        { id: "info", title: "Game Info", content: "b" },
+      ],
+      activeTab: "activity",
+      onShowTab: (id) => shown.push(id),
+    },
+  };
+}
+
+// What each component renders on the TV-shaped page (level 1 = the panel).
+function renderTV(element) {
+  switch (element?.type) {
+    case Panel:
+      return { type: provider, props: { value: {}, children: { type: Layout, props: { appid: 489830 } } } };
+    case Layout:
+      return {
+        type: "div",
+        props: {
+          className: "AppDetailsRoot_q",
+          children: [
+            { type: "div", key: "play", props: { className: `x ${PLAY}`, children: "Play" } },
+            { type: "div", key: "two", props: { className: "AppDetailsContainer_q", children: { type: Body, props: {} } } },
+          ],
+        },
+      };
+    case Body:
+      return { type: memoFocus, props: { children: tvTabbedPage() } };
+    case memoFocus:
+      return element.props.children;
+    case TabbedPage:
+      return { type: "div", props: { className: "TabRow_q", children: [] } };
+    case Sections:
+      return {
+        type: "div",
+        props: {
+          className: "AppDetailSectionList_q",
+          children: [
+            { type: Section, key: "ach", props: { title: "Achievements" } },
+            { type: Section, key: "cloud", props: { title: "Cloud saves" } },
+          ],
+        },
+      };
+    default:
+      return null;
+  }
+}
+
+const FORGE_CARD = { type: "forge-card", key: "forge-mods-card", props: {} };
+
+// The patch's walk, without React: the tab into a tab container, the card into
+// the section list, then the game carriers (within CARRIER_DEPTH) and the
+// discovered path's components one level further.
+function simulate(types, sectionHost, render = renderTV) {
+  const placed = { tab: undefined, card: undefined, visited: [] };
+  const visit = (el, depth) => {
+    if (depth > 40) return;
+    const ret = render(el);
+    if (!ret) return;
+    placed.visited.push(depth);
+    const tabs = findTabContainer(ret);
+    if (tabs && addTab(tabs, "forge-mods", "Mods", "TAB")) placed.tab = { depth, tabs };
+    const host = findSectionHost(ret, sectionHost);
+    if (host && insertCard(host, FORGE_CARD, FORGE_CARD.key) >= 0) placed.card = { depth, host };
+    const next = new Set(pathElements(ret, types));
+    if (depth < CARRIER_DEPTH) for (const c of gameCarriers(ret)) next.add(c);
+    for (const n of next) visit(n, depth + 1);
+  };
+  visit({ type: Panel, props: { overview, details, bFastRender: false } }, 1);
+  return placed;
+}
+
+// A fake DOM with React fibers, shaped like the TV page.
+let fiberKey = 0;
+function el(className, fiber, children = []) {
+  const node = { className, children, parentElement: null };
+  node[`__reactFiber$k${fiberKey++}`] = fiber;
+  for (const c of children) c.parentElement = node;
+  node.querySelector = (sel) => {
+    const cls = sel.replace(/^\./, "");
+    const walk = (n) => {
+      for (const c of n.children) {
+        if (typeof c.className === "string" && c.className.split(/\s+/).includes(cls)) return c;
+        const deep = walk(c);
+        if (deep) return deep;
+      }
+      return null;
+    };
+    return walk(node);
+  };
+  return node;
+}
+
+function tvDom({ layoutType = Layout, withListClass = true } = {}) {
+  const f = (elementType, memoizedProps, ret) => ({ elementType, type: elementType, memoizedProps, return: ret });
+  const panelFiber = f(Panel, { overview, details, bFastRender: false }, f("div", { className: "InnerContainer_abc" }, null));
+  const providerFiber = f(provider, { value: {} }, panelFiber);
+  const layoutFiber = f(layoutType, { appid: 489830 }, providerFiber);
+  const rootHost = f("div", { className: "AppDetailsRoot_q" }, layoutFiber);
+  const containerHost = f("div", { className: "AppDetailsContainer_q" }, rootHost);
+  const bodyFiber = f(Body, {}, containerHost);
+  const focusFiber = f(memoFocus, {}, bodyFiber);
+  const tabbedFiber = f(TabbedPage, tvTabbedPage().props, focusFiber);
+  const tabRowHost = f("div", { className: "TabRow_q" }, tabbedFiber);
+  const sectionsFiber = f(Sections, {}, tabbedFiber);
+  const listClass = withListClass ? "AppDetailSectionList_q" : "x9Sections";
+  const listHost = f("div", { className: listClass }, sectionsFiber);
+  const sectionHost = f("div", { className: "AppDetailsSection_q" }, f(Section, {}, listHost));
+  const dom = el("InnerContainer_abc", panelFiber.return, [
+    el("Header_q", null),
+    el("AppDetailsRoot_q", rootHost, [
+      el(`x ${PLAY}`, null),
+      el("AppDetailsContainer_q", containerHost, [
+        el("TabRow_q", tabRowHost, [el("Tab_q", null)]),
+        el(listClass, listHost, [el("AppDetailsSection_q", sectionHost), el("AppDetailsSection_q", sectionHost)]),
+      ]),
+    ]),
+  ]);
+  return { dom, panelFiber, tabbedFiber, tabRowHost, listHost };
+}
+
+const CLS = {
+  container: "AppDetailsContainer_q",
+  tabRow: ["TabRow_q"],
+  sectionList: "AppDetailSectionList_q",
+  section: ["AppDetailsSection_q"],
+};
+
+test("the TV case: the game-carrier search alone never reaches Steam's tabs or cards", () => {
+  const placed = simulate(new Set(), undefined);
+  assert.equal(placed.tab, undefined, "no tab found by carriers (what the TV showed)");
+  assert.equal(placed.card, undefined);
+  assert.ok(Math.max(...placed.visited) <= CARRIER_DEPTH);
+});
+
+test("the scout finds screen two by class and names the components down to it", () => {
+  const { dom } = tvDom();
+  const s = discoverScreenTwo(dom, CLS);
+  assert.equal(s.container, true);
+  assert.equal(s.tabRow, true);
+  assert.deepEqual(s.tabPath, [Layout, Body, memoFocus], "panel (exclusive) down to the tabbed page's parent; contexts and hosts skipped");
+  assert.equal(s.sections, true);
+  assert.deepEqual(s.sectionPath, [Layout, Body, memoFocus, TabbedPage, Sections]);
+  assert.deepEqual(s.sectionHost, { token: "AppDetailSectionList_q" });
+});
+
+test("with the scout's path the patch puts the tab in Steam's tab row and the card second among the section cards", () => {
+  const { dom } = tvDom();
+  const s = discoverScreenTwo(dom, CLS);
+  const paths = new ScreenTwoPaths();
+  assert.equal(paths.learn(s), true);
+  const placed = simulate(paths.types, paths.sectionHost);
+  assert.equal(placed.tab.depth, 3, "Body's render holds the tabbed page");
+  assert.deepEqual(placed.tab.tabs.node.props.tabs.map((t) => t.id), ["activity", "info", "forge-mods"]);
+  assert.equal(CARD_INDEX, 1);
+  assert.deepEqual(placed.card.host.props.children.map((c) => c.key), ["ach", "forge-mods-card", "cloud"]);
+  // X on the card can switch Steam's tabbed page to Mods.
+  const tabs = new SteamTabs();
+  tabs.note(1, tabSwitcher(placed.tab.tabs));
+  assert.equal(tabs.open(1, "forge-mods"), true);
+  assert.deepEqual(shown.slice(-1), ["forge-mods"]);
+});
+
+test("NOTHING is drawn on screen one when no anchor is found", () => {
+  // A page with no screen two at all (or a Steam build whose classes are unknown).
+  const bare = el("InnerContainer_abc", null, [el("Header_q", null), el(`x ${PLAY}`, null)]);
+  for (const cls of [CLS, {}]) {
+    const s = discoverScreenTwo(bare, cls);
+    assert.deepEqual([s.container, s.tabRow, s.sections, s.tabPath, s.sectionPath], [false, false, false, undefined, undefined]);
+    assert.ok(s.outline.length >= 3, "what was looked for is kept for the log line");
+    assert.equal(new ScreenTwoPaths().learn(s), false);
+  }
+  const placed = simulate(new Set(), undefined);
+  assert.equal(placed.tab, undefined);
+  assert.equal(placed.card, undefined);
+  // Screen one (the play bar's render) is never written to.
+  const layout = renderTV({ type: Layout });
+  assert.deepEqual(layout.props.children.map((c) => c.key), ["play", "two"]);
+  // And the patch has no other way onto the page: the only element it puts in
+  // InnerContainer is the scout, which draws nothing.
+  const src = readFileSync(new URL("../src/gamePagePatch.tsx", import.meta.url), "utf8");
+  const route = src.slice(src.indexOf("export function registerGamePagePatch"));
+  assert.ok(!/<GameModsSection/.test(route), "no Mods element in the route's InnerContainer");
+  assert.equal((route.match(/children\.splice\(/g) || []).length, 1);
+  assert.match(route, /children\.splice\(at, 0, <ScreenTwoScout key=\{SCOUT_KEY\} appId=\{appId\} \/>\)/);
+  const scout = src.slice(src.indexOf("function ScreenTwoScout("), src.indexOf("export function registerGamePagePatch"));
+  assert.match(scout, /return <span ref=\{ref\} data-forge-scout="" aria-hidden="true" style=\{\{ display: "none" \}\} \/>;/);
+  assert.ok(!/<GameModsSection|<ModsCard/.test(scout));
+  assert.match(scout, /placementLog\.noteNothing\(/, "nothing placed: the outline is logged once");
+  const section = readFileSync(new URL("../src/GameModsSection.tsx", import.meta.url), "utf8");
+  assert.match(section, /placement: "card" \| "tab"/, "only screen-two placements exist");
+  assert.ok(!/placement="(above|below)"|AbovePlay|BelowPlay|aboveFallbackShown/.test(src + section), "the row above / under Play is gone");
+});
+
+test("the patch follows the panel, the game carriers and the scout's path; tab and card only on screen two", () => {
+  const src = readFileSync(new URL("../src/gamePagePatch.tsx", import.meta.url), "utf8");
+  assert.match(src, /follow\(children\[at\]\.props\.children, 1\)/, "follows the overview panel found by its props");
+  assert.match(src, /pathElements\(ret, screenTwo\.types\)/, "and the discovered path");
+  assert.match(src, /if \(depth < CARRIER_DEPTH\) for \(const c of gameCarriers\(ret\)\) next\.add\(c\)/);
+  assert.match(src, /findInsertionChildren\(ret, findInReactTree, innerContainer\(\)\)/, "Decky 3/4 InnerContainer lookup kept");
+  assert.match(src, /"basicAppDetailsSectionStylerClasses", \["AppDetailsRoot", "AppDetailsContainer"\]/);
+  assert.match(src, /"gamepadTabbedPageClasses", \["GamepadTabbedPage", "TabRow"\]/);
+  assert.match(src, /collectorOwnsPanel\(children\)/, "Collector-drawn ROM pages are left alone");
+  assert.match(src, /insertCard\(host, card\(appId\), CARD_KEY\)/);
+  assert.match(src, /addTab\(\s*tabs,\s*MODS_TAB_ID,/);
+  assert.match(src, /placementLog\.note\(/, "where Forge went is logged once");
+  const section = readFileSync(new URL("../src/GameModsSection.tsx", import.meta.url), "utf8");
+  assert.match(section, /placements\.mount\(appId, token\)/);
+  assert.match(section, /placements\.isFirst\(appId, token\)/);
+});
+
+test("a patched type in the fibers is named by Steam's own type", () => {
+  const Patched = function PatchedLayout() {};
+  const { dom } = tvDom({ layoutType: Patched });
+  const s = discoverScreenTwo(dom, CLS, (t) => (t === Patched ? Layout : t));
+  assert.equal(s.tabPath[0], Layout);
+});
+
+test("no AppDetailSectionList class: the section cards' parent is found by its exact class", () => {
+  const { dom } = tvDom({ withListClass: false });
+  const s = discoverScreenTwo(dom, { ...CLS, sectionList: undefined });
+  assert.deepEqual(s.sectionHost, { exact: "x9Sections" });
+  const paths = new ScreenTwoPaths();
+  paths.learn(s);
+  const placed = simulate(paths.types, paths.sectionHost, (e) => {
+    const r = renderTV(e);
+    if (e?.type === Sections) r.props.className = "x9Sections";
+    return r;
+  });
+  assert.equal(placed.card.host.props.className, "x9Sections");
+});
+
+test("fibers: found by React's key, climbs stop at the overview panel, a missing panel gives no path", () => {
+  const fiber = { memoizedProps: {} };
+  assert.equal(fiberOf({ __reactFiber$abc: fiber }), fiber);
+  assert.equal(fiberOf({ __reactInternalInstance$abc: fiber }), fiber);
+  assert.equal(fiberOf({}), undefined);
+  assert.equal(fiberOf(null), undefined);
+  assert.ok(isOverviewFiber({ memoizedProps: { overview: {}, details: {}, bFastRender: false } }));
+  assert.ok(!isOverviewFiber({ memoizedProps: { overview: {} } }));
+  const orphan = { elementType: Body, memoizedProps: {}, return: { elementType: Layout, memoizedProps: {}, return: null } };
+  assert.equal(componentPath(orphan), undefined, "not under the overview panel: no path");
+  const { tabRowHost, tabbedFiber } = tvDom();
+  assert.equal(tabPageFiber(tabRowHost), tabbedFiber);
+  const { panelFiber } = tvDom();
+  assert.equal(tabPageFiber({ memoizedProps: {}, return: panelFiber }), undefined, "the climb stops at the panel");
+  const cyclic = { elementType: Body, memoizedProps: {} };
+  cyclic.return = cyclic;
+  assert.equal(componentPath(cyclic), undefined, "bounded");
+});
+
+test("walkRender reaches tab contents and element props; pathElements is bounded", () => {
+  const inner = { type: Sections, props: {} };
+  const tree = { type: "div", props: { header: { type: Section, props: {} }, children: { type: TabbedPage, props: { tabs: [{ id: "a", title: "A", content: inner }, { id: "b", title: "B" }] } } } };
+  const seen = [];
+  walkRender(tree, (n) => void seen.push(n.type));
+  assert.ok(seen.includes(Sections) && seen.includes(Section));
+  assert.deepEqual(pathElements(tree, new Set([Sections])), [inner]);
+  assert.deepEqual(pathElements(tree, new Set()), []);
+  const many = { type: "div", props: { children: Array.from({ length: 50 }, () => ({ type: Body, props: {} })) } };
+  assert.equal(pathElements(many, new Set([Body]), 12).length, 12);
+  const cyclic = { type: "div", props: {} };
+  cyclic.props.children = [cyclic];
+  assert.doesNotThrow(() => walkRender(cyclic, () => false));
+});
+
+test("the card goes in once, second, whatever the list holds", () => {
+  const two = { props: { className: "L", children: [{ key: "a" }, { key: "b" }] } };
+  assert.equal(insertCard(two, FORGE_CARD, FORGE_CARD.key), 1);
+  assert.equal(insertCard(two, FORGE_CARD, FORGE_CARD.key), -1);
+  assert.deepEqual(two.props.children.map((c) => c.key), ["a", "forge-mods-card", "b"]);
+  const one = { props: { children: { key: "a" } } };
+  assert.equal(insertCard(one, FORGE_CARD, FORGE_CARD.key), 1);
+  assert.deepEqual(one.props.children.map((c) => c.key), ["a", "forge-mods-card"]);
+  const none = { props: { children: undefined } };
+  assert.equal(insertCard(none, FORGE_CARD, FORGE_CARD.key), 0);
+  assert.equal(insertCard(null, FORGE_CARD, FORGE_CARD.key), -1);
+  assert.ok(hasClass({ props: { className: "a AppDetailSectionList_q" } }, ["AppDetailSectionList_q"]));
+  assert.equal(findSectionHost({ props: { className: "AppDetailSectionList_q0", children: [] } }, { token: "AppDetailSectionList_q" }), undefined, "whole classes only");
+  assert.equal(findSectionHost({ props: {} }, undefined), undefined);
+});
+
+test("no section list but a tabbed page: the card ends the first tab, once; the card belongs to the first tab only", () => {
+  const page = tvTabbedPage();
+  const c = findTabContainer(page);
+  const before = page.props.tabs[0];
+  assert.equal(addCardToFirstTab(c, "forge-mods-card", (content) => ["WRAPPED", content]), true);
+  assert.equal(addCardToFirstTab(findTabContainer(page), "forge-mods-card", (x) => x), false, "once per render");
+  assert.equal(page.props.tabs[0].id, "activity", "Steam's selection is unchanged");
+  assert.deepEqual(page.props.tabs[0].content, ["WRAPPED", before.content]);
+  assert.equal(before.content.type, Sections, "Steam's own tab object is not changed in place");
+  assert.equal(firstTabActive(c), true);
+  assert.equal(firstTabActive(findTabContainer({ props: { tabs: page.props.tabs, activeTab: "info" } })), false);
+  assert.equal(firstTabActive(findTabContainer({ props: { tabs: page.props.tabs } })), true, "unknown: assume the first");
+});
+
+test("the scout keeps looking for a few seconds, and what it learns is kept for the session", () => {
+  assert.ok(SCOUT_TRIES_MS.length >= 3);
+  assert.ok(SCOUT_TRIES_MS.every((ms, i) => i === 0 || ms > SCOUT_TRIES_MS[i - 1]));
+  assert.ok(SCOUT_TRIES_MS[SCOUT_TRIES_MS.length - 1] <= 10000);
+  const paths = new ScreenTwoPaths();
+  let heard = 0;
+  paths.subscribe(() => heard++);
+  const s = discoverScreenTwo(tvDom().dom, CLS);
+  assert.equal(paths.learn(s), true);
+  assert.equal(paths.learn(s), false, "nothing new the second time");
+  assert.equal(heard, 1);
+  assert.equal(paths.tabFound, true);
+});
 
 // ---- Steam's tab container (anygame.72) -------------------------------------
 

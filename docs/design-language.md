@@ -138,7 +138,7 @@ than by a separate bar. One language for "this is working" everywhere.
 
 ### Forge surfaces
 
-The Mods section on Steam's game page and the tile dots sit on Steam's own
+The Mods tab and card on Steam's game page and the tile dots sit on Steam's own
 pages and use the same palette: black behind, crimson for accents and
 problems (an update, a lock, the restore offer), steel for secondary text,
 gunmetal for surfaces. The crimson update dots on library tiles are an
@@ -147,7 +147,8 @@ elsewhere. Focus is a crimson edge on a lighter surface. See
 [forge.md](forge.md).
 
 The game page's **Mods card** (anygame.72, Steam pages and The Collector's
-ROM pages alike): gunmetal `#1A1D21` on black, 10 px radius, the raised
+ROM pages alike; on Steam pages among Steam's section cards on screen two
+since anygame.77, never over the art or the play bar): gunmetal `#1A1D21` on black, 10 px radius, the raised
 `#2A2F36` surface and a **square** crimson edge on focus (no glow), the
 updates chip amber `#C98B4A` with black text, one status line coloured by
 tone (green OK, amber waiting, crimson problems, steel-muted hints), and a
