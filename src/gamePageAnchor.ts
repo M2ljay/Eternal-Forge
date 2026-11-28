@@ -161,7 +161,7 @@ export function walkRender(tree: any, visit: (node: any) => boolean | void, maxD
       if (key === "children") continue;
       const value = props[key];
       if (isElementLike(value)) walk(value, depth + 1);
-      else if (TAB_PROPS.includes(key) && Array.isArray(value)) {
+      else if (Array.isArray(value) && (TAB_PROPS.includes(key) || tabShape(value))) {
         for (const tab of value) if (isElementLike(tab?.content)) walk(tab.content, depth + 1);
       }
     }
@@ -265,20 +265,21 @@ function fiberType(f: any): unknown {
   return f?.elementType ?? f?.type;
 }
 
-/** The component types from just below the overview panel down to `start`
- * (inclusive), outermost first, mapped through `original` (the patch swaps
+/** The component types from just below the overview panel (or the first
+ * ancestor `stop` accepts) down to `start` (inclusive), outermost first, mapped through `original` (the patch swaps
  * types it follows for patched copies; a path must name Steam's own types).
  * Host elements, contexts and fragments are skipped. Undefined when the
  * overview panel is not an ancestor within `maxSteps`. */
 export function componentPath(
   start: any,
   original: (t: unknown) => unknown = (t) => t,
-  maxSteps = 120
+  maxSteps = 120,
+  stop: (f: any) => boolean = isOverviewFiber
 ): unknown[] | undefined {
   const out: unknown[] = [];
   let f = start;
   for (let i = 0; f && i < maxSteps; i++, f = f.return) {
-    if (isOverviewFiber(f)) return out.reverse();
+    if (stop(f)) return out.reverse();
     const t = fiberType(f);
     if (isFollowable({ type: t })) out.push(original(t));
   }
@@ -293,7 +294,7 @@ export function tabPageFiber(start: any, maxSteps = 60): any {
   for (let i = 0; f && i < maxSteps; i++, f = f.return) {
     if (isOverviewFiber(f)) return undefined;
     const p = f.memoizedProps;
-    if (isObject(p) && TAB_PROPS.some((k) => tabShape(p[k]))) return f;
+    if (isObject(p) && findTabProp(p)) return f;
   }
   return undefined;
 }
@@ -313,22 +314,25 @@ export function fiberOutline(start: any, maxLines = 30): string[] {
   return lines;
 }
 
-/** Screen two's classes as the loader maps them; any may be missing. */
+/** Screen two's classes, each the union of every Steam class module that
+ * carries it (anygame.78: Steam ships duplicate modules with the same keys and
+ * different hashes, and either copy may be the one on screen). Any may be
+ * empty. */
 export interface ScreenTwoClasses {
-  /** basicAppDetailsSectionStylerClasses.AppDetailsContainer */
-  container?: string;
-  /** gamepadTabbedPageClasses.TabRow (TabRowTabs as a second try) */
+  /** appdetails (basicappdetailssectionstyler) AppDetailsContainer */
+  container?: string[];
+  /** tabbedpage TabRow (TabRowTabs as a second try) */
   tabRow?: string[];
-  /** basicAppDetailsSectionStylerClasses.AppDetailSectionList */
-  sectionList?: string;
-  /** appdetailssection's AppDetailsSection / AppDetailsSectionContainer */
+  /** appdetails AppDetailSectionList */
+  sectionList?: string[];
+  /** appsection AppDetailsSection / AppDetailsSectionContainer */
   section?: string[];
 }
 
 /** How to find the section list's host element in a render. */
 export interface HostMatch {
-  /** A whole class it carries (AppDetailSectionList), when known. */
-  token?: string;
+  /** Whole classes it may carry (AppDetailSectionList, every copy), when known. */
+  tokens?: string[];
   /** Else its exact className, read from the DOM. */
   exact?: string;
 }
@@ -337,47 +341,97 @@ export interface ScreenTwo {
   /** Screen two's container was found in the DOM. */
   container: boolean;
   tabRow: boolean;
+  /** The element carrying the tab list was found above the tab row. */
+  tabbedPage: boolean;
+  /** That element's component type (Steam's tabbed page), for the global patch. */
+  tabbedType?: unknown;
   /** Types from below the overview panel down to the tabbed page's parent. */
   tabPath?: unknown[];
   sections: boolean;
   /** Types from below the overview panel down to the section list's parent. */
   sectionPath?: unknown[];
+  /** Types from below the tabbed page down to the section list's parent (the
+   * way from the first tab's content to the cards). */
+  contentPath?: unknown[];
   sectionHost?: HostMatch;
   /** What was seen, for the log line when nothing could be placed. */
   outline: string[];
 }
 
-function query(root: any, cls: string | undefined): any {
-  if (!cls || !root || typeof root.querySelector !== "function") return null;
+/** A CSS selector list for a set of class values (each may hold several
+ * space-separated names, or `|`-separated alternatives as Core writes merged
+ * maps). Names that are not plain class names are dropped; undefined when
+ * nothing is left. */
+export function classSelector(values: readonly (string | undefined)[] | undefined): string | undefined {
+  const out: string[] = [];
+  for (const value of values ?? []) {
+    if (typeof value !== "string") continue;
+    for (const alt of value.split("|")) {
+      const names = alt.trim().split(/\s+/).filter(Boolean);
+      if (!names.length || !names.every((n) => CLASS_NAME.test(n))) continue;
+      const sel = "." + names.join(".");
+      if (!out.includes(sel)) out.push(sel);
+    }
+  }
+  return out.length ? out.join(",") : undefined;
+}
+
+const CLASS_NAME = /^-?[A-Za-z_][\w-]*$/;
+
+function query(root: any, cls: readonly string[] | undefined): any {
+  const sel = classSelector(cls);
+  if (!sel || !root || typeof root.querySelector !== "function") return null;
   try {
-    return root.querySelector(`.${cls}`);
+    return root.querySelector(sel);
   } catch {
     return null;
   }
 }
 
+/** The scopes the scout searches, closest first: the element it sits in, then
+ * up to `levels` ancestors (screen two may sit beside InnerContainer rather
+ * than inside it on some Steam builds). */
+export function scoutScopes(root: any, levels = 3): any[] {
+  const out: any[] = [];
+  for (let el = root, i = 0; el && i <= levels; i++, el = el.parentElement) out.push(el);
+  return out;
+}
+
+/** The fiber that carries a tab list (any tab-shaped prop): Steam's tabbed page. */
+export function isTabbedFiber(f: any): boolean {
+  const p = f?.memoizedProps;
+  return isObject(p) && Boolean(findTabProp(p));
+}
+
 /** Looks up screen two inside `root` (the page's InnerContainer element, from
- * the scout) and the component paths down to its tabbed page and section
- * list. Never throws. */
+ * the scout; its ancestors as a second try) and the component paths down to
+ * its tabbed page and section list. Never throws. */
 export function discoverScreenTwo(
   root: any,
   cls: ScreenTwoClasses,
   original: (t: unknown) => unknown = (t) => t
 ): ScreenTwo {
-  const out: ScreenTwo = { container: false, tabRow: false, sections: false, outline: [] };
+  const out: ScreenTwo = { container: false, tabRow: false, tabbedPage: false, sections: false, outline: [] };
   try {
-    const container = query(root, cls.container);
+    let container: any = null;
+    let scope: any = root;
+    for (const s of scoutScopes(root)) {
+      container = query(s, cls.container);
+      if (container) break;
+    }
     out.container = Boolean(container);
-    const scope = container ?? root;
+    if (container) scope = container;
     out.outline.push(
-      `screen two: container ${container ? "found" : cls.container ? "not found" : "class unknown"}`
+      `screen two: container ${container ? "found" : cls.container?.length ? "not found" : "class unknown"}`
     );
 
-    let tabRow: any = null;
-    for (const c of cls.tabRow ?? []) if (!tabRow) tabRow = query(scope, c);
+    let tabRow: any = query(scope, cls.tabRow);
+    if (!tabRow && !container) for (const s of scoutScopes(root).slice(1)) if (!tabRow) tabRow = query(s, cls.tabRow);
     out.tabRow = Boolean(tabRow);
     if (tabRow) {
       const page = tabPageFiber(fiberOf(tabRow));
+      out.tabbedPage = Boolean(page);
+      if (page) out.tabbedType = original(fiberType(page));
       const path = page ? componentPath(page.return, original) : undefined;
       if (path) out.tabPath = path;
       out.outline.push(
@@ -389,25 +443,27 @@ export function discoverScreenTwo(
     }
 
     let list: any = query(scope, cls.sectionList);
-    let host: HostMatch | undefined = list && cls.sectionList ? { token: cls.sectionList } : undefined;
+    let host: HostMatch | undefined = list && cls.sectionList?.length ? { tokens: [...cls.sectionList] } : undefined;
     if (!list) {
-      let first: any = null;
-      for (const c of cls.section ?? []) if (!first) first = query(scope, c);
+      const first = query(scope, cls.section);
       list = first?.parentElement ?? null;
       const exact = fiberOf(list)?.memoizedProps?.className ?? list?.className;
       if (list && typeof exact === "string" && exact) host = { exact };
     }
     out.sections = Boolean(list && host);
     if (list && host) {
-      const path = componentPath(fiberOf(list)?.return, original);
-      if (path) {
-        out.sectionPath = path;
-        out.sectionHost = host;
-      }
-      out.outline.push(`section list found; ${path ? `path ${path.length} deep` : "no path to the overview panel"}`);
-      if (!path) out.outline.push(...fiberOutline(fiberOf(list)).map((l) => `  ${l}`));
+      out.sectionHost = host;
+      const start = fiberOf(list)?.return;
+      const path = componentPath(start, original);
+      if (path) out.sectionPath = path;
+      const content = componentPath(start, original, 120, isTabbedFiber);
+      if (content) out.contentPath = content;
+      out.outline.push(
+        `section list found; ${path ? `path ${path.length} deep` : "no path to the overview panel"}; ${content ? `${content.length} below the tabbed page` : "not under a tabbed page"}`
+      );
+      if (!path && !content) out.outline.push(...fiberOutline(fiberOf(list)).map((l) => `  ${l}`));
     } else {
-      out.outline.push(`section cards ${cls.sectionList || cls.section?.length ? "not found" : "class unknown"}`);
+      out.outline.push(`section cards ${cls.sectionList?.length || cls.section?.length ? "not found" : "class unknown"}`);
     }
   } catch (e) {
     out.outline.push(`screen two lookup failed: ${String(e)}`);
@@ -426,7 +482,7 @@ export class ScreenTwoPaths {
   /** Adds a discovery; true when it taught anything new. */
   learn(s: ScreenTwo): boolean {
     let fresh = false;
-    for (const path of [s.tabPath, s.sectionPath]) {
+    for (const path of [s.tabPath, s.sectionPath, s.contentPath]) {
       for (const t of path ?? []) {
         if (!this.types.has(t)) {
           this.types.add(t);
@@ -467,12 +523,13 @@ export const screenTwo = new ScreenTwoPaths();
 /** The section list's host element in one render: an element with array
  * children that matches `match`. Undefined when none is in this render. */
 export function findSectionHost(tree: any, match: HostMatch | undefined): any {
-  if (!match || (!match.token && !match.exact)) return undefined;
+  if (!match || (!match.tokens?.length && !match.exact)) return undefined;
+  const tokens = (match.tokens ?? []).flatMap((t) => t.split("|")).map((t) => t.trim()).filter(Boolean);
   let found: any;
   walkRender(tree, (node) => {
     const cls = node.props?.className;
     if (typeof cls !== "string") return false;
-    const hit = match.token ? hasClass(node, [match.token]) : cls === match.exact;
+    const hit = tokens.length ? tokens.some((t) => t.split(/\s+/).every((n) => hasClass(node, [n]))) : cls === match.exact;
     if (hit && node.props.children !== undefined) {
       found = node;
       return true;
@@ -587,15 +644,24 @@ export class PlacementLog {
   }
 
   /** Neither Steam's tab row nor its section cards were found: nothing is
-   * drawn (never on screen one), and the page outline is logged once. */
-  noteNothing(seen: string[] = []): boolean {
+   * drawn (never on screen one). Logs once: `line` (the diagnostic, one line
+   * saying which class maps, keys and page parts were found or missing), then
+   * on a second line what the scout saw and the overview panel's render. */
+  noteNothing(line: string, seen: string[] = []): boolean {
+    if (this.said.has(NOTHING)) return false;
+    this.said.add(NOTHING);
     const lines = [...seen, ...(this.outline.length ? ["overview panel render:", ...this.outline] : [])];
-    return this.note(
-      "not shown: neither Steam's tab row nor its section cards were found on screen two (nothing is drawn on screen one)",
-      lines.length ? `\n${lines.join("\n")}` : ""
-    );
+    try {
+      this.out(line);
+      if (lines.length) this.out(`Forge game page: outline\n${lines.join("\n")}`);
+    } catch {
+      // logging must never break the page
+    }
+    return true;
   }
 }
+
+const NOTHING = "\u0000nothing";
 
 export const placementLog = new PlacementLog();
 
@@ -621,6 +687,27 @@ export interface TabContainer {
 
 const TAB_PROPS = ["tabs", "sections"];
 
+/** The prop of `props` that holds a tab list: `tabs` or `sections` first,
+ * then any other array of tabs that carry content. */
+export function findTabProp(props: any): { prop: string; idKey: "id" | "key"; titleKey: "title" | "label" } | undefined {
+  if (!isObject(props)) return undefined;
+  try {
+    for (const prop of TAB_PROPS) {
+      const shape = tabShape(props[prop]);
+      if (shape) return { prop, ...shape };
+    }
+    for (const prop of Object.keys(props)) {
+      if (TAB_PROPS.includes(prop) || prop === "children") continue;
+      const list = props[prop];
+      const shape = tabShape(list);
+      if (shape && (list as any[]).every((t: any) => "content" in t)) return { prop, ...shape };
+    }
+  } catch {
+    // hostile props: no tab list
+  }
+  return undefined;
+}
+
 function tabShape(list: unknown): { idKey: "id" | "key"; titleKey: "title" | "label" } | undefined {
   if (!Array.isArray(list) || list.length < 2) return undefined;
   for (const idKey of ["id", "key"] as const) {
@@ -643,12 +730,10 @@ export function findTabContainer(tree: any, maxDepth = 64): TabContainer | undef
   walkRender(
     tree,
     (node) => {
-      for (const prop of TAB_PROPS) {
-        const shape = tabShape(node.props[prop]);
-        if (shape) {
-          found = { node, prop, ...shape };
-          return true;
-        }
+      const shape = findTabProp(node.props);
+      if (shape) {
+        found = { node, ...shape };
+        return true;
       }
       return false;
     },
@@ -770,3 +855,491 @@ export class SteamTabs {
 }
 
 export const steamTabs = new SteamTabs();
+
+// ---- Class maps: every duplicate module, merged (anygame.78) ----------------
+// .77 took one module per map (@decky/ui's named exports and findClassModule
+// answer the FIRST module carrying a key). Steam ships some class modules two
+// or three times with identical keys and different hashes (Core 3.3.11 found
+// this), and the copy the game page draws may be the other one: on the TV the
+// scout then found nothing. Now every module that carries a map's keys is
+// taken, and each key holds every copy's class. The hashes change with Steam
+// builds, so nothing here names one: maps are found by their key names.
+
+/** A Steam class map Forge reads, by the keys every copy carries. `alt` is a
+ * second key set tried when no module carries `all`. */
+export interface ClassMapSpec {
+  all: string[];
+  alt?: string[];
+}
+
+/** The maps screen two needs (names follow Core's CORE-UI.md). */
+export const CLASS_MAP_SPECS: Record<string, ClassMapSpec> = {
+  tabbedpage: { all: ["GamepadTabbedPage", "TabRow", "Tab", "Selected"], alt: ["TabRow", "Tab", "TabTitle"] },
+  appdetails: { all: ["AppDetailsContainer", "PlaySection"], alt: ["AppDetailsContainer", "AppDetailsRoot"] },
+  appsection: { all: ["AppDetailsSection", "AppDetailsSectionContainer"] },
+  appview: { all: ["HeaderLoaded", "InnerContainer"] },
+};
+
+/** The keys screen two reads from each map, for the diagnostic line. */
+export const CLASS_MAP_KEYS: Record<string, string[]> = {
+  tabbedpage: ["GamepadTabbedPage", "TabRow", "TabRowTabs", "Tab", "Selected", "TabTitle"],
+  appdetails: ["AppDetailsContainer", "AppDetailsRoot", "AppDetailSectionList", "PlaySection"],
+  appsection: ["AppDetailsSection", "AppDetailsSectionContainer"],
+  appview: ["InnerContainer"],
+};
+
+/** A merged class map: each key holds every distinct class the copies carry. */
+export type ClassUnion = Record<string, string[]>;
+
+export interface ClassMapReport {
+  /** How many distinct Steam modules matched (duplicates included). */
+  modules: number;
+  /** Where the classes came from. */
+  source: "core" | "steam" | "core+steam" | "none";
+  /** Whether the second key set was needed. */
+  alt: boolean;
+}
+
+function looksLikeClassMap(value: any): boolean {
+  if (!isObject(value) || Array.isArray(value)) return false;
+  try {
+    const entries = Object.entries(value);
+    return entries.length > 0 && entries.length <= 1200 && entries.every(([, v]) => typeof v === "string");
+  } catch {
+    return false;
+  }
+}
+
+function sameMap(a: any, b: any): boolean {
+  if (a === b) return true;
+  try {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
+  } catch {
+    return false;
+  }
+}
+
+/** Every Steam class map the loader can show, each once: @decky/ui 4's
+ * `classMap` list (Decky 3.3.1), then a full walk through `findClassModule`,
+ * `findVar` and `findModuleScopeByVar` (@decky/ui 5, Decky 4) with a filter
+ * that never accepts, so every module is visited. Never throws. */
+export function collectClassModules(ui: any, limit = 20000): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  const seen = new Set<any>();
+  const visit = (value: any): false => {
+    if (out.length >= limit || !value || typeof value !== "object" || seen.has(value)) return false;
+    seen.add(value);
+    if (looksLikeClassMap(value)) out.push(value);
+    return false;
+  };
+  try {
+    const list = ui?.classMap;
+    if (Array.isArray(list)) for (const m of list) visit(m);
+  } catch {
+    // no classMap on this loader
+  }
+  for (const name of ["findClassModule", "findVar"]) {
+    const find = finder(ui, name);
+    if (!find) continue;
+    try {
+      find(visit);
+    } catch {
+      // a walk that throws part way keeps what it saw
+    }
+  }
+  const byScope = finder(ui, "findModuleScopeByVar");
+  if (byScope) {
+    try {
+      byScope((value: unknown) => visit(value));
+    } catch {
+      // as above
+    }
+  }
+  return out;
+}
+
+/** Adds every class of `map` (values may hold `|`-separated alternatives) to `into`. */
+function addClasses(into: ClassUnion, map: any): void {
+  try {
+    for (const key of Object.keys(map)) {
+      const value = map[key];
+      if (typeof value !== "string" || !value) continue;
+      for (const alt of value.split("|")) {
+        const cls = alt.trim();
+        if (!cls) continue;
+        const list = into[key] ?? (into[key] = []);
+        if (!list.includes(cls)) list.push(cls);
+      }
+    }
+  } catch {
+    // a hostile map adds nothing
+  }
+}
+
+function carries(map: any, keys: string[]): boolean {
+  try {
+    return keys.every((k) => typeof map?.[k] === "string" && map[k].length > 0);
+  } catch {
+    return false;
+  }
+}
+
+/** Merges, per map in `specs`, EVERY module that carries its keys (never just
+ * the first), plus the map Core resolved when Core publishes one (`core`,
+ * name -> map with `|`-separated alternatives). */
+export function resolveClassUnion(
+  modules: readonly any[],
+  specs: Record<string, ClassMapSpec> = CLASS_MAP_SPECS,
+  core?: Record<string, any>
+): { maps: Record<string, ClassUnion>; report: Record<string, ClassMapReport> } {
+  const maps: Record<string, ClassUnion> = {};
+  const report: Record<string, ClassMapReport> = {};
+  for (const [name, spec] of Object.entries(specs)) {
+    const union: ClassUnion = {};
+    const fromCore = core && isObject(core[name]) && carries(core[name], spec.alt && !carries(core[name], spec.all) ? spec.alt : spec.all);
+    if (fromCore) addClasses(union, core![name]);
+    const distinct: any[] = [];
+    let alt = false;
+    for (const keys of [spec.all, spec.alt]) {
+      if (!keys || distinct.length) continue;
+      for (const m of modules) {
+        if (carries(m, keys) && !distinct.some((d) => sameMap(d, m))) distinct.push(m);
+      }
+      if (distinct.length && keys === spec.alt) alt = true;
+    }
+    for (const m of distinct) addClasses(union, m);
+    maps[name] = union;
+    report[name] = {
+      modules: distinct.length,
+      source: fromCore && distinct.length ? "core+steam" : fromCore ? "core" : distinct.length ? "steam" : "none",
+      alt,
+    };
+  }
+  return { maps, report };
+}
+
+/** Screen two's classes from the merged maps. */
+export function screenTwoClassesFrom(maps: Record<string, ClassUnion>): ScreenTwoClasses {
+  const list = (...xs: (string[] | undefined)[]) => xs.flatMap((x) => x ?? []);
+  return {
+    container: list(maps.appdetails?.AppDetailsContainer),
+    sectionList: list(maps.appdetails?.AppDetailSectionList),
+    tabRow: list(maps.tabbedpage?.TabRow, maps.tabbedpage?.TabRowTabs),
+    section: list(maps.appsection?.AppDetailsSection, maps.appsection?.AppDetailsSectionContainer),
+  };
+}
+
+/** The class maps Core resolved, if a Core build publishes them on the window
+ * (`window[Symbol.for("core.ui.classMaps")]`, an object or a function
+ * answering one: map name -> key -> class, `|`-separated for merged copies).
+ * Core 3.3.11 publishes none (only `core.ui.diagnostics`, which carries no
+ * classes); Forge reads it if a later Core does, and merges its own lookup in
+ * either way. */
+export const CORE_CLASS_MAPS_KEY = "core.ui.classMaps";
+export function coreClassMaps(host: any): Record<string, any> | undefined {
+  try {
+    const value = host?.[Symbol.for(CORE_CLASS_MAPS_KEY)];
+    const maps = typeof value === "function" ? value() : value;
+    return isObject(maps) ? maps : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---- Steam's tabbed page, patched where it is defined (anygame.78) ---------
+// .77 reached Steam's tabbed page only by following components down from the
+// overview panel along a path the scout learned, and only from a redraw after
+// that: on the TV nothing appeared. anygame.78 patches the tabbed page
+// component itself, once, at load: Steam's GamepadTabbedPage is a React memo
+// (the component @decky/ui exports as `Tabs`), and a memo's inner `type` can be
+// swapped for a wrapper. Every tabbed page mounted afterwards renders through
+// Forge's wrapper, which passes everything through unchanged unless the scout
+// on the current game page has confirmed that this tabbed page is that page's
+// screen two (found in the fibers below the scout, no class names needed).
+
+const MEMO = typeof Symbol === "function" ? Symbol.for("react.memo") : undefined;
+/** Marks Forge's wrapper; its value is the function it wraps. */
+export const FORGE_WRAPPED = typeof Symbol === "function" ? Symbol.for("forge.tabbedPage.original") : "__forgeOriginal";
+
+export function isMemo(value: any): boolean {
+  return isObject(value) && value.$$typeof === MEMO && typeof value.type === "function";
+}
+
+function isClassComponent(fn: any): boolean {
+  try {
+    return Boolean(fn?.prototype?.isReactComponent);
+  } catch {
+    return true;
+  }
+}
+
+function sourceOf(fn: any): string {
+  try {
+    return typeof fn === "function" ? Function.prototype.toString.call(fn) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** True when a module is Steam's tabbed page module: one of its function
+ * exports names the tab row (`TabRowTabs`) and the `activeTab` prop (the
+ * signature @decky/ui 4 uses to find `Tabs`). */
+export function isTabbedPageModule(mod: any): boolean {
+  if (!isObject(mod) && typeof mod !== "function") return false;
+  try {
+    for (const key of Object.keys(mod)) {
+      let value: any;
+      try {
+        value = mod[key];
+      } catch {
+        continue;
+      }
+      const fn = typeof value === "function" ? value : isMemo(value) ? value.type : undefined;
+      const src = sourceOf(fn);
+      if (src.includes("TabRowTabs") && src.includes("activeTab")) return true;
+    }
+  } catch {
+    // a hostile module is not the tabbed page
+  }
+  return false;
+}
+
+/** Every memo export of every tabbed page module in `modules` (Steam may ship
+ * the module more than once: all copies are taken), plus `extra` memos
+ * (@decky/ui's `Tabs`). Class components are left out. Each memo once. */
+export function findTabbedPageComponents(modules: Iterable<any>, extra: unknown[] = []): any[] {
+  const out: any[] = [];
+  const add = (m: any) => {
+    if (isMemo(m) && !isClassComponent(m.type) && !out.includes(m)) out.push(m);
+  };
+  for (const e of extra) add(e);
+  const hasMemo = (mod: any): boolean => {
+    try {
+      return Object.keys(mod).some((k) => {
+        try {
+          return isMemo(mod[k]);
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  };
+  try {
+    for (const mod of modules) {
+      for (const candidate of [mod, (mod as any)?.default]) {
+        // Cheap test first: only a module exporting a memo is read as source.
+        if (!candidate || typeof candidate !== "object" || !hasMemo(candidate) || !isTabbedPageModule(candidate)) continue;
+        try {
+          for (const key of Object.keys(candidate)) {
+            try {
+              add(candidate[key]);
+            } catch {
+              // skip a throwing export
+            }
+          }
+        } catch {
+          // skip the module
+        }
+      }
+    }
+  } catch {
+    // keep what was found
+  }
+  return out;
+}
+
+/** Swaps a memo's inner component for `build(original)`, once: a memo already
+ * wrapped by Forge (an earlier load) is re-wrapped around its original.
+ * Returns false when the memo cannot be written. */
+export function wrapMemo(memo: any, build: (original: (...a: any[]) => any) => (...a: any[]) => any): boolean {
+  if (!isMemo(memo)) return false;
+  try {
+    const current = memo.type;
+    const original = (current as any)[FORGE_WRAPPED] ?? current;
+    const wrapped = build(original);
+    (wrapped as any)[FORGE_WRAPPED] = original;
+    for (const k of ["displayName", "defaultProps", "propTypes"]) {
+      if ((original as any)[k] !== undefined) (wrapped as any)[k] = (original as any)[k];
+    }
+    memo.type = wrapped;
+    return memo.type === wrapped;
+  } catch {
+    return false;
+  }
+}
+
+/** Puts Steam's own component back when Forge's wrapper is still the memo's
+ * type (another plugin may have wrapped it since: then it is left, and the
+ * wrapper passes everything through once Forge has unloaded). */
+export function unwrapMemo(memo: any): boolean {
+  try {
+    const original = memo?.type?.[FORGE_WRAPPED];
+    if (typeof original !== "function") return false;
+    memo.type = original;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Calls `visit` for every fiber below `start` (child and sibling links,
+ * `start` itself excluded), depth first, at most `maxNodes`. Stops when
+ * `visit` returns true. */
+export function walkFibers(start: any, visit: (f: any) => boolean | void, maxNodes = 30000): number {
+  let count = 0;
+  const stack: any[] = [];
+  if (start?.child) stack.push(start.child);
+  const seen = new Set<any>();
+  while (stack.length && count < maxNodes) {
+    const f = stack.pop();
+    if (!f || seen.has(f)) continue;
+    seen.add(f);
+    count++;
+    if (visit(f) === true) return count;
+    if (f.sibling) stack.push(f.sibling);
+    if (f.child) stack.push(f.child);
+  }
+  return count;
+}
+
+/** The records (from `lookup`, keyed by the props a tabbed page rendered with)
+ * of the tabbed pages in the scout's page: the fibers below the scout's
+ * parent, then below each ancestor up to `levels` (closest first; stops at
+ * the first level that holds any). Both a fiber's and its alternate's props
+ * are looked up. */
+export function tabbedPagesNear<T>(
+  scoutFiber: any,
+  lookup: (props: unknown) => T | undefined,
+  levels = 3,
+  maxNodes = 30000
+): T[] {
+  const out: T[] = [];
+  let anchor = scoutFiber?.return;
+  for (let i = 0; anchor && i <= levels && !out.length; i++, anchor = anchor.return) {
+    walkFibers(
+      anchor,
+      (f) => {
+        for (const props of [f.memoizedProps, f.alternate?.memoizedProps]) {
+          if (!isObject(props)) continue;
+          const rec = lookup(props);
+          if (rec !== undefined && !out.includes(rec)) out.push(rec);
+        }
+      },
+      maxNodes
+    );
+  }
+  return out;
+}
+
+/** The key a tabbed page reads its selected tab from. */
+export function activeTabKey(props: any): string {
+  for (const k of ["activeTab", "selectedTab", "strActiveTab"]) if (props?.[k] !== undefined) return k;
+  return "activeTab";
+}
+
+/** The key a tabbed page calls to switch tabs, if any. */
+export function showTabKey(props: any): string | undefined {
+  for (const k of ["onShowTab", "onSelectTab", "onTabChange"]) if (typeof props?.[k] === "function") return k;
+  return undefined;
+}
+
+export interface ForgeTabPlan {
+  id: string;
+  title: string;
+  content: unknown;
+  /** Forge's tab is the one shown (the tabbed page's own state left alone). */
+  forgeActive: boolean;
+  /** Replaces the tabbed page's switcher (Forge's tab is selected locally). */
+  onShow?: (id: string) => void;
+  /** Builds the first tab's new content from its old, or undefined to leave it. */
+  firstContent?: (content: unknown) => unknown;
+}
+
+/** New props for Steam's tabbed page with Forge's tab last, never changing
+ * Steam's own props, list or tab objects. Undefined when the props carry no
+ * tab list. */
+export function forgeTabProps(props: any, plan: ForgeTabPlan): any {
+  const shape = findTabProp(props);
+  if (!shape) return undefined;
+  const list: any[] = props[shape.prop];
+  const tabs = list.slice();
+  if (!tabs.some((t: any) => t?.[shape.idKey] === plan.id)) {
+    const tab: Record<string, unknown> = { ...(list[list.length - 1] ?? {}) };
+    for (const k of Object.keys(tab)) if (typeof tab[k] === "function" || k === "content" || k === "footer") delete tab[k];
+    tab[shape.idKey] = plan.id;
+    tab[shape.titleKey] = plan.title;
+    tab.content = plan.content;
+    tabs.push(tab);
+  }
+  if (plan.firstContent && tabs[0] && tabs[0][shape.idKey] !== plan.id) {
+    const content = plan.firstContent(tabs[0].content);
+    if (content !== undefined && content !== tabs[0].content) tabs[0] = { ...tabs[0], content };
+  }
+  const next: any = { ...props, [shape.prop]: tabs };
+  if (plan.forgeActive) next[activeTabKey(props)] = plan.id;
+  if (plan.onShow) next[showTabKey(props) ?? "onShowTab"] = plan.onShow;
+  return next;
+}
+
+/** The id of the tab a tabbed page's props say is shown (the first when they
+ * say nothing). */
+export function shownTabId(props: any): unknown {
+  const shape = findTabProp(props);
+  const active = props?.[activeTabKey(props)];
+  if (active !== undefined && active !== null) return active;
+  return shape ? props[shape.prop][0]?.[shape.idKey] : undefined;
+}
+
+// ---- The diagnostic line (anygame.78) --------------------------------------
+
+export interface ScreenTwoReport {
+  maps: Record<string, ClassMapReport>;
+  /** Which keys each map has (key names only, never the hashed classes). */
+  keys: Record<string, { found: string[]; missing: string[] }>;
+  coreGlobal: boolean;
+  /** Tabbed page memos patched; whether @decky/ui's Tabs was among them. */
+  patched: number;
+  deckyTabs: boolean;
+  /** Fibers readable from the scout (React's key on its element). */
+  scoutFibers: boolean;
+  /** Tabbed pages rendered through Forge's wrapper found in the scout's page. */
+  wrappedNear: number;
+  scout?: ScreenTwo;
+}
+
+/** Which of `CLASS_MAP_KEYS` a merged map carries. */
+export function keyReport(maps: Record<string, ClassUnion>): Record<string, { found: string[]; missing: string[] }> {
+  const out: Record<string, { found: string[]; missing: string[] }> = {};
+  for (const [name, keys] of Object.entries(CLASS_MAP_KEYS)) {
+    const map = maps[name] ?? {};
+    out[name] = { found: keys.filter((k) => map[k]?.length), missing: keys.filter((k) => !map[k]?.length) };
+  }
+  return out;
+}
+
+/** One line saying what was found and what was missing, so the next log or
+ * Core UI snapshot shows exactly where the way to screen two broke. */
+export function screenTwoDiagnostic(r: ScreenTwoReport): string {
+  const maps = Object.entries(r.maps)
+    .map(([name, m]) => {
+      const k = r.keys[name];
+      const keys = k ? ` [${k.found.length ? `has ${k.found.join(",")}` : "no keys"}${k.missing.length ? `; missing ${k.missing.join(",")}` : ""}]` : "";
+      return `${name}: ${m.modules} module${m.modules === 1 ? "" : "s"}${m.alt ? " (second key set)" : ""}${m.source.startsWith("core") ? ` (${m.source})` : ""}${keys}`;
+    })
+    .join("; ");
+  const s = r.scout;
+  const page = s
+    ? `container ${s.container ? "found" : "missing"}, tab row ${s.tabRow ? "found" : "missing"}, tabbed page ${s.tabbedPage ? "found" : "missing"}, section list ${s.sections ? "found" : "missing"}, path to tabs ${s.tabPath ? "yes" : "no"}, path to cards ${s.sectionPath || s.contentPath ? "yes" : "no"}`
+    : "scout did not run";
+  return (
+    `Forge game page: Mods not shown, nothing drawn. Class maps: ${maps}. ` +
+    `Core class maps on window: ${r.coreGlobal ? "yes" : "no"}. ` +
+    `Tabbed page components patched: ${r.patched}${r.deckyTabs ? " (incl. @decky/ui Tabs)" : " (@decky/ui Tabs missing)"}. ` +
+    `Scout fibers: ${r.scoutFibers ? "yes" : "no"}; patched tabbed pages on this page: ${r.wrappedNear}. ` +
+    `Screen two: ${page}.`
+  );
+}

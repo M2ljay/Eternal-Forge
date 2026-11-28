@@ -7,22 +7,32 @@
 // play bar, and puts Steam's tab row and section cards one press down
 // (Core's docs/eternal/CORE-UI.md, "For Forge"). So Forge adds a "Mods" tab to
 // Steam's tabbed page (its `tabs` prop, a new array) and its Overview card
-// among the section cards (`AppDetailSectionList`). Order:
-// forgeRules.gamePagePlacement. When neither is found, NOTHING is drawn and
-// the page outline is logged once: there is no row above Play any more.
+// among the section cards. Order: forgeRules.gamePagePlacement. When neither
+// is found, NOTHING is drawn and one diagnostic line is logged.
 //
-// How it gets there: the patch follows Steam's overview panel (InnerContainer's
-// child, recognised by its props) and, from its renders, two kinds of
-// components: those handed the game (`overview` / `details`, within
-// CARRIER_DEPTH levels, the anygame.71 search) and those on the path the scout
-// discovered. The scout is an invisible element in InnerContainer: after the
-// page mounts it finds screen two in the DOM by Core's class maps and climbs
-// React's fibers from there to the overview panel, naming every component on
-// the way (gamePageAnchor.discoverScreenTwo). The path is kept for the session,
-// so later pages are placed on their first render. Non-Steam shortcuts get the
-// same; a page The Collector draws (a ROM) is left to The Collector, which
-// hosts Forge's tab and card through window.__eternalGamePage
-// (collectorBridge.ts).
+// How it gets there (anygame.78). .77 only followed components down from the
+// overview panel along a path an invisible scout learned from the DOM, and the
+// TV showed nothing: its class lookup took the first of Steam's duplicate
+// class modules, and the path needed a redraw. Now:
+// 1. At load, Steam's tabbed page component (a React memo; every copy Steam
+//    ships, plus @decky/ui's Tabs) gets Forge's wrapper as its inner type
+//    (gamePageAnchor.findTabbedPageComponents / wrapMemo). Every tabbed page
+//    mounted afterwards, the first game page after Steam starts included,
+//    renders through it; the wrapper passes everything through unchanged.
+// 2. The scout (display: none, in InnerContainer) tells the wrapper which
+//    tabbed page is this game page's: the first one in the React fibers below
+//    the scout (gamePageAnchor.tabbedPagesNear). No class names are needed for
+//    that. The confirmed tabbed page then renders with Forge's tab last and the
+//    card in its first tab, before the browser paints.
+// 3. The section cards are found in the first tab's content by the merged
+//    class maps (every duplicate module, gamePageAnchor.resolveClassUnion), or
+//    along the path the scout learns from the DOM; else, once the scout is
+//    done, the card ends the first tab.
+// 4. .77's way (follow the overview panel along the learned path) stays as a
+//    second route, for a Steam build whose tabbed page is not a memo.
+// Non-Steam shortcuts get the same; a page The Collector draws (a ROM) is left
+// to The Collector, which hosts Forge's tab and card through
+// window.__eternalGamePage (collectorBridge.ts).
 //
 // Fail-safe by construction:
 // - every step is inside try/catch, and a failure returns Steam's tree
@@ -40,20 +50,49 @@ import { routerHook } from "@decky/api";
 import type { RoutePatch } from "@decky/api";
 import * as DFL from "@decky/ui";
 import { afterPatch, createReactTreePatcher, findInReactTree } from "@decky/ui";
-import { Component, ErrorInfo, ReactNode, useEffect, useRef } from "react";
+import {
+  Component,
+  ErrorInfo,
+  ReactNode,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+} from "react";
 
 import { GameModsSection } from "./GameModsSection";
 import {
   CARRIER_DEPTH,
+  CLASS_MAP_SPECS,
   MAX_FOLLOW_DEPTH,
   SCOUT_TRIES_MS,
   ScreenTwo,
   ScreenTwoClasses,
+  ScreenTwoReport,
+  activeTabKey,
   addCardToFirstTab,
+  classSelector,
   addTab,
+  collectClassModules,
   collectorOwnsPanel,
+  coreClassMaps,
   discoverScreenTwo,
   fiberOf,
+  findTabProp,
+  findTabbedPageComponents,
+  forgeTabProps,
+  isMemo,
+  keyReport,
+  resolveClassUnion,
+  screenTwoClassesFrom,
+  screenTwoDiagnostic,
+  showTabKey,
+  shownTabId,
+  tabbedPagesNear,
+  unwrapMemo,
+  wrapMemo,
   findInsertionChildren,
   findSectionHost,
   findTabContainer,
@@ -133,27 +172,38 @@ function innerContainer(): string | undefined {
   return innerContainerClass;
 }
 
-let twoClasses: ScreenTwoClasses | undefined;
+interface ClassState {
+  two: ScreenTwoClasses;
+  report: ScreenTwoReport["maps"];
+  keys: ScreenTwoReport["keys"];
+  core: boolean;
+}
+let classState: ClassState | undefined;
+let classTries = 0;
 
 // Screen two's classes (Core's CORE-UI.md: AppDetailsContainer, the tabbed
-// page's TabRow, the section cards), read once per session.
-function screenTwoClasses(): ScreenTwoClasses {
-  if (!twoClasses) {
-    const details = resolveClassModule(DFL, "basicAppDetailsSectionStylerClasses", ["AppDetailsRoot", "AppDetailsContainer"]);
-    const tabbed = resolveClassModule(DFL, "gamepadTabbedPageClasses", ["GamepadTabbedPage", "TabRow"]);
-    const section = resolveClassModule(DFL, "appDetailsSectionClasses", ["AppDetailsSection", "AppDetailsSectionContainer"]);
-    twoClasses = {
-      container: details?.AppDetailsContainer,
-      sectionList: details?.AppDetailSectionList,
-      tabRow: [tabbed?.TabRow, tabbed?.TabRowTabs].filter((c): c is string => Boolean(c)),
-      section: [section?.AppDetailsSection, section?.AppDetailsSectionContainer].filter((c): c is string => Boolean(c)),
-    };
-    const missing = Object.entries(twoClasses)
-      .filter(([, v]) => !v || (Array.isArray(v) && !v.length))
-      .map(([k]) => k);
-    if (missing.length) console.warn(`Forge game page: screen two classes missing on this Steam build: ${missing.join(", ")}`);
+// page's TabRow, the section cards): every Steam module carrying a map's keys,
+// merged (duplicates have different hashes; either may be on screen), plus
+// Core's own resolved maps if Core publishes them. Kept once every map is
+// found; looked up again (a few times) while one is missing.
+function screenTwoState(): ClassState {
+  const complete = (c: ClassState) => Object.values(c.report).every((m) => m.modules > 0 || m.source !== "none");
+  if (!classState || (!complete(classState) && classTries < 5)) {
+    classTries++;
+    try {
+      const core = coreClassMaps(globalThis);
+      const { maps, report } = resolveClassUnion(collectClassModules(DFL), CLASS_MAP_SPECS, core);
+      classState = { two: screenTwoClassesFrom(maps), report, keys: keyReport(maps), core: Boolean(core) };
+    } catch (e) {
+      noteFailure("reading Steam's class maps", e);
+      classState = classState ?? { two: {}, report: {}, keys: {}, core: false };
+    }
   }
-  return twoClasses;
+  return classState;
+}
+
+function screenTwoClasses(): ScreenTwoClasses {
+  return screenTwoState().two;
 }
 
 // The game the route is drawing, set by the route patch: the renders followed
@@ -175,7 +225,7 @@ function original(t: unknown): unknown {
 
 // Follows `element`'s component so its render runs onPanelRender. Depth 1 is
 // the overview panel itself.
-function follow(element: any, depth: number): void {
+function follow(element: any, depth: number, from: string = "the overview panel"): void {
   if (depth > MAX_FOLLOW_DEPTH || !isFollowable(element)) return;
   const orig = element.type;
   if (originals.has(orig)) return; // already followed in this render
@@ -185,7 +235,7 @@ function follow(element: any, depth: number): void {
     run = createReactTreePatcher(
       [(node: any) => node],
       function (this: any, args: any[], ret?: any) {
-        return onPanelRender(depth, this, args, ret);
+        return onPanelRender(depth, this, args, ret, from);
       },
       `ForgeScreenTwo${depth}`
     );
@@ -203,19 +253,266 @@ function card(appId: number): ReactNode {
   );
 }
 
+// ---- Steam's tabbed page, patched where it is defined (anygame.78) ---------
+
+// One per mounted tabbed page (Steam's, rendered through Forge's wrapper).
+interface TabbedRecord {
+  /** The game whose screen two this tabbed page is (0: not confirmed). */
+  app: number;
+  /** Forge's tab is the one shown (selected through `opener`). */
+  forgeActive: boolean;
+  /** The tab Steam's own props last said was shown. */
+  parentActive: unknown;
+  /** Steam's own switcher from the last render. */
+  parentShow?: (id: string) => void;
+  /** Forge's switcher handed to the tabbed page (and the card's X). */
+  opener?: (id: string) => void;
+  /** Confirmation attempts made from this tabbed page's own renders. */
+  tries: number;
+  /** Forge's tab was in the last render. */
+  added: boolean;
+  /** The card ends the first tab (no section list found once the scout finished). */
+  tail: boolean;
+  /** `learnEpoch` when this tabbed page last drew its first tab. */
+  epoch?: number;
+  force?: () => void;
+}
+
+// Keyed by the props object a tabbed page rendered with: React keeps it as the
+// fiber's memoizedProps, so the scout can map a fiber below it to its record.
+const tabbedRecords = new WeakMap<object, TabbedRecord>();
+// The scout element of the game page on screen, per app id.
+const liveScouts = new Map<number, HTMLElement>();
+// Every memo Forge wrapped this session (put back on unload).
+const wrappedMemos = new Set<any>();
+let deckyTabsWrapped = false;
+let componentSearches = 0;
+let lastNear = 0;
+// Bumped whenever the scout learns something about screen two.
+let learnEpoch = 0;
+
+// The section list in a render: the class the scout read from the DOM, else
+// every copy of AppDetailSectionList from the merged class maps.
+function sectionHostMatch(): { tokens?: string[]; exact?: string } | undefined {
+  if (screenTwo.sectionHost) return screenTwo.sectionHost;
+  const tokens = screenTwoClasses().sectionList ?? [];
+  return tokens.length ? { tokens } : undefined;
+}
+
+function buildTabbedWrapper(original: (...a: any[]) => any): (...a: any[]) => any {
+  return function ForgeTabbedPage(this: any, props: any, ...rest: any[]) {
+    // Hooks first, always the same ones in the same order (Steam's own hooks
+    // follow inside `original`); they stay harmless after Forge unloads.
+    const ref = useRef<TabbedRecord | null>(null);
+    if (ref.current === null) {
+      ref.current = { app: 0, forgeActive: false, parentActive: undefined, tries: 0, added: false, tail: false };
+    }
+    const rec = ref.current;
+    const [, force] = useReducer((n: number) => n + 1, 0);
+    rec.force = force;
+    let next = props;
+    if (!unloaded && props && typeof props === "object") {
+      try {
+        tabbedRecords.set(props, rec);
+        next = forgeTabbedProps(props, rec) ?? props;
+      } catch (e) {
+        rec.added = false;
+        next = props;
+        noteFailure("adding the Mods tab to Steam's tabbed page", e);
+      }
+    }
+    useLayoutEffect(() => {
+      afterTabbedRender(rec);
+    });
+    return original.call(this, next, ...rest);
+  };
+}
+
+// Steam's tabbed page props with Forge's tab (and the card in the first tab),
+// for the tabbed page the scout confirmed on the game page on screen only;
+// undefined (Steam's props unchanged) everywhere else.
+function forgeTabbedProps(props: any, rec: TabbedRecord): any {
+  rec.added = false;
+  if (budget.disabled || !getForgeSetting("gamePage")) return undefined;
+  const app = rec.app;
+  if (!app || app !== activeAppId || !findTabProp(props)) return undefined;
+  const parentActive = props[activeTabKey(props)];
+  if (rec.parentActive !== parentActive) {
+    rec.parentActive = parentActive;
+    if (parentActive !== MODS_TAB_ID) rec.forgeActive = false;
+  }
+  const show = showTabKey(props);
+  rec.parentShow = show ? props[show] : undefined;
+  if (!rec.opener) {
+    rec.opener = (id: string) => {
+      if (id === MODS_TAB_ID) {
+        if (!rec.forgeActive) {
+          rec.forgeActive = true;
+          rec.force?.();
+        }
+        return;
+      }
+      const was = rec.forgeActive;
+      rec.forgeActive = false;
+      try {
+        rec.parentShow?.(id);
+      } finally {
+        if (was) rec.force?.();
+      }
+    };
+  }
+  const shape = findTabProp(props)!;
+  const firstId = props[shape.prop][0]?.[shape.idKey];
+  const firstShown = !rec.forgeActive && shownTabId(props) === firstId;
+  const next = forgeTabProps(props, {
+    id: MODS_TAB_ID,
+    title: MODS_TAB_TITLE,
+    content: (
+      <ForgeBoundary key={TAB_KEY}>
+        <GameModsSection appId={app} placement="tab" />
+      </ForgeBoundary>
+    ),
+    forgeActive: rec.forgeActive,
+    onShow: rec.opener,
+    firstContent: (content) => firstTabContent(content, app, rec, firstShown),
+  });
+  rec.added = Boolean(next);
+  return next;
+}
+
+// The first tab's content with the card: among the section cards when their
+// list is in this content (found by the merged class maps or the class the
+// scout read), else along the scout's path inside the content; else, once the
+// scout has finished, at the end. Always wrapped the same way (content, then
+// the card or nothing) so Steam's content keeps its place and never remounts.
+function firstTabContent(content: unknown, app: number, rec: TabbedRecord, shown: boolean): unknown {
+  try {
+    // Something new was learned since this tabbed page last drew: hand Steam
+    // a fresh copy of the content element, or React would skip re-rendering
+    // it (same element) and never reach the cards along the new path.
+    if (rec.epoch !== learnEpoch) {
+      if (rec.epoch !== undefined && isValidElement(content)) content = cloneElement(content);
+      rec.epoch = learnEpoch;
+    }
+    const host = findSectionHost(content, sectionHostMatch());
+    if (host) {
+      if (insertCard(host, card(app), CARD_KEY) >= 0) placementLog.note("card among Steam's section cards (first tab)");
+    } else if (isFollowable(content)) {
+      // Followed from the first render, so learning the path later never
+      // swaps the content's type (no remount).
+      follow(content, 1, "the first tab's content");
+    }
+    if (!rec.tail && shown && scoutDone.has(app) && !screenTwo.sectionHost && !host) {
+      rec.tail = true;
+      placementLog.note("card at the end of Steam's first tab (no section list found)");
+    }
+  } catch (e) {
+    noteFailure("placing the card in the first tab", e);
+  }
+  return (
+    <>
+      {content}
+      {rec.tail ? card(app) : null}
+    </>
+  );
+}
+
+function afterTabbedRender(rec: TabbedRecord): void {
+  if (unloaded) return;
+  try {
+    if (rec.app && rec.app === activeAppId) {
+      if (rec.added) {
+        steamTabs.note(rec.app, rec.opener);
+        placementLog.note("tab in Steam's tab row (Steam's tabbed page, patched where it is defined)");
+      }
+      return;
+    }
+    if (!activeAppId || !liveScouts.has(activeAppId) || rec.tries >= 3) return;
+    rec.tries++;
+    confirmNear(activeAppId);
+  } catch (e) {
+    noteFailure("confirming Steam's tabbed page", e);
+  }
+}
+
+// Tells the first tabbed page in the fibers below the game page's scout that
+// it is that page's screen two (a tabbed page nested inside a tab is never the
+// first: the fiber walk is depth first). Returns how many were seen.
+function confirmNear(app: number): number {
+  const el = liveScouts.get(app);
+  const f = fiberOf(el);
+  if (!f) return 0;
+  const found = tabbedPagesNear(f, (props) => tabbedRecords.get(props as object));
+  lastNear = found.length;
+  const first = found[0];
+  if (first && first.app !== app) {
+    first.app = app;
+    first.tries = 0;
+    first.tail = false;
+    first.force?.();
+  }
+  return found.length;
+}
+
+function wrapTabbed(memo: any): boolean {
+  if (wrappedMemos.has(memo) || !isMemo(memo)) return false;
+  if (!wrapMemo(memo, buildTabbedWrapper)) return false;
+  wrappedMemos.add(memo);
+  return true;
+}
+
+// Finds and wraps Steam's tabbed page component(s): every copy of the module
+// @decky/ui finds Tabs in, plus Tabs itself. Bounded to a few searches a
+// session (Steam may load a chunk late).
+function patchTabbedPages(): number {
+  if (componentSearches >= 3 || (wrappedMemos.size && componentSearches)) return wrappedMemos.size;
+  componentSearches++;
+  try {
+    const ui: any = DFL;
+    const modules: any[] = [];
+    const take = (m: any) => {
+      if (m && (typeof m === "object" || typeof m === "function")) modules.push(m);
+      return undefined;
+    };
+    try {
+      if (typeof ui.findModuleChild === "function") ui.findModuleChild(take);
+    } catch {
+      // keep what was collected
+    }
+    try {
+      const scopes = ui.moduleScopes;
+      if (scopes && typeof scopes.values === "function") for (const scope of scopes.values()) take(scope);
+    } catch {
+      // Decky 3 has no module scopes
+    }
+    let tabs: unknown;
+    try {
+      tabs = ui.Tabs;
+    } catch {
+      tabs = undefined;
+    }
+    for (const memo of findTabbedPageComponents(modules, [tabs])) {
+      if (wrapTabbed(memo) && memo === tabs) deckyTabsWrapped = true;
+    }
+  } catch (e) {
+    noteFailure("patching Steam's tabbed page", e);
+  }
+  return wrappedMemos.size;
+}
+
 // One render below the overview panel: Forge's tab goes into Steam's tabbed
 // page when this render holds it, the card among the section cards when this
 // render holds their list; then the game carriers and the discovered path's
 // components here are followed one level further. A render with neither is
 // not an error.
-function onPanelRender(depth: number, self: any, args: any[], ret: any): any {
+function onPanelRender(depth: number, self: any, args: any[], ret: any, from = "the overview panel"): any {
   if (unloaded || budget.disabled || !getForgeSetting("gamePage")) return ret;
   try {
     const props = args?.[0] ?? self?.props;
     const own = Number(props?.overview?.appid) || 0;
     const appId = own || activeAppId;
     if (!appId || appId !== activeAppId) return ret;
-    if (depth === 1) placementLog.rememberOutline(outlineTree(ret));
+    if (depth === 1 && from === "the overview panel") placementLog.rememberOutline(outlineTree(ret));
 
     let tabs: ReturnType<typeof findTabContainer>;
     try {
@@ -231,23 +528,23 @@ function onPanelRender(depth: number, self: any, args: any[], ret: any): any {
         );
         steamTabs.note(appId, tabSwitcher(tabs));
         onFirstTab.set(appId, firstTabActive(tabs));
-        placementLog.note(`tab in Steam's tab row (${depth} below the overview panel)`);
+        placementLog.note(`tab in Steam's tab row (${depth} below ${from})`);
       }
     } catch (e) {
       noteFailure(`adding the Mods tab (depth ${depth})`, e);
     }
 
     try {
-      const host = findSectionHost(ret, screenTwo.sectionHost);
+      const host = findSectionHost(ret, sectionHostMatch());
       const where = gamePagePlacement({
         overviewFound: true,
         tabContainer: Boolean(tabs) || steamTabs.injected(appId),
-        sectionCards: Boolean(screenTwo.sectionHost),
+        sectionCards: Boolean(host || screenTwo.sectionHost),
         scoutDone: scoutDone.has(appId),
       });
       if (host && where.card === "sections" && onFirstTab.get(appId) !== false) {
         if (insertCard(host, card(appId), CARD_KEY) >= 0) {
-          placementLog.note(`card among Steam's section cards (${depth} below the overview panel)`);
+          placementLog.note(`card among Steam's section cards (${depth} below ${from})`);
         }
       } else if (tabs && where.card === "first-tab") {
         if (addCardToFirstTab(tabs, CARD_KEY, (content) => (
@@ -265,7 +562,7 @@ function onPanelRender(depth: number, self: any, args: any[], ret: any): any {
 
     const next = new Set<any>(pathElements(ret, screenTwo.types));
     if (depth < CARRIER_DEPTH) for (const c of gameCarriers(ret)) next.add(c);
-    for (const el of next) follow(el, depth + 1);
+    for (const el of next) follow(el, depth + 1, from);
   } catch (e) {
     noteFailure(`placing Forge on screen two (depth ${depth})`, e);
   }
@@ -296,10 +593,43 @@ function nudge(fromEl: any): boolean {
   return false;
 }
 
+// The diagnostic report for the "nothing shown" line.
+function report(scout: ScreenTwo | undefined, scoutEl: any): ScreenTwoReport {
+  const state = screenTwoState();
+  return {
+    maps: state.report,
+    keys: state.keys,
+    coreGlobal: state.core,
+    patched: wrappedMemos.size,
+    deckyTabs: deckyTabsWrapped,
+    scoutFibers: Boolean(fiberOf(scoutEl)),
+    wrappedNear: lastNear,
+    scout,
+  };
+}
+
 // The scout: an invisible element (display: none, no focus, no size) in
-// InnerContainer that looks for screen two after the page mounts.
+// InnerContainer. It marks the game page on screen (for the tabbed page
+// wrapper, from the first commit), and after the page mounts it looks for
+// screen two in the DOM, which teaches the way to the section cards (and, for
+// a Steam build whose tabbed page is not a memo, .77's way to the tabs).
 function ScreenTwoScout({ appId }: { appId: number }) {
   const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    activeAppId = appId;
+    liveScouts.set(appId, el);
+    try {
+      confirmNear(appId);
+    } catch (e) {
+      noteFailure("confirming Steam's tabbed page", e);
+    }
+    return () => {
+      if (liveScouts.get(appId) === el) liveScouts.delete(appId);
+      if (activeAppId === appId) activeAppId = 0;
+    };
+  }, [appId]);
   useEffect(() => {
     let alive = true;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -311,9 +641,18 @@ function ScreenTwoScout({ appId }: { appId: number }) {
         const root = ref.current?.parentElement;
         if (!root) return;
         if (!placed()) {
+          if (!wrappedMemos.size) patchTabbedPages();
+          confirmNear(appId);
           last = discoverScreenTwo(root, screenTwoClasses(), original);
+          // The tabbed page above the tab row: wrapped now when the load-time
+          // search missed it (shown from the next game page opened).
+          if (last.tabbedType && isMemo(last.tabbedType) && wrapTabbed(last.tabbedType)) {
+            placementLog.note("tabbed page found from the tab row and patched (Mods from the next game page)");
+          }
           if (screenTwo.learn(last)) {
-            const told = nudge(root.querySelector?.(`.${screenTwoClasses().container}`) ?? root);
+            learnEpoch++;
+            for (const rec of confirmedRecords(appId)) rec.force?.();
+            const told = nudge(root.querySelector?.(classSelectorOf(screenTwoClasses().container)) ?? root);
             placementLog.note(
               `path to screen two learned${told ? "" : " (Steam not asked to redraw: shown from its next render)"}`
             );
@@ -323,11 +662,16 @@ function ScreenTwoScout({ appId }: { appId: number }) {
           scoutDone.add(appId);
           // The tab is in but no section list was found: the card can now end
           // the first tab, from the next render.
-          if (steamTabs.injected(appId) && !placements.has(appId)) nudge(root);
+          if (steamTabs.injected(appId) && !placements.has(appId)) {
+            for (const rec of confirmedRecords(appId)) rec.force?.();
+            nudge(root);
+          }
           timers.push(
             setTimeout(() => {
               if (!alive) return;
-              if (!steamTabs.injected(appId) && !placements.has(appId)) placementLog.noteNothing(last?.outline ?? []);
+              if (!steamTabs.injected(appId) && !placements.has(appId)) {
+                placementLog.noteNothing(screenTwoDiagnostic(report(last, ref.current)), last?.outline ?? []);
+              }
             }, 1000)
           );
         }
@@ -344,9 +688,23 @@ function ScreenTwoScout({ appId }: { appId: number }) {
   return <span ref={ref} data-forge-scout="" aria-hidden="true" style={{ display: "none" }} />;
 }
 
+function classSelectorOf(values: string[] | undefined): string {
+  return classSelector(values) ?? "[data-forge-none]";
+}
+
+// The tabbed page records confirmed for a game, found again through the fibers.
+function confirmedRecords(app: number): TabbedRecord[] {
+  const f = fiberOf(liveScouts.get(app));
+  if (!f) return [];
+  return tabbedPagesNear(f, (props) => tabbedRecords.get(props as object)).filter((r) => r.app === app);
+}
+
 export function registerGamePagePatch(): void {
   if (patch) return;
   unloaded = false;
+  // Steam's tabbed page component, wrapped before any game page opens (the
+  // first one after Steam starts included).
+  if (getForgeSetting("gamePage")) patchTabbedPages();
   try {
     patch = routerHook.addPatch(ROUTE, (tree: any) => {
       if (unloaded || budget.disabled) return tree;
@@ -440,6 +798,11 @@ export function registerGamePagePatch(): void {
 
 export function unregisterGamePagePatch(): void {
   unloaded = true;
+  for (const memo of wrappedMemos) unwrapMemo(memo);
+  wrappedMemos.clear();
+  componentSearches = 0;
+  deckyTabsWrapped = false;
+  liveScouts.clear();
   if (!patch) return;
   try {
     routerHook.removePatch(ROUTE, patch);

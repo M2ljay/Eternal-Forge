@@ -11,7 +11,7 @@ report check, OptiScaler's GPU lookup and the "game is running" check.
 
 | Piece | Frontend | Backend |
 |---|---|---|
-| Mods tab and Overview card on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts`, `src/GameModsSection.tsx` | `forge_game_status` |
+| Mods tab and Overview card on the game page | `src/gamePagePatch.tsx`, `src/gamePageAnchor.ts` (tested by `tests/gamePageAnchor.test.mjs`), `src/GameModsSection.tsx` | `forge_game_status` |
 | ROM pages (The Collector) | `src/collectorBridge.ts`, `src/RomMods.tsx` | `py_modules/rom_mods.py`, `forge_rom_*` in `main.py` |
 | Every other library game (shortcuts, no folder, no Nexus page) | `setUpGame` in `src/ExperimentalSetup.tsx`, `src/FolderPicker.tsx` | `set_game_folder`, `forge_list_folders`, `search_nexus_games`, `_experimental_install` |
 | Anti-cheat lock | the card's and tab's locked state | `py_modules/forge_guard.py`, wrappers at the end of `main.py` |
@@ -33,7 +33,7 @@ save backups are tested by `tests/test_save_backup.py` against a fake
 The frontend parts can be switched off in the plugin's Settings, under
 **Game page**.
 
-## Mods tab and Overview card (anygame.72, screen two since anygame.77)
+## Mods tab and Overview card (anygame.72, screen two since anygame.77, Steam's tabbed page patched since anygame.78)
 
 The approved design ("Core: current vision", boards 6 and 7, and the game
 view board `GameSteam`): on every game page mods are a **Mods tab** beside
@@ -48,76 +48,192 @@ section cards. **Forge never draws anything on screen one.**
 
 ### Where it goes, in order (`gamePagePlacement` in `src/forgeRules.ts`)
 
-- **The tab**: in Steam's tabbed page on screen two (its `tabs` prop, the
-  tab row `gamepadTabbedPageClasses.TabRow`), last, in a **new** array
-  (Steam's own list is never changed in place), its content inside Forge's
-  error boundary. When the tabbed page is controlled (`onShowTab`), the
-  card's X switches to it (`SteamTabs`).
+- **The tab**: in Steam's tabbed page on screen two (the tab row
+  `tabbedpage.TabRow`: Activity, Your Stuff, Community, Game Info), last, in
+  a **new** props object and a **new** tab list (Steam's props, list and tab
+  objects are never changed), its content inside Forge's error boundary. It
+  is a real entry of Steam's tab list, so it takes Steam's tab classes and
+  Core's crimson underline, and Steam's own tab switching (L1/R1) should
+  reach it like any other tab (not yet seen on a TV). Selecting it is handled by Forge (the tabbed page is told Mods is
+  shown; Steam's own tab state is left alone, so a parent that refuses ids it
+  does not know cannot block it); selecting any other tab hands back to
+  Steam's switcher. The card's X uses the same switch (`SteamTabs`).
 - **The card**: second among Steam's section cards (`AppDetailsSection`
-  inside `AppDetailSectionList`), after Steam's first card, as on the board
-  (`CARD_INDEX`), and only while the first tab (Steam's Overview) is shown.
-  When the tabbed page is found but its section list is not, once the scout
-  (below) has finished looking, the card ends the first tab's content
-  instead.
-- **Neither found**: nothing at all. The one-line row above Play (anygame.70
-  to .76) and the tab-like section under Play (.71 to .76) are **gone** on
-  Steam pages. The console logs the page outline once: what the scout saw
-  on screen two and the overview panel's render.
+  inside the section list), after Steam's first card, as on the board
+  (`CARD_INDEX`), in the first tab. When the section list cannot be found,
+  once the scout (below) has finished looking, the card ends the first tab's
+  content instead.
+- **Neither found**: nothing at all, never anything on screen one. The
+  console logs one diagnostic line (see "When nothing is found").
 
 On a ROM page (The Collector's own page) Forge registers its tab with
 `order: 25`, so Mods sits between Achievements (20) and Saves (30) as on the
 board; The Collector's built-in orders are Overview 0, Achievements 20,
-Saves 30, Media 34, Details 37, BIOS 40 (anygame.75). The Overview card registers at `order: 20`, between The Collector's RetroAchievements (10) and Save sync (30) cards (anygame.76). ROM pages are unchanged by anygame.77.
+Saves 30, Media 34, Details 37, BIOS 40 (anygame.75). The Overview card registers at `order: 20`, between The Collector's RetroAchievements (10) and Save sync (30) cards (anygame.76). ROM pages are unchanged by anygame.77 and anygame.78.
 
-### How the patch finds screen two (anygame.77)
+### Why anygame.77 showed nothing on the TV
 
-anygame.72 to .76 followed, from the overview panel, only components handed
-the game (`overview` / `details` props), four levels deep. On the TV that
-chain never reached Steam's tabs: Forge fell back to its row over the art.
-So the patch now finds the way itself (`src/gamePageAnchor.ts`,
-`src/gamePagePatch.tsx`):
+.77 found screen two by class names, then climbed React's fibers from the
+tab row up to the overview panel and followed that path down on the next
+render. On the TV nothing appeared (and, correctly, nothing on screen one).
+Two weak points, both fixed in .78:
 
-1. The route patch puts an invisible **scout** into InnerContainer (a
-   `display: none` span: no size, no focus, nothing drawn).
-2. After the page mounts (`SCOUT_TRIES_MS`: 0.25, 0.7, 1.5, 3 and 6 s) the
-   scout looks inside the page for screen two by Core's class maps:
-   `basicAppDetailsSectionStylerClasses.AppDetailsContainer`, the tab row
-   (`gamepadTabbedPageClasses.TabRow`, else `TabRowTabs`), and the section
-   list (`AppDetailSectionList`, else the parent of the first
-   `AppDetailsSection` / `AppDetailsSectionContainer`), each looked up with
-   `resolveClassModule` (Decky 3: `findClassModule`; Decky 4: `findVar`).
-3. From each element found it climbs React's fibers (`__reactFiber$...`) up
-   to the overview panel (recognised by `overview`, `details`,
-   `bFastRender`), naming every component type on the way: for the tab row,
-   from the element that carries the tab list (`tabs` / `sections`) upward
-   (`tabPageFiber`, `componentPath`, `discoverScreenTwo`).
-4. Those types are kept for the session (`ScreenTwoPaths`): component types
-   are fixed for a Steam build, so later game pages are placed on their first
-   render. The patch follows them from the panel's render down (one tree
-   patcher per type, so a type always gets the same patched copy), as well as
-   the old game carriers (`CARRIER_DEPTH` 4). In a render that holds the
-   tabbed page the tab is added; in one that holds the section list the card
-   is inserted.
-5. When the scout learns a path, Steam is asked to draw the page again: the
-   nearest class component from screen two up to just above the overview
-   panel is told to update. Steam's function components cannot be; then the
-   tab and card appear from Steam's next render of the page (its data loads
-   in after the art), or on the next game page opened.
+1. **One class module per map.** .77 read classes from @decky/ui's named
+   exports (`gamepadTabbedPageClasses`, `basicAppDetailsSectionStylerClasses`)
+   and `findClassModule`, which answer the **first** module carrying a key.
+   Steam ships some class modules two or three times with identical keys and
+   different hashes (Core 3.3.11, "Class maps: duplicate modules are
+   merged"); when the page draws the other copy, `querySelector` finds
+   nothing. Core 3.3.11 confirmed the parts on the user's build:
+   `appdetails.AppDetailsContainer` (page host), `appdetails.AppDetailsRoot`,
+   `tabbedpage.GamepadTabbedPage` inside the host, `tabbedpage.TabRow` (and
+   `Tab`, `Selected`, `TabTitle`), `appdetails.PlaySection`,
+   `appdetails.AppActionButton`; the section cards' classes were not
+   captured.
+2. **A path that needed a redraw.** Even with the right classes, the tab
+   only came from Steam's next render of the page along a path of component
+   types learned after the page mounted, and only if every component on the
+   way could be followed (a render-prop or context consumer on the way cannot
+   be).
 
-The console says once which way: *Mods tab in Steam's tab row (N below the
-overview panel)*, *Mods card among Steam's section cards (...)*, *Mods card
-at the end of Steam's first tab*, *Mods path to screen two learned*, or
-*Mods not shown: neither Steam's tab row nor its section cards were found on
-screen two (nothing is drawn on screen one)* followed by the outline (what
-the scout found, the fibers above an element it could not trace to the
-panel, and the overview panel's render).
+### How the tab gets there (anygame.78)
 
-**Not seen on a TV yet**: that Steam's game page tab row is a tabbed page with
-a `tabs` prop (Core's notes say it is the Library's `tabbedpage`; confirm
-with a Core UI snapshot of a Steam game page), and that the redraw request
-reaches a class component. Tested on fake DOMs and fiber chains shaped like
-the page Core describes, including the TV case where the carrier search finds
-nothing (`tests/gamePageAnchor.test.mjs`).
+**Steam's tabbed page is patched where it is defined.** Steam's
+`GamepadTabbedPage` is a React memo (the component @decky/ui exports as
+`Tabs`, found by the same signature @decky/ui uses: a function export of its
+module names `TabRowTabs` and `activeTab`). At load, before any game page
+opens, Forge finds **every** module with that signature (Steam may ship it
+more than once) plus @decky/ui's `Tabs`, and swaps each memo's inner
+component for Forge's wrapper (`findTabbedPageComponents`, `wrapMemo` in
+`src/gamePageAnchor.ts`; `patchTabbedPages` in `src/gamePagePatch.tsx`).
+React reads a memo's inner type when a tabbed page mounts, so every tabbed
+page mounted afterwards renders through the wrapper, the first game page
+after Steam starts included. Tabbed pages already on screen keep Steam's
+component. The wrapper calls the same three hooks on every render
+(`useRef`, `useReducer`, `useLayoutEffect`) and then Steam's component; it
+passes Steam's props through unchanged except on the one tabbed page that is
+the current game page's screen two. Unload puts Steam's component back
+(`unwrapMemo`); a page still mounted keeps calling the wrapper, which then
+only passes through.
+
+**Which tabbed page is the game page's.** The route patch still puts an
+invisible **scout** into InnerContainer (a `display: none` span: no size, no
+focus, nothing drawn). From its layout effect (same commit as the page) the
+scout looks through the React fibers **below** its parent for the first
+tabbed page rendered through the wrapper (`tabbedPagesNear`: depth first, so
+a tabbed page nested inside a tab is never chosen, and the Library's or
+Home's are never below the scout). Each wrapper render registers its props
+object, and a fiber's `memoizedProps` is that object, so no class names are
+needed for this. The confirmed tabbed page re-renders with Forge's tab
+before the browser paints (a state update from a layout effect is
+synchronous). If the scout's fibers cannot be read, the tabbed page's own
+layout effect retries (three times per tabbed page).
+
+**Fallbacks.**
+
+- If the load-time search finds no tabbed page component, the scout reads
+  the component above the tab row (DOM tab row, then fibers up to the
+  element carrying the tab list) and wraps it then: Mods appears from the
+  next game page opened, and the log says so.
+- .77's route stays as a second way, for a Steam build whose tabbed page is
+  not a memo: the overview panel's renders are followed along the path the
+  scout learns (`ScreenTwoPaths`), with the game carriers (`CARRIER_DEPTH`
+  4). Both ways add the tab by id, so it is never there twice.
+
+### How the card gets there (anygame.78)
+
+In the confirmed tabbed page's render, the first tab's content is always
+wrapped the same way (Steam's content, then the card or nothing), so Steam's
+content keeps its place. The section list is looked for in that content:
+
+1. by class, with every copy of `appdetails.AppDetailSectionList` from the
+   merged class maps, or the exact class the scout read from the DOM (the
+   parent of the first `appsection.AppDetailsSection` /
+   `AppDetailsSectionContainer`) when the map has no `AppDetailSectionList`
+   key; the card goes in second (`insertCard`);
+2. else by following the content's component (from its first render, so
+   learning a path later never swaps its type) along the types the scout
+   learned from the section list up to the tabbed page (`contentPath`); when
+   the scout learns something new, the confirmed tabbed page redraws and
+   hands Steam a fresh copy of the content element so React does not skip
+   it;
+3. else, once the scout has finished (`SCOUT_TRIES_MS`: 0.25, 0.7, 1.5, 3 and
+   6 s), the card ends the first tab.
+
+### Class maps: every copy, merged, never a hash
+
+Steam's hashed classes change with Steam builds, so Forge never names one.
+Maps are found by their key names (`CLASS_MAP_SPECS`): `tabbedpage`
+(`GamepadTabbedPage` + `TabRow` + `Tab` + `Selected`, else `TabRow` + `Tab` +
+`TabTitle`), `appdetails` (`AppDetailsContainer` + `PlaySection`, else
+`AppDetailsContainer` + `AppDetailsRoot`), `appsection` (`AppDetailsSection`
++ `AppDetailsSectionContainer`), `appview` (`HeaderLoaded` +
+`InnerContainer`). `collectClassModules` visits every class module the loader
+can show (@decky/ui 4's `classMap`, then a full walk with a filter that never
+accepts through `findClassModule`, `findVar` and `findModuleScopeByVar` for
+Decky 4), and `resolveClassUnion` merges **every** module that carries a
+map's keys: each key holds every distinct class, and selectors are lists
+(`.a,.b`). The lookup is repeated (up to five times) while a map is missing.
+
+Core does not publish its resolved maps on `window` (3.3.11 sets only
+`window[Symbol.for("core.ui.diagnostics")]`, which holds Starfield counters
+and no classes). Forge reads `window[Symbol.for("core.ui.classMaps")]` (an
+object, or a function answering one: map name to key to class, `|` between
+merged copies, as Core's `mergeMaps` writes them) first if a later Core sets
+it, and merges its own lookup in either way (`coreClassMaps`). Adding that
+global to Core is a one-line change on Core's side (its `findCoreUiMapsDetailed`
+already has the merged maps).
+
+The scout looks for screen two in InnerContainer, then up to three ancestors
+(`scoutScopes`), closest first.
+
+### When nothing is found
+
+Nothing is drawn, and once per session, about 7 s after the page opened, the
+console gets one line (`screenTwoDiagnostic`), for example:
+
+*Forge game page: Mods not shown, nothing drawn. Class maps: tabbedpage: 2
+modules [has GamepadTabbedPage,TabRow,TabRowTabs,Tab,Selected,TabTitle];
+appdetails: 2 modules [has AppDetailsContainer,AppDetailsRoot,PlaySection;
+missing AppDetailSectionList]; appsection: 1 module [...]; appview: 1 module
+[...]. Core class maps on window: no. Tabbed page components patched: 2
+(incl. @decky/ui Tabs). Scout fibers: yes; patched tabbed pages on this
+page: 0. Screen two: container found, tab row found, tabbed page found,
+section list found, path to tabs yes, path to cards yes.*
+
+Key names and counts only, never Steam's hashed classes. A second line
+carries the outline (what the scout saw, the fibers above an element it
+could not trace, and the overview panel's render). When Forge is placed, the
+console says once which way: *Mods tab in Steam's tab row (Steam's tabbed
+page, patched where it is defined)*, *Mods card among Steam's section cards
+(N below the first tab's content)*, *Mods card at the end of Steam's first
+tab*, *Mods tabbed page found from the tab row and patched (Mods from the
+next game page)*, or the .77 lines (*N below the overview panel*).
+
+### Verified, and not yet on a TV
+
+- `tests/gamePageAnchor.test.mjs`: duplicate modules merged (the TV case:
+  the page draws the second copy, which the first-copy lookup misses and the
+  merged lookup finds), Core's merged maps, every loader route for class
+  modules, every copy of the tabbed page module found, the memo wrapped once
+  and put back, the scout's fiber search (outermost first, never the
+  Library's), new props without touching Steam's, the diagnostic line for the
+  found and not-found paths.
+- Checked once by hand with real React 18 (react-dom, jsdom; a harness kept
+  outside the repo) on a page shaped like Core's notes: the tab on the first
+  commit, the Library's tabbed page untouched, Mods selectable while Steam's
+  parent refuses unknown ids, the card second among the cards; with the
+  tabbed page behind a render-prop and no `AppDetailSectionList` key the tab
+  on the first commit and the card after the scout's first look; a tabbed
+  page component the load-time search missed is wrapped from the tab row and
+  shown from the next game page; with no tabbed page nothing is drawn and the
+  one line is logged.
+- **Not seen on a TV**: that Steam's game-page tabbed page is the memo
+  @decky/ui finds as `Tabs` (or a copy of its module); that its tabs are
+  plain `{ id, title, content }` objects in a `tabs` prop; that Steam's
+  React keeps `memoizedProps` as Forge reads it; where the section cards sit
+  relative to the first tab's content; whether L1/R1 cycle into Mods. The
+  diagnostic line answers each of these from one TV log.
 
 ### The card
 
@@ -459,6 +575,12 @@ The page belongs to Steam, so every failure leaves it as Steam drew it:
 
 - each step of the patch is in a `try`; a failure returns Steam's tree
   unchanged;
+- the tabbed page wrapper (anygame.78) changes props only for the tabbed
+  page the scout confirmed on the game page on screen; an error in it hands
+  Steam its own props and counts towards the failure budget; with the budget
+  spent, the setting off or the plugin unloaded it passes everything
+  through, and unload puts Steam's component back where Forge's wrapper is
+  still the memo's type;
 - the tab and the card render inside an error boundary that renders nothing
   on an error;
 - after three failures of either kind in a session the patch stops touching

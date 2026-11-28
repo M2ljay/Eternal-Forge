@@ -434,7 +434,11 @@ Details, sources and the reasoning: [docs/forge.md](docs/forge.md).
   the mods with a switch each, Open / Update, Add mods, My Mods, saves,
   Upscaling and Load order; long explanations are behind **Why?**. Nothing
   is ever drawn on screen one: when Forge cannot find Steam's tab row or
-  section cards it shows nothing and logs the page outline once. Controller
+  section cards it shows nothing and logs one diagnostic line (which class
+  maps, keys and page parts were found or missing). Since anygame.78 the tab
+  comes from Steam's tabbed page component itself, patched once at load, so
+  it is there on every game page including the first after Steam starts.
+  Controller
   only; B from a page opened here returns to the game page. Any error leaves
   Steam's page untouched, and the patch switches itself off for the session
   after three.

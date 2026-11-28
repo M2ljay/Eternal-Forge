@@ -40,6 +40,24 @@ import {
   tabSwitcher,
   walkRender,
   SteamTabs,
+  CLASS_MAP_SPECS,
+  FORGE_WRAPPED,
+  classSelector,
+  collectClassModules,
+  coreClassMaps,
+  findTabProp,
+  findTabbedPageComponents,
+  forgeTabProps,
+  isTabbedPageModule,
+  keyReport,
+  resolveClassUnion,
+  screenTwoClassesFrom,
+  screenTwoDiagnostic,
+  shownTabId,
+  tabbedPagesNear,
+  unwrapMemo,
+  walkFibers,
+  wrapMemo,
 } from "../.test-build/gamePageAnchor.js";
 
 function find(node, filter, seen = new Set()) {
@@ -228,14 +246,13 @@ test("where Forge went is logged once; 'nothing shown' carries the page outline"
   assert.ok(!log.note("tab in Steam's tab row (3 below the overview panel)"));
   const { panelElement } = collectorShapedPage();
   log.rememberOutline(outlineTree(renderOf(panelElement)));
-  assert.ok(log.noteNothing(["screen two: container not found", "tab row not found"]));
-  assert.ok(!log.noteNothing(["again"]), "once per session");
-  assert.equal(lines.length, 2);
+  assert.ok(log.noteNothing("Forge game page: Mods not shown, nothing drawn. DIAG", ["screen two: container not found", "tab row not found"]));
+  assert.ok(!log.noteNothing("again", ["again"]), "once per session");
+  assert.equal(lines.length, 3);
   assert.match(lines[0], /^Forge game page: Mods tab in Steam's tab row/);
-  assert.match(lines[1], /not shown: neither Steam's tab row nor its section cards/);
-  assert.match(lines[1], /nothing is drawn on screen one/);
-  assert.match(lines[1], /screen two: container not found\ntab row not found\noverview panel render:/);
-  assert.match(lines[1], /Inner \{overview,details\}/, "outline names the inner component and its props");
+  assert.equal(lines[1], "Forge game page: Mods not shown, nothing drawn. DIAG", "the diagnostic is one line of its own");
+  assert.match(lines[2], /^Forge game page: outline\nscreen two: container not found\ntab row not found\noverview panel render:/);
+  assert.match(lines[2], /Inner \{overview,details\}/, "outline names the inner component and its props");
   const throwing = new PlacementLog(() => {
     throw new Error("no console");
   });
@@ -356,11 +373,17 @@ function el(className, fiber, children = []) {
   const node = { className, children, parentElement: null };
   node[`__reactFiber$k${fiberKey++}`] = fiber;
   for (const c of children) c.parentElement = node;
+  // A selector list of class compounds (".a.b,.c"), as Forge builds them.
   node.querySelector = (sel) => {
-    const cls = sel.replace(/^\./, "");
+    const compounds = sel.split(",").map((part) => part.trim().replace(/^\./, "").split("."));
+    const matches = (c) => {
+      if (typeof c.className !== "string") return false;
+      const tokens = c.className.split(/\s+/);
+      return compounds.some((names) => names.every((n) => tokens.includes(n)));
+    };
     const walk = (n) => {
       for (const c of n.children) {
-        if (typeof c.className === "string" && c.className.split(/\s+/).includes(cls)) return c;
+        if (matches(c)) return c;
         const deep = walk(c);
         if (deep) return deep;
       }
@@ -400,9 +423,9 @@ function tvDom({ layoutType = Layout, withListClass = true } = {}) {
 }
 
 const CLS = {
-  container: "AppDetailsContainer_q",
+  container: ["AppDetailsContainer_q"],
   tabRow: ["TabRow_q"],
-  sectionList: "AppDetailSectionList_q",
+  sectionList: ["AppDetailSectionList_q"],
   section: ["AppDetailsSection_q"],
 };
 
@@ -421,7 +444,10 @@ test("the scout finds screen two by class and names the components down to it", 
   assert.deepEqual(s.tabPath, [Layout, Body, memoFocus], "panel (exclusive) down to the tabbed page's parent; contexts and hosts skipped");
   assert.equal(s.sections, true);
   assert.deepEqual(s.sectionPath, [Layout, Body, memoFocus, TabbedPage, Sections]);
-  assert.deepEqual(s.sectionHost, { token: "AppDetailSectionList_q" });
+  assert.deepEqual(s.contentPath, [Sections], "from the first tab's content down to the cards");
+  assert.equal(s.tabbedPage, true);
+  assert.equal(s.tabbedType, TabbedPage, "the tabbed page's type, for the global patch");
+  assert.deepEqual(s.sectionHost, { tokens: ["AppDetailSectionList_q"] });
 });
 
 test("with the scout's path the patch puts the tab in Steam's tab row and the card second among the section cards", () => {
@@ -478,8 +504,9 @@ test("the patch follows the panel, the game carriers and the scout's path; tab a
   assert.match(src, /pathElements\(ret, screenTwo\.types\)/, "and the discovered path");
   assert.match(src, /if \(depth < CARRIER_DEPTH\) for \(const c of gameCarriers\(ret\)\) next\.add\(c\)/);
   assert.match(src, /findInsertionChildren\(ret, findInReactTree, innerContainer\(\)\)/, "Decky 3/4 InnerContainer lookup kept");
-  assert.match(src, /"basicAppDetailsSectionStylerClasses", \["AppDetailsRoot", "AppDetailsContainer"\]/);
-  assert.match(src, /"gamepadTabbedPageClasses", \["GamepadTabbedPage", "TabRow"\]/);
+  assert.match(src, /resolveClassUnion\(collectClassModules\(DFL\), CLASS_MAP_SPECS, core\)/, "every duplicate class module, merged");
+  assert.match(src, /coreClassMaps\(globalThis\)/, "Core's resolved maps preferred when published");
+  assert.ok(!/resolveClassModule\(DFL, "(basicAppDetailsSectionStylerClasses|gamepadTabbedPageClasses)"/.test(src), "no first-module class lookup for screen two");
   assert.match(src, /collectorOwnsPanel\(children\)/, "Collector-drawn ROM pages are left alone");
   assert.match(src, /insertCard\(host, card\(appId\), CARD_KEY\)/);
   assert.match(src, /addTab\(\s*tabs,\s*MODS_TAB_ID,/);
@@ -498,7 +525,7 @@ test("a patched type in the fibers is named by Steam's own type", () => {
 
 test("no AppDetailSectionList class: the section cards' parent is found by its exact class", () => {
   const { dom } = tvDom({ withListClass: false });
-  const s = discoverScreenTwo(dom, { ...CLS, sectionList: undefined });
+  const s = discoverScreenTwo(dom, { ...CLS, sectionList: [] });
   assert.deepEqual(s.sectionHost, { exact: "x9Sections" });
   const paths = new ScreenTwoPaths();
   paths.learn(s);
@@ -556,7 +583,7 @@ test("the card goes in once, second, whatever the list holds", () => {
   assert.equal(insertCard(none, FORGE_CARD, FORGE_CARD.key), 0);
   assert.equal(insertCard(null, FORGE_CARD, FORGE_CARD.key), -1);
   assert.ok(hasClass({ props: { className: "a AppDetailSectionList_q" } }, ["AppDetailSectionList_q"]));
-  assert.equal(findSectionHost({ props: { className: "AppDetailSectionList_q0", children: [] } }, { token: "AppDetailSectionList_q" }), undefined, "whole classes only");
+  assert.equal(findSectionHost({ props: { className: "AppDetailSectionList_q0", children: [] } }, { tokens: ["AppDetailSectionList_q"] }), undefined, "whole classes only");
   assert.equal(findSectionHost({ props: {} }, undefined), undefined);
 });
 
@@ -662,4 +689,275 @@ test("the card's X opens Steam's tab when the container is controlled, else fall
   tabs.clear(5);
   assert.equal(tabs.injected(5), false);
   assert.equal(heard, 1);
+});
+
+
+// ---- anygame.78: duplicate class modules, merged ------------------------------
+// The TV with .77: nothing at all. Steam ships some class modules twice with the
+// same keys and different hashes (Core 3.3.11), and .77 took the first copy
+// (@decky/ui's named exports, findClassModule): when the page draws the other
+// copy, the scout's querySelector finds nothing. These maps are shaped like the
+// game page's (the classes are made up; real ones change with Steam builds).
+
+const tabbedA = { GamepadTabbedPage: "gtpA", TabRow: "rowA", Tab: "tabA", Selected: "selA", TabTitle: "ttlA", TabRowTabs: "rtA" };
+const tabbedB = { GamepadTabbedPage: "gtpB", TabRow: "rowB", Tab: "tabB", Selected: "selB", TabTitle: "ttlB", TabRowTabs: "rtB" };
+const detailsA = { AppDetailsContainer: "adcA", PlaySection: "psA", AppDetailsRoot: "rootA", AppDetailSectionList: "listA" };
+const detailsB = { AppDetailsContainer: "adcB", PlaySection: "psB", AppDetailsRoot: "rootB", AppDetailSectionList: "listB" };
+const sectionA = { AppDetailsSection: "secA", AppDetailsSectionContainer: "seccA", RightColumnSection: "rcA" };
+const viewA = { HeaderLoaded: "hlA", InnerContainer: "icA" };
+const unrelated = { Field: "f", FieldLabel: "fl" };
+
+test("every duplicate module is merged: each key holds every copy's class", () => {
+  const { maps, report } = resolveClassUnion([tabbedA, unrelated, tabbedB, { ...tabbedA }, detailsA, detailsB, sectionA, viewA]);
+  assert.deepEqual(maps.tabbedpage.TabRow, ["rowA", "rowB"], "both copies, the equal third counted once");
+  assert.deepEqual(maps.appdetails.AppDetailsContainer, ["adcA", "adcB"]);
+  assert.equal(report.tabbedpage.modules, 2);
+  assert.equal(report.appdetails.modules, 2);
+  assert.equal(report.appsection.modules, 1);
+  assert.equal(report.appview.source, "steam");
+  const two = screenTwoClassesFrom(maps);
+  assert.deepEqual(two.tabRow, ["rowA", "rowB", "rtA", "rtB"]);
+  assert.deepEqual(two.container, ["adcA", "adcB"]);
+  assert.deepEqual(two.sectionList, ["listA", "listB"]);
+  assert.deepEqual(two.section, ["secA", "seccA"]);
+  assert.equal(classSelector(two.tabRow), ".rowA,.rowB,.rtA,.rtB");
+});
+
+test("the TV case: the page draws the SECOND copy; the merged classes still find screen two", () => {
+  const { dom } = tvDom();
+  // Re-class the fake page as if Steam drew copy B.
+  const rename = { AppDetailsContainer_q: "adcB", TabRow_q: "rowB", AppDetailSectionList_q: "listB", AppDetailsSection_q: "secB" };
+  const walk = (n) => {
+    if (typeof n.className === "string") n.className = n.className.split(/\s+/).map((c) => rename[c] ?? c).join(" ");
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(dom);
+  // .77: one module (the first copy) only.
+  const first = screenTwoClassesFrom(resolveClassUnion([tabbedA, detailsA, sectionA]).maps);
+  const before = discoverScreenTwo(dom, first);
+  assert.deepEqual([before.container, before.tabRow, before.sections], [false, false, false], "what the TV showed");
+  // .78: every copy.
+  const merged = screenTwoClassesFrom(resolveClassUnion([tabbedA, tabbedB, detailsA, detailsB, sectionA, { ...sectionA, AppDetailsSection: "secB" }]).maps);
+  const after = discoverScreenTwo(dom, merged);
+  assert.deepEqual([after.container, after.tabRow, after.tabbedPage, after.sections], [true, true, true, true]);
+  assert.deepEqual(after.tabPath, [Layout, Body, memoFocus]);
+  assert.deepEqual(after.sectionHost, { tokens: ["listA", "listB"] });
+  // And the section host is found in a render that carries either copy.
+  assert.ok(findSectionHost({ type: "div", props: { className: "x listB", children: [] } }, after.sectionHost));
+});
+
+test("Core's merged maps ('|'-separated, if Core publishes them) are read first and merged with Forge's own", () => {
+  const core = { tabbedpage: { GamepadTabbedPage: "gtpC", TabRow: "rowC|rowB", Tab: "tabC", Selected: "selC" } };
+  const { maps, report } = resolveClassUnion([tabbedB], CLASS_MAP_SPECS, core);
+  assert.deepEqual(maps.tabbedpage.TabRow, ["rowC", "rowB"], "no duplicate for the class both know");
+  assert.equal(report.tabbedpage.source, "core+steam");
+  assert.equal(report.appdetails.source, "none");
+  assert.equal(coreClassMaps({ [Symbol.for("core.ui.classMaps")]: () => core }), core);
+  assert.equal(coreClassMaps({ [Symbol.for("core.ui.classMaps")]: core }), core);
+  assert.equal(coreClassMaps({}), undefined, "Core 3.3.11 publishes none");
+  const boom = Object.defineProperty({}, Symbol.for("core.ui.classMaps"), { get() { throw new Error("x"); } });
+  assert.equal(coreClassMaps(boom), undefined);
+  assert.equal(classSelector(["a|b c", "bad class!", "", undefined]), ".a,.b.c");
+  assert.equal(classSelector([]), undefined);
+});
+
+test("the second key set is used only when no module carries the first", () => {
+  const noGamepad = { TabRow: "r", Tab: "t", TabTitle: "tt" };
+  const { maps, report } = resolveClassUnion([noGamepad]);
+  assert.deepEqual(maps.tabbedpage.TabRow, ["r"]);
+  assert.equal(report.tabbedpage.alt, true);
+  assert.equal(resolveClassUnion([noGamepad, tabbedA]).report.tabbedpage.alt, false);
+});
+
+test("class modules are collected from every loader route, each once, and hostile ones fail soft", () => {
+  const boom = () => { throw new Error("hostile"); };
+  // Decky 3.3.1 (@decky/ui 4): classMap plus findClassModule walking the same list.
+  const list = [tabbedA, tabbedB, 7, null, { notClasses: 1 }];
+  const deck3 = { classMap: list, findClassModule: (f) => list.find((m) => f(m)) };
+  assert.deepEqual(collectClassModules(deck3), [tabbedA, tabbedB]);
+  // Decky 4 (@decky/ui 5): findVar and findModuleScopeByVar only.
+  const deck4 = { findVar: (f) => [detailsA, tabbedB].find((m) => f(m)), findModuleScopeByVar: (f) => [detailsB].find((m) => f(m)) };
+  assert.deepEqual(collectClassModules(deck4), [detailsA, tabbedB, detailsB]);
+  assert.deepEqual(collectClassModules({ classMap: boom, findClassModule: boom, findVar: boom }), []);
+  assert.deepEqual(collectClassModules(undefined), []);
+  const hostile = new Proxy({}, { ownKeys() { throw new Error("x"); } });
+  assert.doesNotThrow(() => resolveClassUnion([hostile, tabbedA]));
+});
+
+test("the key report and the diagnostic line name what was found and what was missing", () => {
+  const { maps, report } = resolveClassUnion([tabbedA, tabbedB, viewA]);
+  const keys = keyReport(maps);
+  assert.deepEqual(keys.appdetails.missing, ["AppDetailsContainer", "AppDetailsRoot", "AppDetailSectionList", "PlaySection"]);
+  assert.ok(keys.tabbedpage.found.includes("TabRow"));
+  const bare = el("InnerContainer_abc", null, [el("Header_q", null)]);
+  const scout = discoverScreenTwo(bare, screenTwoClassesFrom(maps));
+  const line = screenTwoDiagnostic({ maps: report, keys, coreGlobal: false, patched: 0, deckyTabs: false, scoutFibers: true, wrappedNear: 0, scout });
+  assert.ok(!line.includes("\n"), "one line");
+  assert.match(line, /^Forge game page: Mods not shown, nothing drawn\./);
+  assert.match(line, /tabbedpage: 2 modules \[has GamepadTabbedPage,TabRow,TabRowTabs,Tab,Selected,TabTitle\]/);
+  assert.match(line, /appdetails: 0 modules \[no keys; missing AppDetailsContainer,AppDetailsRoot,AppDetailSectionList,PlaySection\]/);
+  assert.match(line, /appsection: 0 modules/);
+  assert.match(line, /Core class maps on window: no/);
+  assert.match(line, /Tabbed page components patched: 0 \(@decky\/ui Tabs missing\)/);
+  assert.match(line, /patched tabbed pages on this page: 0/);
+  assert.match(line, /container missing, tab row missing, tabbed page missing, section list missing/);
+  assert.ok(!/rowA|rowB|gtpA/.test(line), "key names only, never Steam's hashed classes");
+  const found = screenTwoDiagnostic({ maps: report, keys, coreGlobal: true, patched: 2, deckyTabs: true, scoutFibers: true, wrappedNear: 1, scout: discoverScreenTwo(tvDom().dom, CLS) });
+  assert.match(found, /container found, tab row found, tabbed page found, section list found, path to tabs yes, path to cards yes/);
+  assert.match(found, /patched: 2 \(incl\. @decky\/ui Tabs\)/);
+  assert.match(screenTwoDiagnostic({ maps: {}, keys: {}, coreGlobal: false, patched: 0, deckyTabs: false, scoutFibers: false, wrappedNear: 0 }), /scout did not run/);
+});
+
+test("screen two beside InnerContainer (in its parent) is still found, closest first", () => {
+  const { dom } = tvDom();
+  const outer = el("Outer_q", null, []);
+  const inner = el("InnerContainer_abc", null, [el("Header_q", null)]);
+  outer.children.push(inner, dom.children[1]);
+  inner.parentElement = outer;
+  const s = discoverScreenTwo(inner, CLS);
+  assert.equal(s.container, true);
+  assert.equal(s.tabRow, true);
+});
+
+// ---- anygame.78: Steam's tabbed page, patched where it is defined -------------
+
+const MEMO = Symbol.for("react.memo");
+function tabbedModule(tag) {
+  const Inner = function (e) { return e.activeTab + "TabRowTabs" + tag; };
+  const page = { $$typeof: MEMO, type: function Page(props) { return Inner(props); } };
+  return { exports: { a: Inner, b: page, c: "x" }, page };
+}
+
+test("every copy of Steam's tabbed page module is found (duplicates included), plus @decky/ui's Tabs", () => {
+  const one = tabbedModule("1");
+  const two = tabbedModule("2");
+  const other = { a: { $$typeof: MEMO, type: function Other() { return "nothing"; } } };
+  class Klass { render() {} }
+  Klass.prototype.isReactComponent = {};
+  const classMemo = { a: function (e) { return e.activeTab + "TabRowTabs"; }, b: { $$typeof: MEMO, type: Klass } };
+  const deckyTabs = one.page;
+  const found = findTabbedPageComponents([one.exports, { default: two.exports }, other, classMemo, null, 5], [deckyTabs, undefined]);
+  assert.deepEqual(found, [one.page, two.page], "both copies, each once; class components and other modules left out");
+  assert.equal(isTabbedPageModule(other), false);
+  assert.equal(isTabbedPageModule(one.exports), true);
+  const hostile = Object.defineProperty({ m: { $$typeof: MEMO, type() {} } }, "x", { enumerable: true, get() { throw new Error("x"); } });
+  assert.doesNotThrow(() => findTabbedPageComponents([hostile]));
+});
+
+test("the wrapper replaces a memo's inner component once, and unload puts Steam's back", () => {
+  const { page } = tabbedModule("w");
+  const steam = page.type;
+  const seen = [];
+  const build = (orig) => function Wrapped(props) { seen.push(props); return orig(props); };
+  assert.equal(wrapMemo(page, build), true);
+  assert.notEqual(page.type, steam);
+  assert.equal(page.type[FORGE_WRAPPED], steam);
+  assert.equal(page.type({ activeTab: "a" }), "aTabRowTabsw", "everything passes through");
+  // A second load wraps Steam's own component, not the first wrapper.
+  assert.equal(wrapMemo(page, build), true);
+  assert.equal(page.type[FORGE_WRAPPED], steam);
+  assert.equal(unwrapMemo(page), true);
+  assert.equal(page.type, steam);
+  assert.equal(unwrapMemo(page), false, "nothing of Forge's left");
+  assert.equal(wrapMemo({ type: steam }, build), false, "not a memo");
+  const frozen = Object.freeze({ $$typeof: MEMO, type: steam });
+  assert.equal(wrapMemo(frozen, build), false, "an unwritable memo fails soft");
+});
+
+// Fibers shaped like the game page: InnerContainer holds the scout, then the
+// overview panel; screen two's tabbed page is under the panel, and a second
+// tabbed page sits inside its first tab. The Library's tabbed page is in
+// another branch of the app.
+function fiberTree() {
+  const mk = (props, children = []) => {
+    const f = { memoizedProps: props, child: null, sibling: null, return: null };
+    let prev = null;
+    for (const c of children) {
+      c.return = f;
+      if (prev) prev.sibling = c;
+      else f.child = c;
+      prev = c;
+    }
+    return f;
+  };
+  const nestedProps = { tabs: [{ id: "x", title: "X", content: 1 }, { id: "y", title: "Y", content: 2 }] };
+  const screenTwoProps = { tabs: [{ id: "activity", title: "Activity", content: 1 }, { id: "info", title: "Game Info", content: 2 }], activeTab: "activity" };
+  const libraryProps = { tabs: [{ id: "all", title: "All", content: 1 }, { id: "col", title: "Collections", content: 2 }] };
+  const nested = mk(nestedProps);
+  const screenTwoFiber = mk(screenTwoProps, [mk({}, [mk({}, [nested])])]);
+  const scout = mk({ "data-forge-scout": "" });
+  const inner = mk({ className: "InnerContainer" }, [mk({ className: "Header" }), scout, mk({ overview, details, bFastRender: false }, [mk({}, [screenTwoFiber])])]);
+  const route = mk({}, [inner]);
+  const library = mk(libraryProps);
+  const app = mk({}, [mk({}, [library]), route]);
+  return { app, scout, screenTwoProps, nestedProps, libraryProps, screenTwoFiber };
+}
+
+test("the scout finds its own page's tabbed page in the fibers, outermost first, never the Library's", () => {
+  const t = fiberTree();
+  const records = new Map([[t.screenTwoProps, "screen-two"], [t.nestedProps, "nested"], [t.libraryProps, "library"]]);
+  const found = tabbedPagesNear(t.scout, (p) => records.get(p), 3);
+  assert.deepEqual(found, ["screen-two", "nested"], "depth first: screen two's tabbed page before the one inside its tab");
+  assert.ok(!found.includes("library"));
+  // A tabbed page not yet rendered through the wrapper: nothing confirmed.
+  assert.deepEqual(tabbedPagesNear(t.scout, () => undefined, 3), []);
+  // The alternate's props count too (React's other copy of the fiber).
+  const alt = { memoizedProps: {} };
+  t.screenTwoFiber.alternate = alt;
+  assert.deepEqual(tabbedPagesNear(t.scout, (p) => (p === alt.memoizedProps ? "alt" : undefined), 0), ["alt"]);
+  assert.deepEqual(tabbedPagesNear(null, (p) => records.get(p)), []);
+  let n = 0;
+  assert.equal(walkFibers(t.app, () => void n++, 5), 5, "bounded");
+});
+
+test("Forge's tab goes last in NEW props; Steam's props, list and tabs are never changed", () => {
+  const steamTabs = [
+    { id: "activity", title: "Activity", content: "A", renderTabAddon: () => null },
+    { id: "info", title: "Game Info", content: "B" },
+  ];
+  const onShowTab = () => {};
+  const props = { tabs: steamTabs, activeTab: "activity", onShowTab, autoFocusContents: true };
+  const snapshot = JSON.stringify(props);
+  const mine = () => {};
+  const next = forgeTabProps(props, { id: "forge-mods", title: "Mods", content: "MODS", forgeActive: false, onShow: mine, firstContent: (c) => ["WRAP", c] });
+  assert.equal(JSON.stringify(props), snapshot, "Steam's props untouched");
+  assert.equal(props.tabs, steamTabs);
+  assert.equal(steamTabs.length, 2);
+  assert.equal(steamTabs[0].content, "A");
+  assert.deepEqual(next.tabs.map((t) => t.id), ["activity", "info", "forge-mods"]);
+  assert.deepEqual([next.tabs[2].title, next.tabs[2].content, next.tabs[2].renderTabAddon], ["Mods", "MODS", undefined]);
+  assert.deepEqual(next.tabs[0].content, ["WRAP", "A"], "the card's place in the first tab");
+  assert.equal(next.activeTab, "activity");
+  assert.equal(next.onShowTab, mine, "Forge's switcher selects its own tab");
+  assert.equal(next.autoFocusContents, true);
+  // Forge's tab selected: shown without asking Steam's state.
+  const active = forgeTabProps(props, { id: "forge-mods", title: "Mods", content: "MODS", forgeActive: true });
+  assert.equal(active.activeTab, "forge-mods");
+  assert.equal(active.onShowTab, onShowTab);
+  // Already there (the .77 route added it): not twice.
+  const twice = forgeTabProps(next, { id: "forge-mods", title: "Mods", content: "X", forgeActive: false });
+  assert.equal(twice.tabs.length, 3);
+  // No tab list: Steam's props stay as they are.
+  assert.equal(forgeTabProps({ tabs: [{ id: "a", title: "A" }] }, { id: "f", title: "M", content: 1, forgeActive: false }), undefined);
+  assert.equal(shownTabId(props), "activity");
+  assert.equal(shownTabId({ tabs: steamTabs }), "activity", "nothing said: the first");
+  assert.equal(findTabProp({ pages: steamTabs }).prop, "pages", "any tab-shaped prop with contents");
+  assert.equal(findTabProp({ items: [{ id: "a", title: "A" }, { id: "b", title: "B" }] }), undefined, "no contents: not tabs");
+});
+
+test("the patch: Steam's tabbed page wrapped at load, confirmed by the scout's fibers, a diagnostic line when nothing is found", () => {
+  const src = readFileSync(new URL("../src/gamePagePatch.tsx", import.meta.url), "utf8");
+  const reg = src.slice(src.indexOf("export function registerGamePagePatch"), src.indexOf("export function unregisterGamePagePatch"));
+  assert.match(reg, /patchTabbedPages\(\)/, "wrapped before any game page opens");
+  assert.match(src, /findTabbedPageComponents\(modules, \[tabs\]\)/, "every copy plus @decky/ui's Tabs");
+  assert.match(src, /wrapMemo\(memo, buildTabbedWrapper\)/);
+  const unreg = src.slice(src.indexOf("export function unregisterGamePagePatch"));
+  assert.match(unreg, /for \(const memo of wrappedMemos\) unwrapMemo\(memo\);/, "Steam's component back on unload");
+  assert.match(src, /tabbedPagesNear\(f, \(props\) => tabbedRecords\.get\(props as object\)\)/);
+  assert.match(src, /if \(!app \|\| app !== activeAppId \|\| !findTabProp\(props\)\) return undefined;/, "only the confirmed game page's tabbed page changes");
+  assert.match(src, /placementLog\.noteNothing\(screenTwoDiagnostic\(report\(last, ref\.current\)\), last\?\.outline \?\? \[\]\)/);
+  const wrapper = src.slice(src.indexOf("function buildTabbedWrapper"), src.indexOf("// Steam's tabbed page props with Forge's tab"));
+  const hooks = (wrapper.match(/\buse(Ref|Reducer|LayoutEffect)(<[^>]*>)?\(/g) || []).map((h) => h.replace(/<.*>/, ""));
+  assert.deepEqual(hooks, ["useRef(", "useReducer(", "useLayoutEffect("], "the same hooks, unconditionally, in one order");
+  assert.ok(!/if \([^)]*\) \{\s*use/.test(wrapper), "no hook behind a condition");
 });
