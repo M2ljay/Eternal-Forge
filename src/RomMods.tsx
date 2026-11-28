@@ -1417,7 +1417,8 @@ export function romExtensions(): GamePageExtension[] {
       id: FORGE_CARD_ID,
       kind: "overviewCard",
       label: MODS_TAB_TITLE,
-      order: 50,
+      // The Collector's own cards: RetroAchievements 10, Save sync 30; a Club card goes at 40.
+      order: 20,
       isAvailable: () => true,
       render: (ctx: RomPageContext) => (
         <RomBoundary key={`forge-rom-card-${ctx.appId}-${ctx.romId}`}>

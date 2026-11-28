@@ -61,7 +61,7 @@ row is kept only as the last fallback.
 On a ROM page (The Collector's own page) Forge registers its tab with
 `order: 25`, so Mods sits between Achievements (20) and Saves (30) as on the
 board; The Collector's built-in orders are Overview 0, Achievements 20,
-Saves 30, Media 34, Details 37, BIOS 40 (anygame.75).
+Saves 30, Media 34, Details 37, BIOS 40 (anygame.75). The Overview card registers at `order: 20`, between The Collector's RetroAchievements (10) and Save sync (30) cards (anygame.76).
 
 The console says once which way: *Mods tab in Steam's tab container (level
 N below the overview panel)*, *under Play (...)*, or the fallback line.
